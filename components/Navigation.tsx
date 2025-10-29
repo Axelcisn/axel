@@ -9,6 +9,7 @@ export default function Navigation() {
   const navItems = [
     { href: '/', label: 'Home' },
     { href: '/upload', label: 'Portfolio Upload' },
+    { href: '/companies', label: 'Companies' },
     { href: '/watchlist', label: 'Watchlist' },
   ];
 

@@ -9,6 +9,7 @@ export default function UploadPage() {
   const [csvData, setCsvData] = useState<StockData[]>([]);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string>('');
+  const [success, setSuccess] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,6 +31,7 @@ export default function UploadPage() {
 
     setIsLoading(true);
     setError('');
+    setSuccess('');
 
     try {
       const text = await file.text();
@@ -46,9 +48,22 @@ export default function UploadPage() {
       setCsvData(parsedData);
       const analysisResult = analyzePortfolio(parsedData);
       setAnalysis(analysisResult);
-      
+
       // Save to localStorage for watchlist
       localStorage.setItem('portfolioData', JSON.stringify(parsedData));
+
+      const response = await fetch('/api/companies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companies: parsedData }),
+      });
+
+      if (!response.ok) {
+        const { error: apiError } = await response.json();
+        throw new Error(apiError || 'Failed to save portfolio data');
+      }
+
+      setSuccess('Portfolio saved successfully. You can search for your companies now.');
       
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error processing file');
@@ -122,6 +137,11 @@ export default function UploadPage() {
             {error && (
               <div className="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
                 {error}
+              </div>
+            )}
+            {success && (
+              <div className="mt-4 p-4 bg-green-100 border border-green-400 text-green-700 rounded">
+                {success}
               </div>
             )}
           </div>
