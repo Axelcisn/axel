@@ -7,9 +7,7 @@ export default function Navigation() {
   const pathname = usePathname();
 
   const navItems = [
-    { href: '/', label: 'Home' },
-    { href: '/upload', label: 'Portfolio Upload' },
-    { href: '/watchlist', label: 'Watchlist' },
+    { href: '/search', label: 'Search' },
   ];
 
   return (
