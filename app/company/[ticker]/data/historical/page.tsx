@@ -12,31 +12,28 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [variables, setVariables] = useState<Variable[]>([
-    // Step-1 Variables (Forecasting)
-    { id: '1', name: 'horizon_h_days', value: '1', type: 'integer', purpose: 'forecast horizon h (we evaluate breakouts with h=1; others optional previews later)' },
-    { id: '2', name: 'pi_coverage', value: '0.95', type: 'probability', purpose: 'nominal prediction-interval coverage (e.g., 0.95 ⇒ ~95%)' },
-    { id: '3', name: 'target_variable', value: 'NEXT_CLOSE_ADJ', type: 'enum', purpose: 'defines the future observation we judge (next trading-day adjusted close)' },
-    { id: '4', name: 'exchange_timezone', value: 'America/New_York', type: 'timezone', purpose: 'ties compute/verification to the exchange\'s official close time' },
-    { id: '5', name: 'cutoff_compute', value: 't_close', type: 'enum', purpose: 'bands are computed after day t close' },
-    { id: '6', name: 'cutoff_verify', value: 't_plus_1_close', type: 'enum', purpose: 'bands are verified on next trading-day official close' },
-    { id: '7', name: 'rolling_window_days', value: '504', type: 'integer', purpose: 'lookback used to estimate daily drift/vol and coverage calibration' },
-    { id: '8', name: 'vol_source', value: 'close_to_close', type: 'enum', purpose: 'declares how σ is obtained; Step-1 uses close-to-close' },
-    { id: '9', name: 'skip_earnings', value: 'false', type: 'boolean', purpose: 'if true, suppress breakout evaluation on earnings dates' },
-    { id: '10', name: 'preview_horizons', value: '2,3,5', type: 'csv', purpose: 'optional extra horizons to display bands' },
-    
-    // Step-2 Variables (Data Quality & Canonical Dataset)
-    { id: '11', name: 'exchange', value: 'NASDAQ', type: 'enum', purpose: 'bind symbol to its primary listing exchange' },
-    { id: '12', name: 'calendar_source', value: 'OFFICIAL', type: 'enum', purpose: 'use the exchange\'s official trading calendar (incl. early closes)' },
-    { id: '13', name: 'price_adjustment_mode', value: 'back_adjusted', type: 'enum', purpose: 'require split-adjusted OHLC as canonical' },
-    { id: '14', name: 'adj_close_definition', value: 'splits_and_cash_dividends', type: 'enum', purpose: 'ensures returns are economically correct' },
-    { id: '15', name: 'validation_price_tolerance_bps', value: '5', type: 'integer', purpose: 'tolerance when auditing split adjustments and data fixes (±0.05%)' },
-    { id: '16', name: 'invalid_row_policy', value: 'flag', type: 'enum', purpose: 'never delete valid extremes; only flag/fix true errors' },
-    { id: '17', name: 'min_history_days', value: '504', type: 'integer', purpose: 'minimum length for downstream rolling windows' },
-    { id: '18', name: 'earnings_window_days_before', value: '1', type: 'integer', purpose: 'tag context around earnings' },
-    { id: '19', name: 'earnings_window_days_after', value: '1', type: 'integer', purpose: 'tag context around earnings' },
-    { id: '20', name: 'delisting_policy', value: 'keep_full_history', type: 'enum', purpose: 'avoid survivorship bias in backtests' },
-    { id: '21', name: 'repair_logging_enabled', value: 'true', type: 'boolean', purpose: 'record every correction (who/when/what/why)' },
-    { id: '22', name: 'data_source_vendor', value: 'VendorName', type: 'string', purpose: 'provenance tag (appears in the Data Quality drawer)' }
+    // Canonical Variables v1.0 (Step-1 & Step-2 merged and deduplicated)
+    { id: '1', name: 'window_days', value: '504', type: 'integer', purpose: 'single rolling lookback; also the minimum history gate' },
+    { id: '2', name: 'horizon_h_days', value: '1', type: 'integer', purpose: 'forecast horizon h (we evaluate breakouts with h=1; others optional previews later)' },
+    { id: '3', name: 'pi_coverage', value: '0.95', type: 'float', purpose: 'nominal prediction-interval coverage (e.g., 0.95 ⇒ ~95%)' },
+    { id: '4', name: 'target_variable', value: 'NEXT_CLOSE_ADJ', type: 'enum', purpose: 'defines the future observation we judge (next trading-day adjusted close)' },
+    { id: '5', name: 'preview_horizons', value: '2,3,5', type: 'csv', purpose: 'optional extra horizons to display bands' },
+    { id: '6', name: 'exchange', value: 'NASDAQ', type: 'enum', purpose: 'bind symbol to its primary listing exchange' },
+    { id: '7', name: 'tz_policy', value: 'derive_from_exchange', type: 'enum', purpose: 'timezone derivation policy (derive_from_exchange|override)' },
+    { id: '8', name: 'timezone_override', value: '', type: 'string', purpose: 'IANA TZ string; only used when tz_policy=override' },
+    { id: '9', name: 'cutoff', value: 't_close->t_plus_1_close', type: 'enum', purpose: 'compute→verify pair for band timing' },
+    { id: '10', name: 'calendar_source', value: 'OFFICIAL', type: 'enum', purpose: 'use the exchange\'s official trading calendar (incl. early closes)' },
+    { id: '11', name: 'price_adjustment_mode', value: 'back_adjusted', type: 'enum', purpose: 'require split-adjusted OHLC as canonical' },
+    { id: '12', name: 'adj_close_definition', value: 'splits_and_cash_dividends', type: 'enum', purpose: 'ensures returns are economically correct' },
+    { id: '13', name: 'vol_source', value: 'close_to_close', type: 'enum', purpose: 'declares how σ is obtained; Step-1 uses close-to-close' },
+    { id: '14', name: 'validation_tolerance_bps', value: '5', type: 'integer', purpose: 'tolerance when auditing split adjustments and data fixes (±0.05%)' },
+    { id: '15', name: 'invalid_row_policy', value: 'flag', type: 'enum', purpose: 'never delete valid extremes; only flag/fix true errors' },
+    { id: '16', name: 'skip_earnings', value: 'false', type: 'boolean', purpose: 'if true, suppress breakout evaluation on earnings dates' },
+    { id: '17', name: 'earnings_window', value: '1,1', type: 'csv', purpose: 'format: before_days,after_days (e.g., 1,1) - tag context around earnings' },
+    { id: '18', name: 'delisting_policy', value: 'keep_full_history', type: 'enum', purpose: 'avoid survivorship bias in backtests' },
+    { id: '19', name: 'repair_logging_enabled', value: 'true', type: 'boolean', purpose: 'record every correction (who/when/what/why)' },
+    { id: '20', name: 'data_source_vendor', value: 'VendorName', type: 'string', purpose: 'provenance tag (appears in the Data Quality drawer)' },
+    { id: '21', name: 'config_version', value: '1.0.0', type: 'string', purpose: 'SemVer for this configuration schema' }
   ]);
   const [newVariableName, setNewVariableName] = useState("");
   const [newVariableValue, setNewVariableValue] = useState("");
@@ -52,13 +49,42 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
 
   useEffect(() => { load(); }, [load]);
 
-  // Helper functions for calculations
+  // Helper functions for calculations (updated for canonical variables)
   const getVariableValue = useCallback((name: string): string => {
     return variables.find(v => v.name === name)?.value || '';
   }, [variables]);
 
   const getVariableNumber = useCallback((name: string): number => {
     return parseFloat(getVariableValue(name)) || 0;
+  }, [getVariableValue]);
+
+  const getEffectiveTimezone = useCallback((): string => {
+    const tzPolicy = getVariableValue('tz_policy');
+    const exchange = getVariableValue('exchange');
+    const timezoneOverride = getVariableValue('timezone_override');
+    
+    if (tzPolicy === 'override' && timezoneOverride) {
+      return timezoneOverride;
+    }
+    
+    // Derive from exchange (IANA standard)
+    const exchangeTimezones: Record<string, string> = {
+      'NASDAQ': 'America/New_York',
+      'NYSE': 'America/New_York',
+      'LSE': 'Europe/London',
+      'TSE': 'Asia/Tokyo'
+    };
+    
+    return exchangeTimezones[exchange] || 'America/New_York';
+  }, [getVariableValue]);
+
+  const parseEarningsWindow = useCallback((): { before: number; after: number } => {
+    const earningsWindow = getVariableValue('earnings_window');
+    const parts = earningsWindow.split(',').map(p => parseInt(p.trim()));
+    return {
+      before: parts[0] || 1,
+      after: parts[1] || 1
+    };
   }, [getVariableValue]);
 
   const inverseNormalCdf = (p: number): number => {
@@ -168,17 +194,17 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
     return diffDays >= -daysBefore && diffDays <= daysAfter;
   };
 
-  // Process data with new columns
+  // Process data with new columns (updated for canonical variables)
   const processedData = useMemo(() => {
     if (!data || !data.rows || data.rows.length === 0) return data;
 
-    const rollingWindowDays = getVariableNumber('rolling_window_days');
+    const windowDays = getVariableNumber('window_days'); // was rolling_window_days
     const piCoverage = getVariableNumber('pi_coverage');
     const skipEarnings = getVariableValue('skip_earnings') === 'true';
-    const earningsWindowBefore = getVariableNumber('earnings_window_days_before');
-    const earningsWindowAfter = getVariableNumber('earnings_window_days_after');
+    const earningsWindow = parseEarningsWindow(); // replaces separate before/after variables
     const dataSourceVendor = getVariableValue('data_source_vendor');
     const currentTimestamp = new Date().toISOString();
+    const effectiveTimezone = getEffectiveTimezone();
 
     const zValue = inverseNormalCdf(0.5 + (piCoverage / 2));
 
@@ -218,8 +244,8 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
       
       // Rolling statistics
       const validLogReturns = logReturns.slice(0, i).filter(lr => lr !== null) as number[];
-      newRow.mu_star_rolling = calculateMeanLastN(validLogReturns, rollingWindowDays, validLogReturns.length);
-      newRow.sigma_rolling = calculateStdevLastN(validLogReturns, rollingWindowDays, validLogReturns.length);
+      newRow.mu_star_rolling = calculateMeanLastN(validLogReturns, windowDays, validLogReturns.length);
+      newRow.sigma_rolling = calculateStdevLastN(validLogReturns, windowDays, validLogReturns.length);
       newRow.z_value = zValue;
 
       const muStar = newRow.mu_star_rolling;
@@ -269,7 +295,7 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
       newRow.cash_dividend = 0.0; // Default to no dividend
       newRow.corporate_event_flags = formatCorporateEventFlags(newRow.split_factor, newRow.cash_dividend);
       newRow.earnings_date = null; // Would normally come from earnings calendar
-      newRow.is_earnings_window = isInEarningsWindow(date, newRow.earnings_date, earningsWindowBefore, earningsWindowAfter);
+      newRow.is_earnings_window = isInEarningsWindow(date, newRow.earnings_date, earningsWindow.before, earningsWindow.after);
 
       // Validation & repairs
       newRow.valid_ohlc = validateOHLC(open, high, low, close);
@@ -332,20 +358,21 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
     ];
 
     return { columns: newColumns, rows: processedRows };
-  }, [data, getVariableNumber, getVariableValue]);
+  }, [data, getVariableNumber, getVariableValue, getEffectiveTimezone, parseEarningsWindow]);
 
-  // Generate Target Spec summary
+  // Generate Target Spec summary (updated for canonical variables)
   const targetSpec = useMemo(() => {
+    const cutoffParts = getVariableValue('cutoff').split('->');
     return {
       horizon: getVariableValue('horizon_h_days'),
       coverage: getVariableValue('pi_coverage'),
       target: getVariableValue('target_variable'),
-      computeCutoff: getVariableValue('cutoff_compute'),
-      verifyCutoff: getVariableValue('cutoff_verify'),
-      timezone: getVariableValue('exchange_timezone'),
+      computeCutoff: cutoffParts[0] || 't_close',
+      verifyCutoff: cutoffParts[1] || 't_plus_1_close',
+      timezone: getEffectiveTimezone(),
       evalPlan: 'rolling-origin'
     };
-  }, [getVariableValue]);
+  }, [getVariableValue, getEffectiveTimezone]);
 
   const addVariable = () => {
     if (newVariableName.trim() && newVariableValue.trim()) {
@@ -407,9 +434,11 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
                   <td className="px-4 py-3 border-r border-gray-200">
                     <input
                       type="text"
-                      value={variable.name}
+                      value={variable.name === 'window_days' ? 'Window (days)' : variable.name}
                       onChange={(e) => updateVariable(variable.id, 'name', e.target.value)}
                       className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={true}
+                      title={variable.purpose}
                     />
                   </td>
                   <td className="px-4 py-3 border-r border-gray-200">
@@ -418,6 +447,10 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
                       value={variable.value}
                       onChange={(e) => updateVariable(variable.id, 'value', e.target.value)}
                       className="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder={variable.name === 'earnings_window' ? 'before_days,after_days (e.g., 1,1)' : 
+                                 variable.name === 'timezone_override' ? 'IANA timezone (e.g., Europe/London)' : 
+                                 variable.name === 'config_version' ? 'SemVer (e.g., 1.0.0)' : ''}
+                      title={variable.purpose}
                     />
                   </td>
                   <td className="px-4 py-3">
@@ -492,8 +525,17 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
               <span className="ml-2 text-green-700">{targetSpec.target}</span>
             </div>
             <div>
-              <span className="font-medium text-green-800">Timezone:</span>
-              <span className="ml-2 text-green-700">{targetSpec.timezone}</span>
+              <span className="font-medium text-green-800">Exchange:</span>
+              <span className="ml-2 text-green-700">{getVariableValue('exchange')}</span>
+              <div className="mt-1">
+                <span className="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded" title="Derived from IANA timezone database">
+                  Derived TZ: {targetSpec.timezone}
+                </span>
+              </div>
+            </div>
+            <div>
+              <span className="font-medium text-green-800">Window:</span>
+              <span className="ml-2 text-green-700">{getVariableValue('window_days')} days</span>
             </div>
             <div>
               <span className="font-medium text-green-800">Compute:</span>
@@ -504,8 +546,8 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
               <span className="ml-2 text-green-700">{targetSpec.verifyCutoff}</span>
             </div>
             <div>
-              <span className="font-medium text-green-800">Eval Plan:</span>
-              <span className="ml-2 text-green-700">{targetSpec.evalPlan}</span>
+              <span className="font-medium text-green-800">Config Ver:</span>
+              <span className="ml-2 text-green-700">{getVariableValue('config_version')}</span>
             </div>
           </div>
         </div>
@@ -551,11 +593,11 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
             </div>
             <div className="flex items-center">
               <div className={`w-3 h-3 rounded-full mr-2 ${
-                processedData.rows.filter((row: any) => row.log_return !== null).length >= getVariableNumber('min_history_days') 
+                processedData.rows.filter((row: any) => row.log_return !== null).length >= getVariableNumber('window_days') 
                 ? 'bg-green-500' : 'bg-yellow-500'
               }`}></div>
               <span className="text-sm font-medium text-blue-800">
-                History {processedData.rows.filter((row: any) => row.log_return !== null).length}/{getVariableNumber('min_history_days')} days
+                History {processedData.rows.filter((row: any) => row.log_return !== null).length}/{getVariableNumber('window_days')} days
               </span>
             </div>
           </div>
