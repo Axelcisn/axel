@@ -508,12 +508,17 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
       const currentAdj = parseFloat(rows[i]['Adj. Close'] || rows[i]['Adj_Close'] || 0);
       adjCloses.push(currentAdj);
       
-      // DESC order: log_return[i] = ln(Adj_Close[i] / Adj_Close[i+1])
-      // Current row (i) is newer, previous row (i+1) is older
-      const prevAdj = prev(adjCloses, i, 1);
-      if (currentAdj > 0 && prevAdj && prevAdj > 0) {
-        logReturns.push(Math.log(currentAdj / prevAdj));
+      // log_return[i] = ln( Adj_Close[i] / Adj_Close[i+1] )
+      // In DESC order: row i is newer, row i+1 is older (previous day)
+      if (i < rows.length - 1) {
+        const nextRowAdj = parseFloat(rows[i + 1]['Adj. Close'] || rows[i + 1]['Adj_Close'] || 0);
+        if (currentAdj > 0 && nextRowAdj > 0) {
+          logReturns.push(Math.log(currentAdj / nextRowAdj));
+        } else {
+          logReturns.push(null);
+        }
       } else {
+        // Last (oldest) row has no previous day, so no return
         logReturns.push(null);
       }
     }
