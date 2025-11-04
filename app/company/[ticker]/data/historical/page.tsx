@@ -775,19 +775,12 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
       'valid_ohlc',
       'valid_nonneg',
       'valid_row',
-      // Volatility model (Step-4)
+      // Volatility model (Step-4) - keeping essential forecast columns
       'sigma2_forecast_1d',
       'sigma_forecast_1d',
-      'critical_value',
       'uncond_variance',
-      'garch_alpha',
-      'garch_beta',
       'garch_omega',
-      'garch_persistence',
       'innovations_df_out',
-      'vol_method',
-      'aic',
-      'bic',
       // Auditing
       'window_start',
       'window_end',
@@ -1188,13 +1181,27 @@ export default function HistoricalPage({ params }: { params: { ticker: string }}
                       <span className="ml-1">{recentRow.vol_method || 'N/A'}</span>
                     </div>
                   </div>
+                  
+                  {/* Additional row for Critical Value and Model Fit */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs mt-2">
+                    <div>
+                      <span className="font-medium">Critical Value:</span>
+                      <span className="ml-1">{recentRow.critical_value?.toFixed(3) || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="font-medium">AIC:</span>
+                      <span className="ml-1">{recentRow.aic?.toFixed(1) || 'N/A'}</span>
+                    </div>
+                    <div>
+                      <span className="font-medium">BIC:</span>
+                      <span className="ml-1">{recentRow.bic?.toFixed(1) || 'N/A'}</span>
+                    </div>
+                  </div>
+                  
                   {recentRow.innovations_df_out && (
                     <div className="mt-2 text-xs">
                       <span className="font-medium text-orange-800">Student-t DoF:</span>
                       <span className="ml-2 text-orange-700">{recentRow.innovations_df_out}</span>
-                      <span className="ml-2 text-orange-600">
-                        Critical Value: {recentRow.critical_value?.toFixed(3) || 'N/A'}
-                      </span>
                     </div>
                   )}
                 </div>
