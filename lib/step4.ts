@@ -831,7 +831,6 @@ export function computeStep4(
         rows[i].diagnostics_reason = rows[i].diagnostics_reason ?? 'insufficient_history';
         continue;
       }
-      garchResult = garch;
       const sigma2Current = garch.sigma2SeriesDesc[0];
       const epsCurrent = epsilon[i] ?? 0;
       sigma2Forecast = garch.omega + garch.alpha * (epsCurrent ** 2) + garch.beta * sigma2Current;
