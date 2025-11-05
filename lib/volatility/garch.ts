@@ -1,6 +1,6 @@
 import { SigmaForecast } from './types';
-import { loadCanonicalData } from '@/lib/storage/canonical';
-import { CanonicalRow } from '@/lib/types/canonical';
+import { loadCanonicalData } from '../storage/canonical';
+import { CanonicalRow } from '../types/canonical';
 
 export interface GarchParams {
   symbol: string;
@@ -46,7 +46,9 @@ export async function fitAndForecastGarch(params: GarchParams): Promise<SigmaFor
   const windowData = filteredData.slice(-window);
   
   // Extract log returns (demeaned)
-  const returns = windowData.map((row: CanonicalRow) => row.r).filter((r: number | null) => r !== null) as number[];
+  const returns = windowData
+    .map((row: CanonicalRow) => row.r)
+    .filter((r: number | null | undefined): r is number => r !== null && r !== undefined);
   if (returns.length < window - 1) {
     throw new Error('Insufficient returns for GARCH estimation');
   }
