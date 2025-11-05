@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { IngestionResult } from '@/lib/types/canonical';
 import { TargetSpec, TargetSpecResult } from '@/lib/types/targetSpec';
+import { ForecastRecord } from '@/lib/forecast/types';
 
 interface TimingPageProps {
   params: {
@@ -24,9 +25,17 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [targetError, setTargetError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
-  // Load target spec on mount
+  // GBM Forecast state
+  const [currentForecast, setCurrentForecast] = useState<ForecastRecord | null>(null);
+  const [window, setWindow] = useState(504);
+  const [lambdaDrift, setLambdaDrift] = useState(0.25);
+  const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
+  const [forecastError, setForecastError] = useState<string | null>(null);
+
+  // Load target spec and latest forecast on mount
   useEffect(() => {
     loadTargetSpec();
+    loadLatestForecast();
   }, [params.ticker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTargetSpec = async () => {
@@ -40,6 +49,50 @@ export default function TimingPage({ params }: TimingPageProps) {
       }
     } catch (error) {
       console.error('Failed to load target spec:', error);
+    }
+  };
+
+  const loadLatestForecast = async () => {
+    try {
+      const response = await fetch(`/api/forecast/gbm/${params.ticker}`);
+      if (response.ok) {
+        const forecast: ForecastRecord = await response.json();
+        setCurrentForecast(forecast);
+      } else if (response.status !== 404) {
+        console.error('Failed to load forecast:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Failed to load forecast:', error);
+    }
+  };
+
+  const generateGbmForecast = async () => {
+    setIsGeneratingForecast(true);
+    setForecastError(null);
+
+    try {
+      const response = await fetch(`/api/forecast/gbm/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          window,
+          lambda_drift: lambdaDrift,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate forecast');
+      }
+
+      setCurrentForecast(data);
+    } catch (err) {
+      setForecastError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsGeneratingForecast(false);
     }
   };
 
@@ -254,6 +307,171 @@ export default function TimingPage({ params }: TimingPageProps) {
             <p>Target variable represents the next trading day&apos;s adjusted closing price that we aim to forecast.</p>
           </div>
         </details>
+      </div>
+      
+      {/* GBM Card */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-gbm">
+        <h2 className="text-xl font-semibold mb-4">GBM Baseline PI Engine</h2>
+        
+        {/* Window Controls */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium mb-3">Window Length</label>
+          <div className="flex flex-wrap gap-2">
+            {[252, 504, 756].map((size) => (
+              <button
+                key={size}
+                onClick={() => setWindow(size)}
+                className={`px-3 py-1 text-sm rounded ${
+                  window === size 
+                    ? 'bg-blue-600 text-white' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Lambda Drift Controls */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium mb-3">
+            Drift Shrinkage λ: {lambdaDrift.toFixed(3)}
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="1"
+            step="0.025"
+            value={lambdaDrift}
+            onChange={(e) => setLambdaDrift(parseFloat(e.target.value))}
+            className="w-full"
+          />
+          <div className="flex justify-between text-xs text-gray-500 mt-1">
+            <span>0.000</span>
+            <span>1.000</span>
+          </div>
+        </div>
+
+        {/* Generate Button */}
+        <div className="mb-6">
+          <button
+            onClick={generateGbmForecast}
+            disabled={isGeneratingForecast || !targetSpecResult?.meta.hasTZ}
+            className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGeneratingForecast ? 'Generating...' : 'Generate GBM PI'}
+          </button>
+          
+          {forecastError && (
+            <p className="text-red-600 text-sm mt-2">{forecastError}</p>
+          )}
+          
+          {!targetSpecResult?.meta.hasTZ && (
+            <p className="text-red-600 text-sm mt-2">
+              Target spec required. Please set target specification first.
+            </p>
+          )}
+        </div>
+
+        {/* Display Estimates */}
+        {currentForecast && currentForecast.method === 'GBM-CC' && (
+          <div className="bg-gray-50 p-4 rounded">
+            <h3 className="font-medium mb-3">Current Estimates</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+              <div>
+                <span className="text-gray-600">μ*:</span>
+                <span className="ml-2 font-mono">{currentForecast.estimates.mu_star_hat.toFixed(6)}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">σ (daily):</span>
+                <span className="ml-2 font-mono">{currentForecast.estimates.sigma_hat.toFixed(6)}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">λ:</span>
+                <span className="ml-2 font-mono">{currentForecast.params.lambda_drift.toFixed(3)}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">Window:</span>
+                <span className="ml-2">{currentForecast.estimates.window_start} – {currentForecast.estimates.window_end}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">N:</span>
+                <span className="ml-2">{currentForecast.estimates.n}</span>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">MLE with denominator N</p>
+          </div>
+        )}
+
+        {/* Methods Tooltip */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
+            Methods & Formulas
+          </summary>
+          <div className="mt-2 text-xs bg-blue-50 p-3 rounded font-mono">
+            <p>mu_star_hat = mean( r_window )</p>
+            <p>sigma_hat = sqrt( (1/N) * Σ (r_i − mu_star_hat)² )     # MLE (denominator N)</p>
+            <p>mu_star_used = λ * mu_star_hat</p>
+            <p>m_t(h) = ln(S_t) + h * mu_star_used</p>
+            <p>s_t(h) = sigma_hat * sqrt(h)</p>
+            <p>z_α = Φ⁻¹(1 − α/2)</p>
+            <p>L_h = exp( m_t(h) − z_α * s_t(h) )</p>
+            <p>U_h = exp( m_t(h) + z_α * s_t(h) )</p>
+            <p>band_width_bp = 10000 * (U_1 / L_1 − 1)</p>
+          </div>
+        </details>
+      </div>
+
+      {/* Final PI Card */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-final-pi">
+        <h2 className="text-xl font-semibold mb-4">Final Prediction Intervals</h2>
+        
+        {currentForecast ? (
+          <div>
+            {/* Method Chip */}
+            <div className="mb-4">
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-green-100 text-green-800">
+                🔒 {currentForecast.method}
+              </span>
+              <span className="ml-3 text-sm text-gray-500">
+                Created: {new Date(currentForecast.created_at).toLocaleString()}
+              </span>
+            </div>
+
+            {/* PI Values */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="bg-gray-50 p-3 rounded">
+                <div className="text-sm text-gray-600">L₁ (Lower)</div>
+                <div className="text-lg font-mono">${currentForecast.L_h.toFixed(2)}</div>
+              </div>
+              <div className="bg-gray-50 p-3 rounded">
+                <div className="text-sm text-gray-600">U₁ (Upper)</div>
+                <div className="text-lg font-mono">${currentForecast.U_h.toFixed(2)}</div>
+              </div>
+              <div className="bg-gray-50 p-3 rounded">
+                <div className="text-sm text-gray-600">Band Width</div>
+                <div className="text-lg font-mono">{currentForecast.band_width_bp.toFixed(0)} bp</div>
+              </div>
+              <div className="bg-gray-50 p-3 rounded">
+                <div className="text-sm text-gray-600">Critical z_α</div>
+                <div className="text-lg font-mono">{currentForecast.critical.z_alpha.toFixed(3)}</div>
+              </div>
+            </div>
+
+            {/* Technical Details */}
+            <div className="text-sm text-gray-600 space-y-1">
+              <p><strong>Coverage:</strong> {(currentForecast.params.coverage * 100).toFixed(1)}% • <strong>Horizon:</strong> {currentForecast.params.h}D</p>
+              <p><strong>As-of Date:</strong> {currentForecast.date_t} • <strong>Window:</strong> {currentForecast.params.window} days</p>
+              <p><strong>Drift Shrinkage:</strong> λ = {currentForecast.params.lambda_drift.toFixed(3)}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-8 text-gray-500">
+            <p>No forecast generated yet</p>
+            <p className="text-sm mt-1">Generate a GBM PI above to see prediction intervals</p>
+          </div>
+        )}
       </div>
       
       {/* Upload Section */}

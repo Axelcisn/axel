@@ -4,7 +4,8 @@
 [x] 01 Goals & Scope (this doc) — ACCEPTED
 [x] 02 Ingestion & Canonical dataset — schema, calendar/TZ, badges
 [x] 03 Forecast Target Spec — h, coverage, variable, cutoff, TZ dependency, validation
-[ ] 04 GBM PI engine — μ* (MLE N), σ (MLE N), λ drift, band_width_bp, lock
+[x] 04 GBM PI engine — μ* (MLE N), σ (MLE N), λ drift, band_width_bp, lock
+[ ] 05 GARCH/HAR — σ forecasts (Normal/Student-t), multi-step, diagnostics
 [ ] 04 GARCH/HAR — σ forecasts (Normal/Student-t), multi-step, diagnostics
 [ ] 05 Range-based σ — Parkinson/GK/RS/YZ (with k), EWMA option
 [ ] 06 Conformal — ICP (scaled), CQR, EnbPI, ACI; coverage chips
