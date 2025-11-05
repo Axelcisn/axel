@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/streetsidesoftware/cspell/main/cspell.schema.json",
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "node_modules/**",
+    ".next/**",
+    "dist/**",
+    "build/**",
+    "coverage/**",
+    "data/**",
+    "package-lock.json"
+  ],
+  "allowCompoundWords": true,
+  "words": [
+    "watchlist",
+    "Watchlist",
+    "changepercent",
+    "marketcap"
+  ],
+  "flagWords": []
+}
