@@ -1,6 +1,6 @@
 import { SigmaForecast } from './types';
-import { loadCanonicalData } from '../storage/canonical';
-import { CanonicalRow } from '../types/canonical';
+import { loadCanonicalData } from '@/lib/storage/canonical';
+import { CanonicalRow } from '@/lib/types/canonical';
 
 export interface GarchParams {
   symbol: string;

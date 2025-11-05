@@ -88,7 +88,18 @@
     "dedup",
     "dedups",
     "stationarity",
-    "Bera"
+    "Bera",
+    "QMLE",
+    "Nelsen",
+    "BFGS",
+    "Klass",
+    "Satchell",
+    "Zheng", 
+    "Zhang",
+    "inband",
+    "tplus",
+    "volRegime",
+    "Nelder"
   ],
   "flagWords": []
 }
