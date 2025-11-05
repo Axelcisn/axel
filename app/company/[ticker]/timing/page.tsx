@@ -26,7 +26,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Load target spec on mount
   useEffect(() => {
     loadTargetSpec();
-  }, [params.ticker]);
+  }, [params.ticker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTargetSpec = async () => {
     try {
@@ -240,7 +240,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         {/* Reference Text */}
         <div className="text-sm text-gray-700 bg-gray-50 p-3 rounded">
           <p><strong>Target (future observation):</strong> y_{'{t+1}'} = AdjClose_{'{t+1}'}</p>
-          <p><strong>"Prediction Interval (PI)"</strong> for y_{'{t+1}'} at coverage 1−α</p>
+          <p><strong>&ldquo;Prediction Interval (PI)&rdquo;</strong> for y_{'{t+1}'} at coverage 1−α</p>
         </div>
 
         {/* Methods Tooltip */}
@@ -250,7 +250,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           </summary>
           <div className="mt-2 text-sm bg-blue-50 p-3 rounded">
             <p>PIs are for <strong>future observations</strong> and will be verified <strong>out-of-sample (OOS)</strong> with rolling-origin evaluation.</p>
-            <p>Target variable represents the next trading day's adjusted closing price that we aim to forecast.</p>
+            <p>Target variable represents the next trading day&apos;s adjusted closing price that we aim to forecast.</p>
           </div>
         </details>
       </div>
