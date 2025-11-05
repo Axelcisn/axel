@@ -46,6 +46,16 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isGeneratingVolatility, setIsGeneratingVolatility] = useState(false);
   const [volatilityError, setVolatilityError] = useState<string | null>(null);
 
+  // Conformal Prediction state
+  const [conformalMode, setConformalMode] = useState<'ICP' | 'ICP-SCALED' | 'CQR' | 'EnbPI' | 'ACI'>('ICP');
+  const [conformalDomain, setConformalDomain] = useState<'log' | 'price'>('log');
+  const [conformalCalWindow, setConformalCalWindow] = useState(250);
+  const [conformalEta, setConformalEta] = useState(0.02);
+  const [conformalK, setConformalK] = useState(20);
+  const [conformalState, setConformalState] = useState<any>(null);
+  const [isApplyingConformal, setIsApplyingConformal] = useState(false);
+  const [conformalError, setConformalError] = useState<string | null>(null);
+
   // Load target spec and latest forecast on mount
   useEffect(() => {
     loadTargetSpec();
@@ -160,6 +170,79 @@ export default function TimingPage({ params }: TimingPageProps) {
       setVolatilityError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setIsGeneratingVolatility(false);
+    }
+  };
+
+  const applyConformalPrediction = async () => {
+    setIsApplyingConformal(true);
+    setConformalError(null);
+
+    try {
+      const conformalParams = {
+        mode: conformalMode,
+        domain: conformalDomain,
+        cal_window: conformalCalWindow,
+        ...(conformalMode === 'ACI' ? { eta: conformalEta } : {}),
+        ...(conformalMode === 'EnbPI' ? { K: conformalK } : {})
+      };
+
+      const response = await fetch(`/api/conformal/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          symbol: params.ticker,
+          params: conformalParams
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 409 && data.code === 'DOMAIN_CONFLICT') {
+          const confirmRecalibrate = confirm(
+            `Domain conflict: existing state uses '${data.existing_domain}' but you selected '${data.requested_domain}'. Do you want to force recalibration?`
+          );
+          
+          if (confirmRecalibrate) {
+            // Retry with force=true
+            const retryResponse = await fetch(`/api/conformal/${params.ticker}?force=true`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                symbol: params.ticker,
+                params: conformalParams
+              }),
+            });
+            
+            const retryData = await retryResponse.json();
+            
+            if (!retryResponse.ok) {
+              throw new Error(retryData.error || 'Failed to apply conformal prediction');
+            }
+            
+            setConformalState(retryData.state);
+            setCurrentForecast(null); // Will be loaded by loadLatestForecast
+            await loadLatestForecast();
+            return;
+          } else {
+            setConformalError('Operation cancelled: domain conflict not resolved');
+            return;
+          }
+        }
+        throw new Error(data.error || 'Failed to apply conformal prediction');
+      }
+
+      setConformalState(data.state);
+      setCurrentForecast(null); // Will be loaded by loadLatestForecast
+      await loadLatestForecast(); // Refresh the forecast display
+    } catch (err) {
+      setConformalError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsApplyingConformal(false);
     }
   };
 
@@ -759,6 +842,217 @@ export default function TimingPage({ params }: TimingPageProps) {
         </details>
       </div>
 
+      {/* Conformal Prediction Card */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-conformal">
+        <h2 className="text-xl font-semibold mb-4">Conformal Prediction Intervals</h2>
+        
+        {/* Mode Selector */}
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium mb-2">Mode:</label>
+            <select 
+              value={conformalMode} 
+              onChange={(e) => setConformalMode(e.target.value as any)}
+              className="w-full p-2 border rounded-md"
+            >
+              <option value="ICP">ICP</option>
+              <option value="ICP-SCALED">ICP-scaled</option>
+              <option value="CQR">CQR</option>
+              <option value="EnbPI">EnbPI</option>
+              <option value="ACI">ACI</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-2">Domain:</label>
+            <select 
+              value={conformalDomain} 
+              onChange={(e) => setConformalDomain(e.target.value as 'log' | 'price')}
+              className="w-full p-2 border rounded-md"
+            >
+              <option value="log">log (default)</option>
+              <option value="price">price</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Calibration Window */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium mb-2">Calibration Window:</label>
+          <select 
+            value={conformalCalWindow} 
+            onChange={(e) => setConformalCalWindow(Number(e.target.value))}
+            className="w-full p-2 border rounded-md"
+          >
+            <option value={125}>125 days</option>
+            <option value={250}>250 days (default)</option>
+            <option value={500}>500 days</option>
+          </select>
+        </div>
+
+        {/* Mode-specific Parameters */}
+        {conformalMode === 'ACI' && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-3">ACI Parameters</h3>
+            <div>
+              <label className="block text-sm mb-1">Step size η:</label>
+              <select 
+                value={conformalEta} 
+                onChange={(e) => setConformalEta(Number(e.target.value))}
+                className="w-full p-2 border rounded text-sm"
+              >
+                <option value={0.01}>0.01</option>
+                <option value={0.02}>0.02 (default)</option>
+                <option value={0.05}>0.05</option>
+              </select>
+            </div>
+          </div>
+        )}
+
+        {conformalMode === 'EnbPI' && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-3">EnbPI Parameters</h3>
+            <div>
+              <label className="block text-sm mb-1">Ensemble size K:</label>
+              <input 
+                type="number" 
+                value={conformalK} 
+                onChange={(e) => setConformalK(Number(e.target.value))}
+                className="w-full p-2 border rounded text-sm"
+                min="5"
+                step="1"
+              />
+              <p className="text-xs text-gray-500 mt-1">Minimum 5, default 20</p>
+            </div>
+          </div>
+        )}
+
+        {/* Apply Button */}
+        <div className="mb-4">
+          <button
+            onClick={applyConformalPrediction}
+            disabled={isApplyingConformal || !targetSpecResult}
+            className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {isApplyingConformal ? 'Applying...' : 'Apply Conformal PI'}
+          </button>
+          {!targetSpecResult && (
+            <p className="text-sm text-gray-500 mt-2">Please save target specification first</p>
+          )}
+        </div>
+
+        {/* Error Display */}
+        {conformalError && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-md text-red-700">
+            <p className="font-medium">Error:</p>
+            <p className="text-sm">{conformalError}</p>
+          </div>
+        )}
+
+        {/* Coverage Chips */}
+        {conformalState && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <h4 className="font-medium mb-2">Coverage Statistics</h4>
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="text-center">
+                <div className="font-mono text-lg">
+                  {conformalState.coverage.last60 !== null 
+                    ? `${(conformalState.coverage.last60 * 100).toFixed(1)}%` 
+                    : 'N/A'}
+                </div>
+                <div className="text-xs text-gray-600">Last 60d</div>
+              </div>
+              <div className="text-center">
+                <div className="font-mono text-lg">
+                  {conformalState.coverage.lastCal !== null 
+                    ? `${(conformalState.coverage.lastCal * 100).toFixed(1)}%` 
+                    : 'N/A'}
+                </div>
+                <div className="text-xs text-gray-600">Cal Window</div>
+              </div>
+              <div className="text-center">
+                <div className="font-mono text-lg">{conformalState.coverage.miss_count}</div>
+                <div className="text-xs text-gray-600">Misses</div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Parameters Display */}
+        {conformalState && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
+            <h4 className="font-medium mb-2">Calibrated Parameters</h4>
+            <div className="text-sm font-mono">
+              {conformalMode === 'ICP' && conformalState.params.q_cal !== null && (
+                <p>q_cal = {conformalState.params.q_cal.toFixed(6)}</p>
+              )}
+              {conformalMode === 'ICP-SCALED' && conformalState.params.q_cal_scaled !== null && (
+                <p>q_cal_scaled = {conformalState.params.q_cal_scaled.toFixed(6)}</p>
+              )}
+              {conformalMode === 'CQR' && (
+                <div>
+                  {conformalState.params.delta_L !== null && (
+                    <p>Δ_L = {conformalState.params.delta_L.toFixed(6)}</p>
+                  )}
+                  {conformalState.params.delta_U !== null && (
+                    <p>Δ_U = {conformalState.params.delta_U.toFixed(6)}</p>
+                  )}
+                </div>
+              )}
+              {conformalMode === 'EnbPI' && (
+                <div>
+                  {conformalState.params.K && <p>K = {conformalState.params.K}</p>}
+                  {conformalState.params.q_cal !== null && (
+                    <p>q_cal = {conformalState.params.q_cal.toFixed(6)}</p>
+                  )}
+                </div>
+              )}
+              {conformalMode === 'ACI' && (
+                <div>
+                  {conformalState.params.eta && <p>η = {conformalState.params.eta}</p>}
+                  {conformalState.params.theta !== null && (
+                    <p>θ = {conformalState.params.theta.toFixed(6)}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Warnings */}
+        {conformalState && conformalState.domain !== conformalDomain && (
+          <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-md text-yellow-700">
+            <p className="font-medium">⚠️ Domain Switch Warning</p>
+            <p className="text-sm">Domain switched {conformalState.domain} ↔ {conformalDomain}: recalibration required</p>
+          </div>
+        )}
+
+        {/* Formula Tooltip */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
+            Methods & Formulas
+          </summary>
+          <div className="mt-2 text-xs bg-blue-50 p-3 rounded font-mono">
+            <div className="space-y-2">
+              <div>
+                <strong>ICP:</strong> q_cal = Q&#123;1−α&#125;(|y_i − ŷ_i|); PI: [ ŷ ± q_cal ]
+              </div>
+              <div>
+                <strong>ICP scaled:</strong> q_cal_s = Q&#123;1−α&#125;(|y_i − ŷ_i| / σ_pred_i); width = q_cal_s·σ_pred_t
+              </div>
+              <div>
+                <strong>CQR:</strong> L = L^0 − Δ_L ; U = U^0 + Δ_U
+              </div>
+              <div>
+                <strong>EnbPI:</strong> OOB residuals → q_cal ; PI: [ ŷ ± q_cal ]
+              </div>
+              <div>
+                <strong>ACI:</strong> θ&#123;t+1&#125; = θ_t + η ( miss_t − α )
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
+
       {/* Final PI Card */}
       <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-final-pi">
         <h2 className="text-xl font-semibold mb-4">Final Prediction Intervals</h2>
@@ -768,7 +1062,13 @@ export default function TimingPage({ params }: TimingPageProps) {
             {/* Method Chip */}
             <div className="mb-4">
               <span className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-green-100 text-green-800">
-                🔒 {currentForecast.method}
+                🔒 {currentForecast.method.startsWith('Conformal:') ? (
+                  <>
+                    {currentForecast.diagnostics?.base_method || 'Base'} + {currentForecast.method}
+                  </>
+                ) : (
+                  currentForecast.method
+                )}
               </span>
               <span className="ml-3 text-sm text-gray-500">
                 Created: {new Date(currentForecast.created_at).toLocaleString()}
