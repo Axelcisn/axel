@@ -1,4 +1,4 @@
-export type ForecastMethod = "GBM-CC";
+export type ForecastMethod = "GBM-CC" | "GARCH11-N" | "GARCH11-t" | "HAR-RV" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ";
 
 export type ForecastParams = {
   window: number;            // 252 | 504 | 756 (default 504)
@@ -14,20 +14,37 @@ export type GbmEstimates = {
   window_start: string;      // YYYY-MM-DD
   window_end: string;        // YYYY-MM-DD
   n: number;                 // effective N
+  S_t?: number;              // Current price (for volatility models)
+  sigma_forecast?: number;   // Forecast volatility (for volatility models)
+  sigma2_forecast?: number;  // Forecast variance (for volatility models)
+  critical_value?: number;   // Critical value used
+  window_span?: { start: string; end: string };
+  volatility_diagnostics?: Record<string, any>;
 };
 
 export type ForecastRecord = {
   symbol: string;
   date_t: string;            // YYYY-MM-DD for S_t (as-of)
-  method: ForecastMethod;    // "GBM-CC"
-  params: ForecastParams;
-  estimates: GbmEstimates;
-  critical: { type: "normal"; z_alpha: number };
-  m_log: number;             // m_t(h) on log scale
-  s_scale: number;           // s_t(h)
-  L_h: number;
-  U_h: number;
-  band_width_bp: number;
+  method: ForecastMethod;    // "GBM-CC" | volatility models
+  params?: ForecastParams;   // For GBM models
+  estimates?: GbmEstimates;  // For GBM and volatility models
+  target?: {                 // Target specification
+    h: number;
+    coverage: number;
+    window_requirements?: { min_days: number };
+  };
+  intervals?: {              // Prediction intervals
+    L_h: number;
+    U_h: number;
+    band_width_bp: number;
+  };
+  critical?: { type: "normal" | "t"; z_alpha?: number; value?: number; df?: number };
+  m_log?: number;            // m_t(h) on log scale
+  s_scale?: number;          // s_t(h)
+  L_h?: number;              // Legacy - for backwards compatibility
+  U_h?: number;              // Legacy - for backwards compatibility
+  band_width_bp?: number;    // Legacy - for backwards compatibility
+  diagnostics?: Record<string, any>; // Additional diagnostics
   locked: true;              // immutability flag
   created_at: string;        // ISO
 };

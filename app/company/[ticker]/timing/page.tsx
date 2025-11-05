@@ -32,6 +32,20 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
   const [forecastError, setForecastError] = useState<string | null>(null);
 
+  // Volatility Model state
+  const [selectedModel, setSelectedModel] = useState<'GARCH11-N' | 'GARCH11-t' | 'HAR-RV' | 'Range-P' | 'Range-GK' | 'Range-RS' | 'Range-YZ'>('GARCH11-N');
+  const [garchWindow, setGarchWindow] = useState(1000);
+  const [garchVarianceTargeting, setGarchVarianceTargeting] = useState(true);
+  const [garchDist, setGarchDist] = useState<'normal' | 'student-t'>('normal');
+  const [garchDf, setGarchDf] = useState(8);
+  const [harWindow, setHarWindow] = useState(1000);
+  const [harUseIntradayRv, setHarUseIntradayRv] = useState(true);
+  const [rangeEstimator, setRangeEstimator] = useState<'P' | 'GK' | 'RS' | 'YZ'>('YZ');
+  const [rangeWindow, setRangeWindow] = useState(63);
+  const [rangeEwmaLambda, setRangeEwmaLambda] = useState(0.94);
+  const [isGeneratingVolatility, setIsGeneratingVolatility] = useState(false);
+  const [volatilityError, setVolatilityError] = useState<string | null>(null);
+
   // Load target spec and latest forecast on mount
   useEffect(() => {
     loadTargetSpec();
@@ -93,6 +107,59 @@ export default function TimingPage({ params }: TimingPageProps) {
       setForecastError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setIsGeneratingForecast(false);
+    }
+  };
+
+  const generateVolatilityForecast = async () => {
+    setIsGeneratingVolatility(true);
+    setVolatilityError(null);
+
+    try {
+      let params: any = {};
+      
+      if (selectedModel === 'GARCH11-N' || selectedModel === 'GARCH11-t') {
+        params.garch = {
+          window: garchWindow,
+          variance_targeting: garchVarianceTargeting,
+          dist: garchDist,
+          ...(garchDist === 'student-t' ? { df: garchDf } : {})
+        };
+      } else if (selectedModel === 'HAR-RV') {
+        params.har = {
+          window: harWindow,
+          use_intraday_rv: harUseIntradayRv
+        };
+      } else {
+        params.range = {
+          estimator: rangeEstimator,
+          window: rangeWindow,
+          ewma_lambda: rangeEwmaLambda
+        };
+      }
+
+      const response = await fetch(`/api/volatility/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: selectedModel,
+          params
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate volatility forecast');
+      }
+
+      setCurrentForecast(data);
+      await loadLatestForecast(); // Refresh the forecast display
+    } catch (err) {
+      setVolatilityError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsGeneratingVolatility(false);
     }
   };
 
@@ -381,23 +448,23 @@ export default function TimingPage({ params }: TimingPageProps) {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
               <div>
                 <span className="text-gray-600">μ*:</span>
-                <span className="ml-2 font-mono">{currentForecast.estimates.mu_star_hat.toFixed(6)}</span>
+                <span className="ml-2 font-mono">{currentForecast.estimates?.mu_star_hat?.toFixed(6) || 'N/A'}</span>
               </div>
               <div>
                 <span className="text-gray-600">σ (daily):</span>
-                <span className="ml-2 font-mono">{currentForecast.estimates.sigma_hat.toFixed(6)}</span>
+                <span className="ml-2 font-mono">{currentForecast.estimates?.sigma_hat?.toFixed(6) || 'N/A'}</span>
               </div>
               <div>
                 <span className="text-gray-600">λ:</span>
-                <span className="ml-2 font-mono">{currentForecast.params.lambda_drift.toFixed(3)}</span>
+                <span className="ml-2 font-mono">{currentForecast.params?.lambda_drift?.toFixed(3) || 'N/A'}</span>
               </div>
               <div>
                 <span className="text-gray-600">Window:</span>
-                <span className="ml-2">{currentForecast.estimates.window_start} – {currentForecast.estimates.window_end}</span>
+                <span className="ml-2">{currentForecast.estimates?.window_start || 'N/A'} – {currentForecast.estimates?.window_end || 'N/A'}</span>
               </div>
               <div>
                 <span className="text-gray-600">N:</span>
-                <span className="ml-2">{currentForecast.estimates.n}</span>
+                <span className="ml-2">{currentForecast.estimates?.n || 'N/A'}</span>
               </div>
             </div>
             <p className="text-xs text-gray-500 mt-2">MLE with denominator N</p>
@@ -423,6 +490,275 @@ export default function TimingPage({ params }: TimingPageProps) {
         </details>
       </div>
 
+      {/* Volatility Models Card */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-vol-and-sources">
+        <h2 className="text-xl font-semibold mb-4">Volatility Models</h2>
+        
+        {/* Model Selector */}
+        <div className="mb-6">
+          <label className="block text-sm font-medium mb-2">Select Model:</label>
+          <select 
+            value={selectedModel} 
+            onChange={(e) => setSelectedModel(e.target.value as any)}
+            className="w-full p-2 border rounded-md"
+          >
+            <option value="GARCH11-N">GARCH(1,1) - Normal</option>
+            <option value="GARCH11-t">GARCH(1,1) - Student-t</option>
+            <option value="HAR-RV">HAR-RV</option>
+            <option value="Range-P">Range: Parkinson</option>
+            <option value="Range-GK">Range: Garman-Klass</option>
+            <option value="Range-RS">Range: Rogers-Satchell</option>
+            <option value="Range-YZ">Range: Yang-Zhang</option>
+          </select>
+        </div>
+
+        {/* GARCH Panel */}
+        {(selectedModel === 'GARCH11-N' || selectedModel === 'GARCH11-t') && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-3">GARCH(1,1) Parameters</h3>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm mb-1">Window (days)</label>
+                <input 
+                  type="number" 
+                  value={garchWindow} 
+                  onChange={(e) => setGarchWindow(Number(e.target.value))}
+                  className="w-full p-2 border rounded text-sm"
+                  min="600"
+                  step="1"
+                />
+                <p className="text-xs text-gray-500 mt-1">Recommend 1000</p>
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Distribution</label>
+                <select 
+                  value={garchDist} 
+                  onChange={(e) => setGarchDist(e.target.value as 'normal' | 'student-t')}
+                  className="w-full p-2 border rounded text-sm"
+                >
+                  <option value="normal">Normal</option>
+                  <option value="student-t">Student-t</option>
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="flex items-center text-sm">
+                  <input 
+                    type="checkbox" 
+                    checked={garchVarianceTargeting} 
+                    onChange={(e) => setGarchVarianceTargeting(e.target.checked)}
+                    className="mr-2"
+                  />
+                  Variance Targeting
+                </label>
+              </div>
+              {garchDist === 'student-t' && (
+                <div>
+                  <label className="block text-sm mb-1">Degrees of Freedom (ν)</label>
+                  <input 
+                    type="number" 
+                    value={garchDf} 
+                    onChange={(e) => setGarchDf(Number(e.target.value))}
+                    className="w-full p-2 border rounded text-sm"
+                    min="2"
+                    step="1"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* HAR Panel */}
+        {selectedModel === 'HAR-RV' && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-3">HAR-RV Parameters</h3>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm mb-1">Window (days)</label>
+                <input 
+                  type="number" 
+                  value={harWindow} 
+                  onChange={(e) => setHarWindow(Number(e.target.value))}
+                  className="w-full p-2 border rounded text-sm"
+                  min="100"
+                  step="1"
+                />
+              </div>
+              <div>
+                <label className="flex items-center text-sm">
+                  <input 
+                    type="checkbox" 
+                    checked={harUseIntradayRv} 
+                    onChange={(e) => setHarUseIntradayRv(e.target.checked)}
+                    className="mr-2"
+                  />
+                  Use Intraday RV
+                </label>
+                <p className="text-xs text-gray-500 mt-1">Required for HAR</p>
+              </div>
+            </div>
+            {!harUseIntradayRv && (
+              <div className="mt-2 p-2 bg-yellow-100 border-l-4 border-yellow-500 text-sm">
+                ⚠️ HAR-RV disabled: intraday RV must be enabled
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Range Panel */}
+        {selectedModel.startsWith('Range-') && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+            <h3 className="font-medium mb-3">Range-based Parameters</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm mb-1">Estimator</label>
+                <select 
+                  value={rangeEstimator} 
+                  onChange={(e) => {
+                    setRangeEstimator(e.target.value as 'P' | 'GK' | 'RS' | 'YZ');
+                    setSelectedModel(`Range-${e.target.value}` as any);
+                  }}
+                  className="w-full p-2 border rounded text-sm"
+                >
+                  <option value="P">Parkinson</option>
+                  <option value="GK">Garman-Klass</option>
+                  <option value="RS">Rogers-Satchell</option>
+                  <option value="YZ">Yang-Zhang</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm mb-1">Window (days)</label>
+                <input 
+                  type="number" 
+                  value={rangeWindow} 
+                  onChange={(e) => setRangeWindow(Number(e.target.value))}
+                  className="w-full p-2 border rounded text-sm"
+                  min="20"
+                  step="1"
+                />
+                <p className="text-xs text-gray-500 mt-1">Default 63</p>
+              </div>
+              <div>
+                <label className="block text-sm mb-1">EWMA λ</label>
+                <input 
+                  type="number" 
+                  value={rangeEwmaLambda} 
+                  onChange={(e) => setRangeEwmaLambda(Number(e.target.value))}
+                  className="w-full p-2 border rounded text-sm"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                />
+                <p className="text-xs text-gray-500 mt-1">Default 0.94</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Generate Button */}
+        <div className="mb-4">
+          <button
+            onClick={generateVolatilityForecast}
+            disabled={isGeneratingVolatility || !targetSpecResult}
+            className="px-6 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+          >
+            {isGeneratingVolatility ? 'Generating...' : 'Generate Final PI (Volatility Model)'}
+          </button>
+          {!targetSpecResult && (
+            <p className="text-sm text-gray-500 mt-2">Please save target specification first</p>
+          )}
+        </div>
+
+        {/* Error Display */}
+        {volatilityError && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-md text-red-700">
+            <p className="font-medium">Error:</p>
+            <p className="text-sm">{volatilityError}</p>
+          </div>
+        )}
+
+        {/* Diagnostics Display */}
+        {currentForecast && currentForecast.method !== 'GBM-CC' && currentForecast.estimates?.volatility_diagnostics && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <h4 className="font-medium mb-2">Diagnostics</h4>
+            <div className="text-sm font-mono">
+              {currentForecast.method.startsWith('GARCH') && (
+                <div>
+                  <p>α = {currentForecast.estimates.volatility_diagnostics.alpha?.toFixed(3) || 'N/A'}</p>
+                  <p>β = {currentForecast.estimates.volatility_diagnostics.beta?.toFixed(3) || 'N/A'}</p>
+                  <p>α + β = {currentForecast.estimates.volatility_diagnostics.alpha_plus_beta?.toFixed(3) || 'N/A'}</p>
+                  <p>ω = {currentForecast.estimates.volatility_diagnostics.omega?.toFixed(6) || 'N/A'}</p>
+                  {currentForecast.estimates.volatility_diagnostics.df && (
+                    <p>ν = {currentForecast.estimates.volatility_diagnostics.df}</p>
+                  )}
+                  {currentForecast.estimates.volatility_diagnostics.alpha_plus_beta >= 0.98 && (
+                    <p className="text-orange-600 mt-1">⚠️ Near-integrated (α+β ≥ 0.98)</p>
+                  )}
+                </div>
+              )}
+              {currentForecast.method === 'HAR-RV' && (
+                <div>
+                  <p>β₀ = {currentForecast.estimates.volatility_diagnostics.beta0?.toFixed(6) || 'N/A'}</p>
+                  <p>βd = {currentForecast.estimates.volatility_diagnostics.beta_d?.toFixed(3) || 'N/A'}</p>
+                  <p>βw = {currentForecast.estimates.volatility_diagnostics.beta_w?.toFixed(3) || 'N/A'}</p>
+                  <p>βm = {currentForecast.estimates.volatility_diagnostics.beta_m?.toFixed(3) || 'N/A'}</p>
+                  <p>R² = {currentForecast.estimates.volatility_diagnostics.R2_in_sample?.toFixed(3) || 'N/A'}</p>
+                </div>
+              )}
+              {currentForecast.method.startsWith('Range-') && (
+                <div>
+                  <p>Estimator: {currentForecast.estimates.volatility_diagnostics.estimator || 'N/A'}</p>
+                  <p>Window: {currentForecast.estimates.volatility_diagnostics.window || 'N/A'} days</p>
+                  {currentForecast.estimates.volatility_diagnostics.ewma_lambda && (
+                    <p>EWMA λ = {currentForecast.estimates.volatility_diagnostics.ewma_lambda}</p>
+                  )}
+                  {currentForecast.estimates.volatility_diagnostics.k && (
+                    <p>YZ weight k = {currentForecast.estimates.volatility_diagnostics.k.toFixed(3)}</p>
+                  )}
+                  {currentForecast.estimates.volatility_diagnostics.gap_warnings && (
+                    <div className="mt-1 text-orange-600">
+                      {currentForecast.estimates.volatility_diagnostics.gap_warnings.map((warning: string, idx: number) => (
+                        <p key={idx}>⚠️ {warning}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Formula Tooltip */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
+            Methods & Formulas
+          </summary>
+          <div className="mt-2 text-xs bg-blue-50 p-3 rounded font-mono">
+            <div className="mb-4">
+              <strong>GARCH(1,1):</strong>
+              <p>σₜ² = ω + α εₜ₋₁² + β σₜ₋₁²</p>
+              <p>One-step: σ²ₜ₊₁|ₜ = ω + α εₜ² + β σₜ²</p>
+              <p>Multi-step: σ²ₜ₊ₕ|ₜ = ω [1−(α+β)ʰ]/(1−α−β) + (α+β)ʰ σₜ²</p>
+              <p>Critical c: Normal z₁₋α/₂ or Student-t t_ν,₁₋α/₂</p>
+            </div>
+            <div className="mb-4">
+              <strong>HAR-RV:</strong>
+              <p>RVₜ₊₁ = β₀ + βd RVₜ + βw RVₜ⁽ʷ⁾ + βm RVₜ⁽ᵐ⁾</p>
+            </div>
+            <div>
+              <strong>Range daily proxies:</strong>
+              <p>P: [ln(H/L)]² / (4 ln 2)</p>
+              <p>GK: 0.5[ln(H/L)]² − (2 ln 2 − 1)[ln(C/O)]²</p>
+              <p>RS: u(u − c) + d(d − c), u=ln(H/O), d=ln(L/O), c=ln(C/O)</p>
+              <p>YZ: k = 0.34 / (1.34 + (N+1)/(N−1)); σ²_YZ = var(g) + k var(c) + (1−k) mean(var_RS)</p>
+              <p>EWMA: σ²_EWMA_t = (1 − λ) var_today + λ σ²_EWMA_&#123;t−1&#125;</p>
+            </div>
+          </div>
+        </details>
+      </div>
+
       {/* Final PI Card */}
       <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-final-pi">
         <h2 className="text-xl font-semibold mb-4">Final Prediction Intervals</h2>
@@ -443,27 +779,30 @@ export default function TimingPage({ params }: TimingPageProps) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div className="bg-gray-50 p-3 rounded">
                 <div className="text-sm text-gray-600">L₁ (Lower)</div>
-                <div className="text-lg font-mono">${currentForecast.L_h.toFixed(2)}</div>
+                <div className="text-lg font-mono">${(currentForecast.L_h || currentForecast.intervals?.L_h || 0).toFixed(2)}</div>
               </div>
               <div className="bg-gray-50 p-3 rounded">
                 <div className="text-sm text-gray-600">U₁ (Upper)</div>
-                <div className="text-lg font-mono">${currentForecast.U_h.toFixed(2)}</div>
+                <div className="text-lg font-mono">${(currentForecast.U_h || currentForecast.intervals?.U_h || 0).toFixed(2)}</div>
               </div>
               <div className="bg-gray-50 p-3 rounded">
                 <div className="text-sm text-gray-600">Band Width</div>
-                <div className="text-lg font-mono">{currentForecast.band_width_bp.toFixed(0)} bp</div>
+                <div className="text-lg font-mono">{(currentForecast.band_width_bp || currentForecast.intervals?.band_width_bp || 0).toFixed(0)} bp</div>
               </div>
               <div className="bg-gray-50 p-3 rounded">
                 <div className="text-sm text-gray-600">Critical z_α</div>
-                <div className="text-lg font-mono">{currentForecast.critical.z_alpha.toFixed(3)}</div>
+                <div className="text-lg font-mono">
+                  {currentForecast.critical?.z_alpha?.toFixed(3) || 
+                   currentForecast.critical?.value?.toFixed(3) || 'N/A'}
+                </div>
               </div>
             </div>
 
             {/* Technical Details */}
             <div className="text-sm text-gray-600 space-y-1">
-              <p><strong>Coverage:</strong> {(currentForecast.params.coverage * 100).toFixed(1)}% • <strong>Horizon:</strong> {currentForecast.params.h}D</p>
-              <p><strong>As-of Date:</strong> {currentForecast.date_t} • <strong>Window:</strong> {currentForecast.params.window} days</p>
-              <p><strong>Drift Shrinkage:</strong> λ = {currentForecast.params.lambda_drift.toFixed(3)}</p>
+              <p><strong>Coverage:</strong> {((currentForecast.params?.coverage || currentForecast.target?.coverage || 0) * 100).toFixed(1)}% • <strong>Horizon:</strong> {currentForecast.params?.h || currentForecast.target?.h || 1}D</p>
+              <p><strong>As-of Date:</strong> {currentForecast.date_t} • <strong>Window:</strong> {currentForecast.params?.window || 'N/A'} days</p>
+              <p><strong>Drift Shrinkage:</strong> λ = {currentForecast.params?.lambda_drift?.toFixed(3) || 'N/A'}</p>
             </div>
           </div>
         ) : (
