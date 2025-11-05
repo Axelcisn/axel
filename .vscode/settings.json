@@ -1,6 +1,8 @@
 {
   "cSpell.enabled": true,
   "cSpell.configFile": "cspell.json",
+  "cSpell.checkLimit": 500,
+  "cSpell.showAutocompleteSuggestions": true,
 
   // Silence CSS "unknown at rule" for Tailwind @tailwind
   "css.lint.unknownAtRules": "ignore",
