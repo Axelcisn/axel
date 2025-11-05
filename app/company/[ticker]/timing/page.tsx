@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { IngestionResult } from '@/lib/types/canonical';
 import { TargetSpec, TargetSpecResult } from '@/lib/types/targetSpec';
 import { ForecastRecord } from '@/lib/forecast/types';
+import { EventRecord } from '@/lib/events/types';
 
 interface TimingPageProps {
   params: {
@@ -55,6 +56,13 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [conformalState, setConformalState] = useState<any>(null);
   const [isApplyingConformal, setIsApplyingConformal] = useState(false);
   const [conformalError, setConformalError] = useState<string | null>(null);
+
+  // Breakout Detection state
+  const [latestEvent, setLatestEvent] = useState<EventRecord | null>(null);
+  const [isDetectingBreakout, setIsDetectingBreakout] = useState(false);
+  const [breakoutError, setBreakoutError] = useState<string | null>(null);
+  const [breakoutDetectDate, setBreakoutDetectDate] = useState('');
+  const [cooldownStatus, setCooldownStatus] = useState<{ok: boolean; inside_count: number; reason?: string} | null>(null);
 
   // Load target spec and latest forecast on mount
   useEffect(() => {
@@ -312,6 +320,103 @@ export default function TimingPage({ params }: TimingPageProps) {
       setIsUploading(false);
     }
   };
+
+  // Breakout Detection Functions
+  const detectBreakoutToday = async () => {
+    setIsDetectingBreakout(true);
+    setBreakoutError(null);
+
+    try {
+      const response = await fetch(`/api/events/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ mode: 'today' }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          setBreakoutError(data.error || 'Cooldown failed or open event exists');
+        } else if (response.status === 422) {
+          setBreakoutError(data.error || 'Cannot verify today yet');
+        } else {
+          throw new Error(data.error || 'Detection failed');
+        }
+        return;
+      }
+
+      setLatestEvent(data.created);
+      if (data.created) {
+        setCooldownStatus({ ok: true, inside_count: 3 });
+      }
+    } catch (err) {
+      setBreakoutError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsDetectingBreakout(false);
+    }
+  };
+
+  const detectBreakoutForDate = async () => {
+    if (!breakoutDetectDate) return;
+
+    setIsDetectingBreakout(true);
+    setBreakoutError(null);
+
+    try {
+      const response = await fetch(`/api/events/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          mode: 'date', 
+          t_date: breakoutDetectDate 
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 409) {
+          setBreakoutError(data.error || 'Cooldown failed or open event exists');
+        } else if (response.status === 422) {
+          setBreakoutError(data.error || 'Missing data for specified date');
+        } else {
+          throw new Error(data.error || 'Detection failed');
+        }
+        return;
+      }
+
+      setLatestEvent(data.created);
+      if (data.created) {
+        setCooldownStatus({ ok: true, inside_count: 3 });
+      }
+    } catch (err) {
+      setBreakoutError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsDetectingBreakout(false);
+    }
+  };
+
+  // Load latest event on mount
+  useEffect(() => {
+    const loadEvent = async () => {
+      try {
+        const response = await fetch(`/api/events/${params.ticker}?recent=1`);
+        if (response.ok) {
+          const data = await response.json();
+          setLatestEvent(data.event);
+        }
+      } catch (error) {
+        console.error('Failed to load latest event:', error);
+      }
+    };
+    
+    loadEvent();
+  }, [params.ticker]);
 
   return (
     <div className="container mx-auto p-6">
@@ -1049,6 +1154,153 @@ export default function TimingPage({ params }: TimingPageProps) {
                 <strong>ACI:</strong> θ&#123;t+1&#125; = θ_t + η ( miss_t − α )
               </div>
             </div>
+          </div>
+        </details>
+      </div>
+
+      {/* Breakout Card */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-breakout">
+        <h2 className="text-xl font-semibold mb-4">Breakout Detection</h2>
+        
+        {/* Controls */}
+        <div className="mb-6 space-y-3">
+          <div className="flex gap-3">
+            <button
+              onClick={detectBreakoutToday}
+              disabled={isDetectingBreakout}
+              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+            >
+              {isDetectingBreakout ? 'Detecting...' : 'Detect Today'}
+            </button>
+            
+            <div className="flex gap-2 items-center">
+              <input
+                type="date"
+                value={breakoutDetectDate}
+                onChange={(e) => setBreakoutDetectDate(e.target.value)}
+                className="px-3 py-2 border rounded"
+              />
+              <button
+                onClick={detectBreakoutForDate}
+                disabled={isDetectingBreakout || !breakoutDetectDate}
+                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+              >
+                Detect for Date
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Error Display */}
+        {breakoutError && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700">
+            {breakoutError}
+          </div>
+        )}
+
+        {/* Event Display */}
+        {latestEvent ? (
+          <div className="space-y-4">
+            {/* Direction and Basic Info */}
+            <div className="p-4 bg-red-50 border border-red-200 rounded-md">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-2xl">
+                  {latestEvent.direction === 1 ? '↑' : '↓'}
+                </span>
+                <div>
+                  <div className="font-semibold">
+                    Breakout {latestEvent.direction === 1 ? 'Up' : 'Down'}
+                  </div>
+                  <div className="text-sm text-gray-600">
+                    {latestEvent.t_date} → {latestEvent.B_date}
+                  </div>
+                </div>
+                {latestEvent.event_open && (
+                  <span className="ml-auto px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">
+                    OPEN
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Magnitude Chips */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-gray-50 p-3 rounded text-center">
+                <div className="text-xs text-gray-600">z_B</div>
+                <div className="font-mono text-lg">{latestEvent.z_B.toFixed(3)}</div>
+              </div>
+              <div className="bg-gray-50 p-3 rounded text-center">
+                <div className="text-xs text-gray-600">z_excess_B</div>
+                <div className="font-mono text-lg">{latestEvent.z_excess_B.toFixed(3)}</div>
+              </div>
+              <div className="bg-gray-50 p-3 rounded text-center">
+                <div className="text-xs text-gray-600">% Outside</div>
+                <div className="font-mono text-lg">{(latestEvent.pct_outside_B * 100).toFixed(1)}%</div>
+              </div>
+              <div className="bg-gray-50 p-3 rounded text-center">
+                <div className="text-xs text-gray-600">ndist_B</div>
+                <div className="font-mono text-lg">{latestEvent.ndist_B.toFixed(3)}</div>
+              </div>
+            </div>
+
+            {/* Vol Regime */}
+            {latestEvent.vol_regime_percentile !== null && (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <div className="text-sm font-medium text-blue-800">
+                  Vol Regime: {(latestEvent.vol_regime_percentile * 100).toFixed(0)}th percentile
+                </div>
+              </div>
+            )}
+
+            {/* Provenance */}
+            <div className="p-3 bg-gray-50 rounded-md">
+              <div className="text-sm space-y-1">
+                <div>
+                  <strong>Method:</strong> {latestEvent.method_provenance.base_method}
+                  {latestEvent.method_provenance.conformal_mode && ` + Conformal:${latestEvent.method_provenance.conformal_mode}`}
+                </div>
+                <div>
+                  <strong>Coverage:</strong> {(latestEvent.method_provenance.coverage_nominal * 100).toFixed(1)}%
+                </div>
+                <div>
+                  <strong>Critical:</strong> {latestEvent.method_provenance.critical.type} = {latestEvent.method_provenance.critical.value.toFixed(3)}
+                  {latestEvent.method_provenance.critical.df && ` (df=${latestEvent.method_provenance.critical.df})`}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 bg-green-50 border border-green-200 rounded-md text-green-700">
+            No breakout detected (price inside band)
+          </div>
+        )}
+
+        {/* Cool-down Status */}
+        {cooldownStatus && (
+          <div className="mt-4 p-3 bg-gray-50 rounded-md">
+            <div className="text-sm">
+              <strong>Cool-down (K_inside=3):</strong> {cooldownStatus.ok ? '✅ Pass' : '❌ Fail'}
+              {cooldownStatus.reason && ` (${cooldownStatus.reason})`}
+              <div className="text-xs text-gray-600 mt-1">
+                Consecutive in-band days: {cooldownStatus.inside_count}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Formulas Tooltip */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-blue-600 hover:text-blue-800">
+            📖 Formulas & Rules
+          </summary>
+          <div className="mt-2 p-3 bg-gray-50 rounded text-xs space-y-1">
+            <div><strong>outside_1d</strong> = (S_t+1 &lt; L_1) OR (S_t+1 &gt; U_1)</div>
+            <div><strong>z_B</strong> = [ ln(S_t+1) − ( ln(S_t) + mu_star_used ) ] / s_t</div>
+            <div><strong>z_excess_B</strong> = |z_B| − c</div>
+            <div><strong>pct_outside_B</strong> = (L_1 − S_t+1)/L_1 (down) OR (S_t+1 − U_1)/U_1 (up)</div>
+            <div><strong>ndist_B</strong> = | ln(S_t+1) − m_t(1) | / (c * s_t)</div>
+            <div><strong>vol_regime_percentile</strong> = Percentile( σ_t+1|t vs trailing 3y )</div>
+            <div><strong>Cool-down:</strong> K_inside = 3 in-band days required before a new event.</div>
           </div>
         </details>
       </div>

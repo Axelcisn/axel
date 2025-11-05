@@ -7,7 +7,9 @@ const FORECASTS_DIR = path.join(DATA_ROOT, 'forecasts');
 
 export async function saveForecast(record: ForecastRecord): Promise<string> {
   const symbolDir = path.join(FORECASTS_DIR, record.symbol);
-  const filename = `${record.date_t}-gbm.json`;
+  // Generate filename based on method: date-method.json (e.g., 2025-11-06-Conformal-CQR.json)
+  const methodSlug = record.method.replace(/[^a-zA-Z0-9]/g, '-');
+  const filename = `${record.date_t}-${methodSlug}.json`;
   const filePath = path.join(symbolDir, filename);
   
   // Ensure directory exists
@@ -41,13 +43,13 @@ export async function getForecast(symbol: string, date_t?: string): Promise<Fore
     } else {
       // Get latest forecast (lexicographic max by filename)
       const files = await fs.promises.readdir(symbolDir);
-      const gbmFiles = files.filter(f => f.endsWith('-gbm.json')).sort();
+      const forecastFiles = files.filter(f => f.match(/^\d{4}-\d{2}-\d{2}-.+\.json$/)).sort();
       
-      if (gbmFiles.length === 0) {
+      if (forecastFiles.length === 0) {
         return null;
       }
       
-      const latestFile = gbmFiles[gbmFiles.length - 1];
+      const latestFile = forecastFiles[forecastFiles.length - 1];
       const filePath = path.join(symbolDir, latestFile);
       const content = await fs.promises.readFile(filePath, 'utf-8');
       return JSON.parse(content) as ForecastRecord;
@@ -62,8 +64,130 @@ export async function listForecasts(symbol: string): Promise<string[]> {
   
   try {
     const files = await fs.promises.readdir(symbolDir);
-    return files.filter(f => f.endsWith('-gbm.json')).sort();
+    return files.filter(f => f.match(/^\d{4}-\d{2}-\d{2}-.+\.json$/)).sort();
   } catch (error) {
     return [];
+  }
+}
+
+/**
+ * Load base forecasts (non-conformal) for conformal calibration
+ */
+export async function loadBaseForecasts(symbol: string, method?: string): Promise<ForecastRecord[]> {
+  const symbolDir = path.join(FORECASTS_DIR, symbol);
+  
+  try {
+    const files = await fs.promises.readdir(symbolDir);
+    const forecastFiles = files
+      .filter(f => f.match(/^\d{4}-\d{2}-\d{2}-.+\.json$/))
+      .filter(f => !f.includes('Conformal')) // Exclude conformal forecasts
+      .sort();
+    
+    if (method) {
+      // Filter by specific method if provided
+      const methodSlug = method.replace(/[^a-zA-Z0-9]/g, '-');
+      forecastFiles.filter(f => f.includes(methodSlug));
+    }
+    
+    const forecasts: ForecastRecord[] = [];
+    for (const file of forecastFiles) {
+      try {
+        const filePath = path.join(symbolDir, file);
+        const content = await fs.promises.readFile(filePath, 'utf-8');
+        const forecast = JSON.parse(content) as ForecastRecord;
+        if (forecast.locked) {
+          forecasts.push(forecast);
+        }
+      } catch (err) {
+        console.warn(`Failed to load forecast ${file}:`, err);
+      }
+    }
+    
+    return forecasts;
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * Prefer the most recent forecast created for that date, across all methods
+ */
+export async function getFinalForecastForDate(symbol: string, date_t: string): Promise<ForecastRecord | null> {
+  const symbolDir = path.join(FORECASTS_DIR, symbol);
+  
+  try {
+    const files = await fs.promises.readdir(symbolDir);
+    const forecastFiles = files
+      .filter(f => f.match(/^\d{4}-\d{2}-\d{2}-.+\.json$/))
+      .filter(f => f.startsWith(date_t))
+      .sort();
+    
+    if (forecastFiles.length === 0) {
+      return null;
+    }
+    
+    // Find the most recent by created_at for this date
+    let latestForecast: ForecastRecord | null = null;
+    let latestCreatedAt = '';
+    
+    for (const file of forecastFiles) {
+      try {
+        const filePath = path.join(symbolDir, file);
+        const content = await fs.promises.readFile(filePath, 'utf-8');
+        const forecast = JSON.parse(content) as ForecastRecord;
+        
+        if (forecast.locked && forecast.created_at > latestCreatedAt) {
+          latestForecast = forecast;
+          latestCreatedAt = forecast.created_at;
+        }
+      } catch (err) {
+        console.warn(`Failed to load forecast ${file}:`, err);
+      }
+    }
+    
+    return latestForecast;
+  } catch (error) {
+    return null;
+  }
+}
+
+/**
+ * Latest by created_at across all methods
+ */
+export async function getLatestFinalForecast(symbol: string): Promise<ForecastRecord | null> {
+  const symbolDir = path.join(FORECASTS_DIR, symbol);
+  
+  try {
+    const files = await fs.promises.readdir(symbolDir);
+    const forecastFiles = files
+      .filter(f => f.match(/^\d{4}-\d{2}-\d{2}-.+\.json$/))
+      .sort();
+    
+    if (forecastFiles.length === 0) {
+      return null;
+    }
+    
+    // Find the most recent by created_at across all dates and methods
+    let latestForecast: ForecastRecord | null = null;
+    let latestCreatedAt = '';
+    
+    for (const file of forecastFiles) {
+      try {
+        const filePath = path.join(symbolDir, file);
+        const content = await fs.promises.readFile(filePath, 'utf-8');
+        const forecast = JSON.parse(content) as ForecastRecord;
+        
+        if (forecast.locked && forecast.created_at > latestCreatedAt) {
+          latestForecast = forecast;
+          latestCreatedAt = forecast.created_at;
+        }
+      } catch (err) {
+        console.warn(`Failed to load forecast ${file}:`, err);
+      }
+    }
+    
+    return latestForecast;
+  } catch (error) {
+    return null;
   }
 }
