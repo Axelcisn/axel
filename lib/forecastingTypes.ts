@@ -3,6 +3,7 @@
 export interface MarketData {
   date: Date;
   timestamp?: Date;  // Alternative field for compatibility
+  symbol?: string;   // Stock symbol (e.g., "AAPL", "GOOGL")
   open: number;
   high: number;
   low: number;

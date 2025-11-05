@@ -1,3 +1,4 @@
+<!-- cspell:words GARCH EWMA ndist cooldown efron Backtest Watchlist -->
 # Momentum Timing — Implementation Checklist (Layout → Logic)
 
 [x] 01 Goals & Scope (this doc) — ACCEPTED

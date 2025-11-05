@@ -1,3 +1,4 @@
+// cspell:words stationarity Bera
 // Mathematical computation service for forecasting models
 import { MarketData, PredictionInterval, VolatilityEstimate } from './forecastingTypes';
 
@@ -219,7 +220,7 @@ export class GBMService {
       const parameters = this.estimateParameters(windowData, windowSize, lambda);
       
       results.push({
-        date: data[i].timestamp,
+        date: data[i].timestamp || data[i].date,
         parameters
       });
     }

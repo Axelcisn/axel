@@ -1,8 +1,9 @@
+// cspell:words Kupiec pvalue Newey Supremum Evals HAC DMtest LRuc LRcc LRind QLR QS SPA MCS
 // Backtesting Framework - Step 8 specification  
 // Comprehensive evaluation of forecasting performance
-import { MarketData } from './forecastingTypes';
-import { GBMForecast } from './mathService';
-import { ConformalResults } from './conformalService';
+import { MarketData } from '@/lib/forecastingTypes';
+import { GBMForecast } from '@/lib/mathService';
+import { ConformalResults, ConformalInterval } from '@/lib/conformalService';
 
 export interface BacktestPeriod {
   start_date: Date;
@@ -240,7 +241,7 @@ export class BacktestingService {
         
         // Find actual data for evaluation
         const forecastIndex = data.findIndex(d => 
-          d.timestamp.getTime() === fc.timestamp.getTime() && d.symbol === symbol
+          (d.timestamp || d.date).getTime() === fc.timestamp.getTime() && d.symbol === symbol
         );
         
         if (forecastIndex === -1) continue;
@@ -262,7 +263,7 @@ export class BacktestingService {
           for (const method of ['icp_symmetric', 'icp_sigma', 'cqr', 'enbpi', 'aci']) {
             if (fc.conformal.intervals && fc.conformal.intervals.length > 0) {
               // Find intervals for this horizon and method
-              const relevantInterval = fc.conformal.intervals.find(interval => 
+              const relevantInterval = fc.conformal.intervals.find((interval: ConformalInterval) => 
                 interval.horizon === k && interval.method.toLowerCase().includes(method.replace('_', ''))
               );
               
@@ -553,7 +554,7 @@ export class BacktestingService {
    * Bai-Perron structural break detection for regime analysis
    */
   private static detectRegimes(data: MarketData[], startDate: Date, endDate: Date): BaiPerronResult {
-    const filteredData = data.filter(d => d.timestamp >= startDate && d.timestamp <= endDate);
+    const filteredData = data.filter(d => (d.timestamp || d.date) >= startDate && (d.timestamp || d.date) <= endDate);
     
     // Calculate returns
     const returns = [];
@@ -565,18 +566,18 @@ export class BacktestingService {
     const n = returns.length;
     const mid = Math.floor(n / 2);
     
-    const breakpoints = [filteredData[mid].timestamp];
+    const breakpoints = [filteredData[mid].timestamp || filteredData[mid].date];
     
     const regimes = [
       {
         start: startDate,
-        end: breakpoints[0],
+        end: breakpoints[0]!,
         mean_return: returns.slice(0, mid).reduce((sum, r) => sum + r, 0) / mid,
         volatility: Math.sqrt(returns.slice(0, mid).reduce((sum, r) => sum + r*r, 0) / mid),
         label: 'bull' as const
       },
       {
-        start: breakpoints[0],
+        start: breakpoints[0]!,
         end: endDate,
         mean_return: returns.slice(mid).reduce((sum, r) => sum + r, 0) / (n - mid),
         volatility: Math.sqrt(returns.slice(mid).reduce((sum, r) => sum + r*r, 0) / (n - mid)),

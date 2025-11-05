@@ -1,3 +1,4 @@
+// cspell:words OHLC Delistings delisted ndist cooldown efron Backtest Watchlist
 'use client';
 
 import { useState, useEffect } from 'react';

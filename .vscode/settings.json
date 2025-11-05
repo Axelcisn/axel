@@ -1,0 +1,12 @@
+{
+  "cSpell.enabled": true,
+  "cSpell.configFile": "cspell.json",
+
+  // Silence CSS "unknown at rule" for Tailwind @tailwind
+  "css.lint.unknownAtRules": "ignore",
+
+  // Make sure Tailwind syntax is recognized in CSS
+  "files.associations": {
+    "*.css": "tailwindcss"
+  }
+}
