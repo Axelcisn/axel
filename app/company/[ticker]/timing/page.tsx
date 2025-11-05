@@ -64,6 +64,15 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [breakoutDetectDate, setBreakoutDetectDate] = useState('');
   const [cooldownStatus, setCooldownStatus] = useState<{ok: boolean; inside_count: number; reason?: string} | null>(null);
 
+  // Continuation Clock state
+  const [stopRule, setStopRule] = useState<'re-entry' | 'sign-flip'>('re-entry');
+  const [kInside, setKInside] = useState<1 | 2>(1);
+  const [tMax, setTMax] = useState(20);
+  const [isTicking, setIsTicking] = useState(false);
+  const [continuationError, setContinuationError] = useState<string | null>(null);
+  const [tickDate, setTickDate] = useState('');
+  const [lastContinuationAction, setLastContinuationAction] = useState<string | null>(null);
+
   // Load target spec and latest forecast on mount
   useEffect(() => {
     loadTargetSpec();
@@ -398,6 +407,130 @@ export default function TimingPage({ params }: TimingPageProps) {
       setBreakoutError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setIsDetectingBreakout(false);
+    }
+  };
+
+  // Continuation Clock Functions
+  const tickToday = async () => {
+    setIsTicking(true);
+    setContinuationError(null);
+
+    const today = new Date().toISOString().split('T')[0];
+
+    try {
+      const response = await fetch(`/api/continuation/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'tick',
+          D_date: today,
+          stop_rule: stopRule,
+          k_inside: kInside,
+          T_max: tMax
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 422) {
+          setContinuationError(data.error || 'No open event or missing data');
+        } else {
+          throw new Error(data.error || 'Tick failed');
+        }
+        return;
+      }
+
+      setLatestEvent(data.updated);
+      setLastContinuationAction(data.action);
+    } catch (err) {
+      setContinuationError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsTicking(false);
+    }
+  };
+
+  const tickForDate = async () => {
+    if (!tickDate) return;
+
+    setIsTicking(true);
+    setContinuationError(null);
+
+    try {
+      const response = await fetch(`/api/continuation/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'tick',
+          D_date: tickDate,
+          stop_rule: stopRule,
+          k_inside: kInside,
+          T_max: tMax
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 422) {
+          setContinuationError(data.error || 'No open event or missing data');
+        } else {
+          throw new Error(data.error || 'Tick failed');
+        }
+        return;
+      }
+
+      setLatestEvent(data.updated);
+      setLastContinuationAction(data.action);
+    } catch (err) {
+      setContinuationError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsTicking(false);
+    }
+  };
+
+  const rescanFromB = async () => {
+    if (!latestEvent) return;
+
+    setIsTicking(true);
+    setContinuationError(null);
+
+    try {
+      const response = await fetch(`/api/continuation/${params.ticker}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: 'rescan',
+          start: latestEvent.B_date,
+          stop_rule: stopRule,
+          k_inside: kInside,
+          T_max: tMax
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 422) {
+          setContinuationError(data.error || 'No open event or missing data');
+        } else {
+          throw new Error(data.error || 'Rescan failed');
+        }
+        return;
+      }
+
+      setLatestEvent(data.updated);
+      setLastContinuationAction(data.action);
+    } catch (err) {
+      setContinuationError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsTicking(false);
     }
   };
 
@@ -1301,6 +1434,210 @@ export default function TimingPage({ params }: TimingPageProps) {
             <div><strong>ndist_B</strong> = | ln(S_t+1) − m_t(1) | / (c * s_t)</div>
             <div><strong>vol_regime_percentile</strong> = Percentile( σ_t+1|t vs trailing 3y )</div>
             <div><strong>Cool-down:</strong> K_inside = 3 in-band days required before a new event.</div>
+          </div>
+        </details>
+      </div>
+
+      {/* Continuation Clock Card */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-continuation-clock">
+        <h2 className="text-xl font-semibold mb-4">Continuation Clock</h2>
+        
+        {/* Controls */}
+        <div className="mb-6 space-y-4">
+          {/* Stop Rule */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Stop Rule</label>
+            <div className="flex gap-4">
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="stopRule"
+                  value="re-entry"
+                  checked={stopRule === 're-entry'}
+                  onChange={(e) => setStopRule(e.target.value as 're-entry')}
+                  className="mr-2"
+                />
+                Re-entry (recommended)
+              </label>
+              <label className="flex items-center">
+                <input
+                  type="radio"
+                  name="stopRule"
+                  value="sign-flip"
+                  checked={stopRule === 'sign-flip'}
+                  onChange={(e) => setStopRule(e.target.value as 'sign-flip')}
+                  className="mr-2"
+                />
+                Sign-flip
+              </label>
+            </div>
+          </div>
+
+          {/* k_inside selector (only for re-entry) */}
+          {stopRule === 're-entry' && (
+            <div>
+              <label className="block text-sm font-medium mb-2">k_inside</label>
+              <select
+                value={kInside}
+                onChange={(e) => setKInside(Number(e.target.value) as 1 | 2)}
+                className="px-3 py-2 border rounded"
+              >
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+              </select>
+            </div>
+          )}
+
+          {/* T_max */}
+          <div>
+            <label className="block text-sm font-medium mb-2">T_max</label>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={tMax}
+              onChange={(e) => setTMax(Number(e.target.value))}
+              className="px-3 py-2 border rounded w-20"
+            />
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={tickToday}
+              disabled={isTicking}
+              className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
+            >
+              {isTicking ? 'Ticking...' : 'Tick Today'}
+            </button>
+            
+            <div className="flex gap-2 items-center">
+              <input
+                type="date"
+                value={tickDate}
+                onChange={(e) => setTickDate(e.target.value)}
+                className="px-3 py-2 border rounded"
+              />
+              <button
+                onClick={tickForDate}
+                disabled={isTicking || !tickDate}
+                className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
+              >
+                Tick Date
+              </button>
+            </div>
+
+            <button
+              onClick={rescanFromB}
+              disabled={isTicking || !latestEvent}
+              className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
+            >
+              Rescan from B
+            </button>
+          </div>
+        </div>
+
+        {/* Error Display */}
+        {continuationError && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700">
+            {continuationError}
+          </div>
+        )}
+
+        {/* Last Action */}
+        {lastContinuationAction && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-700">
+            Last action: {lastContinuationAction}
+          </div>
+        )}
+
+        {/* Event Status Display */}
+        {latestEvent ? (
+          <div className="space-y-4">
+            {latestEvent.event_open ? (
+              // Open Event
+              <div className="p-4 bg-orange-50 border border-orange-200 rounded-md">
+                <div className="font-semibold text-orange-800 mb-2">Event Open - Continuing</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                  <div>
+                    <div className="font-medium">T so far</div>
+                    <div className="font-mono text-lg">{latestEvent.at_risk_days || 0}</div>
+                  </div>
+                  {stopRule === 're-entry' && (
+                    <div>
+                      <div className="font-medium">In-band streak</div>
+                      <div className="font-mono text-lg">{latestEvent.inband_streak || 0}</div>
+                    </div>
+                  )}
+                  <div>
+                    <div className="font-medium">Max z_excess</div>
+                    <div className="font-mono text-lg">{latestEvent.max_z_excess?.toFixed(3) || '0.000'}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">Stop Rule</div>
+                    <div className="text-sm">{latestEvent.stop_rule || 'Not set'}</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              // Closed Event
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
+                <div className="font-semibold text-gray-800 mb-2">
+                  Event {latestEvent.censored ? 'Censored' : 'Stopped'}
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
+                  <div>
+                    <div className="font-medium">T</div>
+                    <div className="font-mono text-lg">{latestEvent.T || 0}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">D_stop</div>
+                    <div className="font-mono">{latestEvent.D_stop || 'N/A'}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">Censored</div>
+                    <div>{latestEvent.censored ? '✅ Yes' : '❌ No'}</div>
+                  </div>
+                  <div>
+                    <div className="font-medium">Reason</div>
+                    <div className="text-xs">{latestEvent.censor_reason || 'Reverted'}</div>
+                  </div>
+                </div>
+                
+                {/* KM Tuple */}
+                <div className="p-3 bg-blue-50 border border-blue-200 rounded">
+                  <div className="font-medium text-blue-800 mb-1">KM Tuple</div>
+                  <div className="font-mono text-sm">
+                    time_i = {latestEvent.T || 0} ; status_i = {latestEvent.censored ? 0 : 1}
+                  </div>
+                  <div className="text-xs text-blue-600 mt-1">
+                    (1 if reverted, 0 if censored)
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-md text-gray-700">
+            No event to track
+          </div>
+        )}
+
+        {/* Note */}
+        <div className="mt-4 p-2 bg-gray-50 rounded text-xs text-gray-600">
+          Non-trading days do not increment T; missing data pauses.
+        </div>
+
+        {/* Formulas Tooltip */}
+        <details className="mt-4">
+          <summary className="cursor-pointer text-sm text-blue-600 hover:text-blue-800">
+            📖 Stop Rules & Formulas
+          </summary>
+          <div className="mt-2 p-3 bg-gray-50 rounded text-xs space-y-1">
+            <div><strong>Stop Rule A (re-entry):</strong> S_D ∈ [L_1(D−1), U_1(D−1)] → T = j − k_inside</div>
+            <div><strong>Stop Rule B (sign-flip):</strong> sign( ln(S_D/S_D−1) ) = −d → T = j − 1</div>
+            <div><strong>Right-censor:</strong> j hits T_max (Type-I) or end_of_sample</div>
+            <div><strong>KM tuple:</strong> time_i = T ; status_i = 1 if reverted else 0</div>
           </div>
         </details>
       </div>

@@ -1,5 +1,7 @@
 export type EventDirection = 1 | -1;  // +1 up, -1 down
 
+export type StopRule = "re-entry" | "sign-flip";
+
 export type EventRecord = {
   id: string;                          // uuid
   symbol: string;
@@ -27,4 +29,15 @@ export type EventRecord = {
   // Engine state:
   event_open: boolean;                 // true on creation (Step 8 will close it)
   created_at: string;                  // ISO
+
+  // NEW (Step 8):
+  stop_rule?: StopRule;                // selected rule at creation or first tick
+  k_inside?: 1 | 2;                    // only for re-entry rule; default 1
+  T?: number;                          // trading-day count (integer)
+  D_stop?: string | null;              // YYYY-MM-DD when event closes/censors
+  censored?: boolean;                  // true if right-censored
+  censor_reason?: "T_max" | "end_of_sample" | null;
+  at_risk_days?: number;               // trading days observed since B (for KM)
+  max_z_excess?: number;               // peak |z|-cutoff while event_open
+  inband_streak?: number;              // helper for re-entry k_inside (0,1,2)
 };
