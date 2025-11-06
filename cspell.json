@@ -9,7 +9,8 @@
     "build/**",
     "coverage/**",
     "data/**",
-    "package-lock.json"
+    "package-lock.json",
+    "tsconfig.tsbuildinfo"
   ],
   "allowCompoundWords": true,
   "words": [
@@ -99,7 +100,24 @@
     "inband",
     "tplus",
     "volRegime",
-    "Nelder"
+    "Nelder",
+    "coef",
+    "Coef",
+    "Kaplan",
+    "Politis",
+    "Abramowitz",
+    "Benjamini",
+    "Hochberg",
+    "Bonferroni",
+    "bonferroni",
+    "Mascheroni",
+    "IPCW",
+    "domained",
+    "covariates",
+    "covariate",
+    "Raphson",
+    "terciles",
+    "trombadaria"
   ],
   "flagWords": []
 }
