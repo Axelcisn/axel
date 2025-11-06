@@ -229,8 +229,13 @@ export async function POST(
         }
       },
       estimates: {
-        S_t,
+        mu_star_hat: 0, // Placeholder for volatility models
+        sigma_hat: sigmaForecast.sigma_1d,
         mu_star_used,
+        window_start: piComposeInput.window_span?.start || date_t,
+        window_end: piComposeInput.window_span?.end || date_t,
+        n: canonicalData.length,
+        S_t,
         sigma_forecast: sigmaForecast.sigma_1d,
         sigma2_forecast: sigmaForecast.sigma2_1d,
         critical_value: critical.value,
