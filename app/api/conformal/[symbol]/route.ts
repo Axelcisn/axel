@@ -113,6 +113,30 @@ export async function POST(
           U_h: U,
           band_width_bp: 10000 * (U / L - 1)
         },
+        provenance: {
+          rng_seed: conformalParams.mode === 'EnbPI' ? null : null, // TODO: Add RNG seed for EnbPI bagging
+          params_snapshot: {
+            mode: conformalParams.mode,
+            domain: conformalParams.domain,
+            cal_window: conformalParams.cal_window,
+            coverage: targetSpec.coverage,
+            h: targetSpec.h,
+            base_method: base_method || 'auto'
+          },
+          regime_tag: null, // TODO: Add regime detection from backtest
+          conformal: {
+            mode: conformalParams.mode,
+            domain: conformalParams.domain,
+            cal_window: conformalParams.cal_window,
+            q_cal: state.params.q_cal,
+            q_cal_scaled: state.params.q_cal_scaled,
+            delta_L: state.params.delta_L,
+            delta_U: state.params.delta_U,
+            eta: state.params.eta,
+            theta: state.params.theta,
+            K: state.params.K
+          }
+        },
         diagnostics: {
           method_source: conformalParams.mode,
           m_log,

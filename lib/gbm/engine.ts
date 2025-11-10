@@ -189,6 +189,18 @@ export async function computeGbmForecast({
     L_h,
     U_h,
     band_width_bp,
+    provenance: {
+      rng_seed: null, // GBM doesn't use randomness
+      params_snapshot: {
+        window,
+        lambda_drift,
+        coverage,
+        h,
+        method: "GBM-CC"
+      },
+      regime_tag: null, // TODO: Add regime detection from backtest
+      conformal: null   // Not a conformal method
+    },
     locked: true,
     created_at: new Date().toISOString()
   };

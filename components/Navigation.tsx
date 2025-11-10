@@ -7,7 +7,10 @@ export default function Navigation() {
   const pathname = usePathname();
 
   const navItems = [
-    { href: '/search', label: 'Search' },
+    { href: '/', label: 'Home' },
+    { href: '/analysis', label: 'Analysis' },
+    { href: '/memory', label: 'Memory' },
+    { href: '/watchlist', label: 'Watchlist' },
   ];
 
   return (

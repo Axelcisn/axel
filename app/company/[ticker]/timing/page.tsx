@@ -1,4 +1,4 @@
-// cspell:words OHLC Delistings delisted ndist cooldown efron Backtest Watchlist
+// cspell:words OHLC Delistings delisted ndist cooldown efron Backtest
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -6,6 +6,20 @@ import { IngestionResult } from '@/lib/types/canonical';
 import { TargetSpec, TargetSpecResult } from '@/lib/types/targetSpec';
 import { ForecastRecord } from '@/lib/forecast/types';
 import { EventRecord } from '@/lib/events/types';
+import { AlertFire } from '@/lib/watchlist/types';
+import { RepairRecord } from '@/lib/types/canonical';
+import AlertsCard from '@/components/AlertsCard';
+import { QAPanel } from '@/components/QAPanel';
+import { formatTicker, getAllExchanges, getExchangesByRegion, getExchangeInfo } from '@/lib/utils/formatTicker';
+import { parseExchange, normalizeTicker } from '@/lib/utils/parseExchange';
+import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
+
+// Client-side type for gates status
+type GateStatus = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+};
 
 interface TimingPageProps {
   params: {
@@ -57,6 +71,30 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isApplyingConformal, setIsApplyingConformal] = useState(false);
   const [conformalError, setConformalError] = useState<string | null>(null);
 
+  // Validation Gates state
+  const [gatesStatus, setGatesStatus] = useState<GateStatus | null>(null);
+  const [isCheckingGates, setIsCheckingGates] = useState(false);
+
+  // Company Registry state
+  const [companyTicker, setCompanyTicker] = useState(params.ticker);
+  const [companyName, setCompanyName] = useState('');
+  const [companyExchange, setCompanyExchange] = useState('NASDAQ');
+  const [availableExchanges, setAvailableExchanges] = useState<string[]>([]);
+  const [exchangesByRegion, setExchangesByRegion] = useState<Record<string, string[]>>({});
+  const [isSavingCompany, setIsSavingCompany] = useState(false);
+  const [companySaveSuccess, setCompanySaveSuccess] = useState(false);
+
+  // Alerts state
+  const [firedAlerts, setFiredAlerts] = useState<AlertFire[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [repairRecords, setRepairRecords] = useState<RepairRecord[]>([]);
+  const [isLoadingRepairs, setIsLoadingRepairs] = useState(false);
+  
+  // Watchlist state
+  const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
+  const [watchlistSuccess, setWatchlistSuccess] = useState(false);
+  const [isInWatchlist, setIsInWatchlist] = useState(false);
+
   // Breakout Detection state
   const [latestEvent, setLatestEvent] = useState<EventRecord | null>(null);
   const [isDetectingBreakout, setIsDetectingBreakout] = useState(false);
@@ -77,7 +115,24 @@ export default function TimingPage({ params }: TimingPageProps) {
   useEffect(() => {
     loadTargetSpec();
     loadLatestForecast();
+    loadCompanyInfo();
   }, [params.ticker]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadCompanyInfo = async () => {
+    try {
+      const response = await fetch(`/api/companies?ticker=${params.ticker}`);
+      if (response.ok) {
+        const company = await response.json();
+        setCompanyName(company.name || '');
+        // Keep ticker in sync with URL param
+        setCompanyTicker(params.ticker);
+      }
+    } catch (error) {
+      console.error('Failed to load company info:', error);
+      // Set default ticker from URL
+      setCompanyTicker(params.ticker);
+    }
+  };
 
   const loadTargetSpec = async () => {
     try {
@@ -108,6 +163,10 @@ export default function TimingPage({ params }: TimingPageProps) {
   };
 
   const generateGbmForecast = async () => {
+    // Check validation gates first
+    const canProceed = await checkGatesBeforeAction('GBM forecast generation');
+    if (!canProceed) return;
+
     setIsGeneratingForecast(true);
     setForecastError(null);
 
@@ -138,6 +197,10 @@ export default function TimingPage({ params }: TimingPageProps) {
   };
 
   const generateVolatilityForecast = async () => {
+    // Check validation gates first
+    const canProceed = await checkGatesBeforeAction('volatility forecast generation');
+    if (!canProceed) return;
+
     setIsGeneratingVolatility(true);
     setVolatilityError(null);
 
@@ -191,6 +254,10 @@ export default function TimingPage({ params }: TimingPageProps) {
   };
 
   const applyConformalPrediction = async () => {
+    // Check validation gates first
+    const canProceed = await checkGatesBeforeAction('conformal prediction');
+    if (!canProceed) return;
+
     setIsApplyingConformal(true);
     setConformalError(null);
 
@@ -330,8 +397,92 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   };
 
+  // Company Registry Functions
+  const saveCompanyInfo = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsSavingCompany(true);
+    setCompanySaveSuccess(false);
+
+    try {
+      const exchangeInfo = getExchangeInfo(companyExchange);
+      const formattedTicker = formatTicker(companyTicker, companyExchange);
+
+      const companyData: CompanyInfo = {
+        ticker: companyTicker,
+        name: companyName,
+        exchange: companyExchange,
+        exchangeInfo: exchangeInfo ? {
+          country: exchangeInfo.country,
+          region: exchangeInfo.region,
+          currency: exchangeInfo.currency,
+          timezone: exchangeInfo.timezone,
+          formattedTicker
+        } : undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const response = await fetch('/api/companies', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(companyData),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to save company');
+      }
+
+      setCompanySaveSuccess(true);
+      setTimeout(() => setCompanySaveSuccess(false), 3000);
+      
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setIsSavingCompany(false);
+    }
+  };
+
+  // Validation Gates Functions
+  const checkGatesBeforeAction = async (actionName: string): Promise<boolean> => {
+    setIsCheckingGates(true);
+    try {
+      const response = await fetch(`/api/validation/gates/${params.ticker}`);
+      if (!response.ok) {
+        throw new Error(`Gates API failed: ${response.status}`);
+      }
+      const gates: GateStatus = await response.json();
+      setGatesStatus(gates);
+      
+      if (!gates.ok) {
+        const errorMsg = `Cannot proceed with ${actionName}:\n${gates.errors.join('\n')}`;
+        alert(errorMsg);
+        return false;
+      }
+      
+      if (gates.warnings.length > 0) {
+        const warningMsg = `Warnings for ${actionName}:\n${gates.warnings.join('\n')}\n\nProceed anyway?`;
+        return confirm(warningMsg);
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('Gates check failed:', err);
+      const proceedAnyway = confirm(`Gates validation failed (${err}). Proceed anyway?`);
+      return proceedAnyway;
+    } finally {
+      setIsCheckingGates(false);
+    }
+  };
+
   // Breakout Detection Functions
   const detectBreakoutToday = async () => {
+    // Check validation gates first
+    const canProceed = await checkGatesBeforeAction('breakout detection');
+    if (!canProceed) return;
+
     setIsDetectingBreakout(true);
     setBreakoutError(null);
 
@@ -370,6 +521,10 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const detectBreakoutForDate = async () => {
     if (!breakoutDetectDate) return;
+
+    // Check validation gates first
+    const canProceed = await checkGatesBeforeAction('breakout detection for date');
+    if (!canProceed) return;
 
     setIsDetectingBreakout(true);
     setBreakoutError(null);
@@ -551,16 +706,314 @@ export default function TimingPage({ params }: TimingPageProps) {
     loadEvent();
   }, [params.ticker]);
 
+  // Watchlist and Alerts Functions
+  const runAlertsNow = async () => {
+    setAlertsLoading(true);
+
+    try {
+      const response = await fetch('/api/alerts/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ symbols: [params.ticker] }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFiredAlerts(data.fired || []);
+      }
+    } catch (err) {
+      console.error('Failed to run alerts:', err);
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  // Check alerts on mount
+  useEffect(() => {
+    const checkFiredAlerts = async () => {
+      setAlertsLoading(true);
+
+      try {
+        const response = await fetch('/api/alerts/run');
+        if (response.ok) {
+          const data = await response.json();
+          setFiredAlerts(data.pending || []);
+        }
+      } catch (err) {
+        console.error('Failed to check fired alerts:', err);
+      } finally {
+        setAlertsLoading(false);
+      }
+    };
+
+    const checkIfInWatchlist = async () => {
+      try {
+        // Check if ticker exists in any watchlist data
+        const response = await fetch('/api/watchlist');
+        if (response.ok) {
+          const data = await response.json();
+          const rows = data.rows || [];
+          const isInList = rows.some((row: any) => row.symbol === params.ticker);
+          setIsInWatchlist(isInList);
+        } else {
+          // If no watchlist data exists yet, check if we should persist from localStorage
+          const savedWatchlistState = localStorage.getItem(`watchlist_${params.ticker}`);
+          if (savedWatchlistState === 'true') {
+            setIsInWatchlist(true);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to check watchlist status:', err);
+        // Fallback to localStorage if API fails
+        const savedWatchlistState = localStorage.getItem(`watchlist_${params.ticker}`);
+        if (savedWatchlistState === 'true') {
+          setIsInWatchlist(true);
+        }
+      }
+    };
+
+    checkFiredAlerts();
+    checkIfInWatchlist();
+  }, [params.ticker]);
+
+  // Function to add ticker to watchlist
+  const addToWatchlist = async () => {
+    setIsAddingToWatchlist(true);
+    
+    try {
+      // Get today's date in YYYY-MM-DD format
+      const today = new Date().toISOString().split('T')[0];
+      
+      const response = await fetch('/api/watchlist', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          symbols: [params.ticker],
+          as_of: today
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add to watchlist');
+      }
+
+      setIsInWatchlist(true);
+      setWatchlistSuccess(true);
+      
+      // Save to localStorage for persistence
+      localStorage.setItem(`watchlist_${params.ticker}`, 'true');
+      
+      // Clear success message after 3 seconds but keep button as "Added"
+      setTimeout(() => setWatchlistSuccess(false), 3000);
+    } catch (err) {
+      console.error('Failed to add to watchlist:', err);
+    } finally {
+      setIsAddingToWatchlist(false);
+    }
+  };
+
+  // Load repairs when uploadResult is available
+  useEffect(() => {
+    const loadRepairsForSymbol = async () => {
+      if (!uploadResult) return;
+      
+      setIsLoadingRepairs(true);
+      
+      try {
+        const response = await fetch(`/api/repairs/${params.ticker}`);
+        if (response.ok) {
+          const repairs = await response.json();
+          setRepairRecords(repairs);
+        }
+      } catch (err) {
+        console.error('Failed to load repairs:', err);
+      } finally {
+        setIsLoadingRepairs(false);
+      }
+    };
+
+    loadRepairsForSymbol();
+  }, [uploadResult, params.ticker]);
+
+  // Initialize exchange data on mount
+  useEffect(() => {
+    const initializeExchangeData = async () => {
+      try {
+        const exchanges = getAllExchanges();
+        const regions = getExchangesByRegion();
+        setAvailableExchanges(exchanges);
+        setExchangesByRegion(regions);
+      } catch (error) {
+        console.error('Failed to load exchange data:', error);
+      }
+    };
+
+    initializeExchangeData();
+  }, []);
+
+  // Load existing company info when ticker changes
+  useEffect(() => {
+    const loadCompanyInfo = async () => {
+      try {
+        const response = await fetch(`/api/companies?ticker=${params.ticker}`);
+        if (response.ok) {
+          const company: CompanyInfo = await response.json();
+          setCompanyName(company.name);
+          setCompanyExchange(company.exchange || 'NASDAQ');
+        }
+      } catch (error) {
+        console.error('Failed to load company info:', error);
+      }
+    };
+
+    if (params.ticker) {
+      loadCompanyInfo();
+    }
+  }, [params.ticker]);
+
   return (
     <div className="container mx-auto p-6">
-      <h1 className="text-3xl font-bold mb-6">Momentum Timing - {params.ticker}</h1>
-      
-      {/* Provenance */}
-      {targetSpecResult && (
-        <div className="mb-4 p-2 bg-gray-50 rounded text-sm text-gray-700">
-          Target: {targetSpecResult.spec.variable} @ {(targetSpecResult.spec.coverage * 100).toFixed(1)}% • h={targetSpecResult.spec.h} • cutoff: t→t+1 (TZ: {targetSpecResult.spec.exchange_tz})
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-3xl font-bold">Momentum Timing - {params.ticker}</h1>
+        <div className="flex items-center gap-3">
+          {watchlistSuccess && (
+            <span className="text-green-600 text-sm font-medium">
+              ✓ Added to Watchlist
+            </span>
+          )}
+          <button
+            onClick={addToWatchlist}
+            disabled={isAddingToWatchlist || isInWatchlist}
+            className={`flex items-center gap-2 px-4 py-2 rounded-md transition-colors ${
+              isInWatchlist 
+                ? 'bg-green-600 text-white cursor-default' 
+                : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed'
+            }`}
+            title={isInWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
+          >
+            <span className="text-lg">{isInWatchlist ? '✓' : '+'}</span>
+            <span className="text-sm font-medium">
+              {isAddingToWatchlist ? 'Adding...' : isInWatchlist ? 'Added' : 'Watchlist'}
+            </span>
+          </button>
         </div>
-      )}
+      </div>
+      
+      {/* Upload Data */}
+      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm">
+        <h2 className="text-xl font-semibold mb-4">Upload Data</h2>
+        
+        {/* Company Information Form */}
+        <form onSubmit={saveCompanyInfo} className="mb-6 p-4 bg-gray-50 rounded-lg">
+          <h3 className="text-lg font-medium mb-3">Company Information</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="companyTicker" className="block text-sm font-medium mb-2">
+                Ticker *
+              </label>
+              <input
+                type="text"
+                id="companyTicker"
+                name="companyTicker"
+                value={companyTicker}
+                onChange={(e) => setCompanyTicker(e.target.value.toUpperCase())}
+                required
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md uppercase"
+                placeholder="e.g., AAPL"
+              />
+            </div>
+            <div>
+              <label htmlFor="companyName" className="block text-sm font-medium mb-2">
+                Company Name *
+              </label>
+              <input
+                type="text"
+                id="companyName"
+                name="companyName"
+                value={companyName}
+                onChange={(e) => setCompanyName(e.target.value)}
+                required
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+                placeholder="e.g., Apple Inc."
+              />
+            </div>
+            <div>
+              <label htmlFor="companyExchange" className="block text-sm font-medium mb-2">
+                Exchange *
+              </label>
+              <select
+                id="companyExchange"
+                name="companyExchange"
+                value={companyExchange}
+                onChange={(e) => setCompanyExchange(e.target.value)}
+                required
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md"
+              >
+                <option value="">Select Exchange</option>
+                {Object.entries(exchangesByRegion).map(([region, exchanges]) => (
+                  <optgroup key={region} label={region}>
+                    {exchanges.map((exchange) => {
+                      const exchangeInfo = getExchangeInfo(exchange);
+                      return (
+                        <option key={exchange} value={exchange}>
+                          {exchange} ({exchangeInfo?.country} - {exchangeInfo?.currency})
+                        </option>
+                      );
+                    })}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-4">
+            <button
+              type="submit"
+              disabled={isSavingCompany || !companyTicker || !companyName || !companyExchange}
+              className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSavingCompany ? 'Saving...' : 'Save Company'}
+            </button>
+            {companySaveSuccess && (
+              <span className="text-green-600 text-sm font-medium">✓ Company saved successfully!</span>
+            )}
+          </div>
+        </form>
+
+        {/* File Upload Form */}
+        <form onSubmit={handleFileUpload} className="space-y-4">
+          <h3 className="text-lg font-medium">Upload Data File</h3>
+          <div>
+            <label htmlFor="file" className="block text-sm font-medium mb-2">
+              Excel File (.xlsx)
+            </label>
+            <input
+              type="file"
+              id="file"
+              name="file"
+              accept=".xlsx"
+              required
+              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isUploading}
+            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isUploading ? 'Processing...' : 'Upload & Process'}
+          </button>
+        </form>
+        
+        {error && (
+          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
+            <p className="text-red-600">{error}</p>
+          </div>
+        )}
+      </div>
       
       {/* Forecast Target Card */}
       <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-forecast-target">
@@ -1701,51 +2154,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           </div>
         )}
       </div>
-      
-      {/* Upload Section */}
-      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm">
-        <h2 className="text-xl font-semibold mb-4">Upload Data</h2>
-        <form onSubmit={handleFileUpload} className="space-y-4">
-          <div>
-            <label htmlFor="file" className="block text-sm font-medium mb-2">
-              Excel File (.xlsx)
-            </label>
-            <input
-              type="file"
-              id="file"
-              name="file"
-              accept=".xlsx"
-              required
-              className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-            />
-          </div>
-          <div>
-            <label htmlFor="exchange" className="block text-sm font-medium mb-2">
-              Exchange (optional)
-            </label>
-            <input
-              type="text"
-              id="exchange"
-              name="exchange"
-              placeholder="e.g., NASDAQ, NYSE"
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={isUploading}
-            className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
-          >
-            {isUploading ? 'Processing...' : 'Upload & Process'}
-          </button>
-        </form>
-        
-        {error && (
-          <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-md">
-            <p className="text-red-600">{error}</p>
-          </div>
-        )}
-      </div>
 
       {/* Data Quality Card */}
       {uploadResult && (
@@ -1841,6 +2249,41 @@ export default function TimingPage({ params }: TimingPageProps) {
                   <p>Audit: {uploadResult.paths.audit}</p>
                 </div>
               </div>
+
+              {/* Repairs Section */}
+              {uploadResult.badges.repairsCount > 0 && (
+                <div>
+                  <h4 className="font-medium">Repairs ({uploadResult.badges.repairsCount})</h4>
+                  {isLoadingRepairs ? (
+                    <p className="text-gray-500 text-xs">Loading repairs...</p>
+                  ) : repairRecords.length > 0 ? (
+                    <div className="space-y-1 text-xs">
+                      {repairRecords.slice(0, 10).map((repair, idx) => (
+                        <div key={idx} className="bg-yellow-50 p-2 rounded border">
+                          <p><strong>{repair.date}</strong> - {repair.field}</p>
+                          <p className="text-gray-600">{repair.oldValue} → {repair.newValue}</p>
+                          <p className="text-xs text-gray-500">{repair.reason}</p>
+                        </div>
+                      ))}
+                      {repairRecords.length > 10 && (
+                        <p className="text-gray-500">+ {repairRecords.length - 10} more repairs</p>
+                      )}
+                      <div className="mt-2">
+                        <a 
+                          href={uploadResult.paths.audit} 
+                          className="text-blue-600 hover:text-blue-800 text-xs"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          📄 View full repairs log
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-xs">No repair records found</p>
+                  )}
+                </div>
+              )}
             </div>
           </details>
 
@@ -1856,6 +2299,42 @@ export default function TimingPage({ params }: TimingPageProps) {
               <p><strong>Delistings:</strong> keep history; mark delisted=true if applicable</p>
             </div>
           </details>
+        </div>
+      )}
+
+      {/* QA Testing Panel */}
+      <QAPanel className="mb-8" />
+
+      {/* Validation Gates Status */}
+      {gatesStatus && (
+        <div className={`mb-8 p-4 border rounded-lg ${
+          gatesStatus.ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
+        }`} data-testid="validation-gates-status">
+          <h3 className="font-medium mb-2">
+            Validation Gates: {gatesStatus.ok ? '✅ All Clear' : '❌ Issues Found'}
+          </h3>
+          
+          {gatesStatus.errors.length > 0 && (
+            <div className="mb-2">
+              <p className="text-sm font-medium text-red-800 mb-1">Errors:</p>
+              <ul className="text-sm text-red-700 list-disc list-inside">
+                {gatesStatus.errors.map((error, idx) => (
+                  <li key={idx}>{error}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          
+          {gatesStatus.warnings.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-yellow-800 mb-1">Warnings:</p>
+              <ul className="text-sm text-yellow-700 list-disc list-inside">
+                {gatesStatus.warnings.map((warning, idx) => (
+                  <li key={idx}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </div>

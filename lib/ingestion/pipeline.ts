@@ -1,6 +1,6 @@
 import { IngestionResult, CanonicalRow, CanonicalTableMeta, RepairRecord } from '../types/canonical';
 import { resolveExchangeAndTZ, listTradingDays } from '../calendar/service';
-import { parseExcelToRows, mapColumns } from './excel';
+import { parseExcelToRows, parseExcelFromBuffer, mapColumns } from './excel';
 import { computeLogReturns, sortAndDedup, validateRows } from '../validation/rules';
 import { computeBadges } from '../validation/badges';
 import { saveRaw, saveCanonical, appendRepairs } from '../storage/fsStore';
@@ -32,14 +32,23 @@ export async function ingestExcel({
   // Resolve {exchange, tz}
   const { exchange: resolvedExchange, tz } = await resolveExchangeAndTZ(resolvedSymbol, exchange);
 
-  // Save raw file first if buffer provided
+  // Parse & map rows - use buffer directly when available to avoid file access issues
+  let rawRows: Record<string, any>[];
   let rawPath = filePath || '';
+  
   if (fileBuffer) {
+    // Parse directly from buffer
+    rawRows = await parseExcelFromBuffer(fileBuffer);
+    // Also save raw file for audit trail
     rawPath = await saveRaw(fileBuffer, resolvedSymbol);
+  } else if (filePath) {
+    // Parse from file path
+    rawRows = await parseExcelToRows(filePath);
+    rawPath = filePath;
+  } else {
+    throw new Error('Either fileBuffer or filePath must be provided');
   }
 
-  // Parse & map rows
-  const rawRows = await parseExcelToRows(rawPath);
   const mappedRows = mapColumns(rawRows);
 
   // Sort & dedup

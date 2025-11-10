@@ -1,0 +1,33 @@
+{
+  "rows": [
+    {
+      "date": "1970-01-01",
+      "open": 164.48,
+      "high": 165.4,
+      "low": 158.08,
+      "close": 159.75,
+      "adj_close": 159.75,
+      "volume": 31831860,
+      "split_factor": null,
+      "cash_dividend": null,
+      "valid": true,
+      "issues": [
+        "adj_close_filled_from_close"
+      ],
+      "r": null
+    }
+  ],
+  "meta": {
+    "symbol": "AMD",
+    "exchange": "NASDAQ",
+    "exchange_tz": "America/New_York",
+    "calendar_span": {
+      "start": "1970-01-01",
+      "end": "1970-01-01"
+    },
+    "rows": 1,
+    "missing_trading_days": [],
+    "invalid_rows": 0,
+    "generated_at": "2025-11-06T07:31:25.006Z"
+  }
+}

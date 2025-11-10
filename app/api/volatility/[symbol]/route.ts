@@ -247,6 +247,17 @@ export async function POST(
         U_h: piResult.U_h,
         band_width_bp: piResult.band_width_bp
       },
+      provenance: {
+        rng_seed: null, // Most volatility models don't use randomness (except EnbPI)
+        params_snapshot: {
+          model,
+          h: targetSpec.h,
+          coverage: targetSpec.coverage,
+          ...volParams // Include all model-specific parameters
+        },
+        regime_tag: null, // TODO: Add regime detection from backtest
+        conformal: null   // Not a conformal method yet
+      },
       diagnostics: {
         method_source: model,
         m_log: piResult.m_log,

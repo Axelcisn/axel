@@ -66,3 +66,19 @@ export async function appendRepairs(symbol: string, repairs: RepairRecord[]): Pr
   
   return filePath;
 }
+
+/**
+ * Load repair records for a symbol
+ */
+export async function loadRepairs(symbol: string): Promise<RepairRecord[]> {
+  const filename = `repairs-${symbol}.json`;
+  const filePath = path.join(DATA_ROOT, 'audit', filename);
+  
+  try {
+    const content = await fs.promises.readFile(filePath, 'utf-8');
+    return JSON.parse(content) as RepairRecord[];
+  } catch (error) {
+    // File doesn't exist or is invalid - return empty array
+    return [];
+  }
+}

@@ -45,6 +45,23 @@ export type ForecastRecord = {
   U_h?: number;              // Legacy - for backwards compatibility
   band_width_bp?: number;    // Legacy - for backwards compatibility
   diagnostics?: Record<string, any>; // Additional diagnostics
+  provenance?: {
+    rng_seed?: string | null;            // if any randomness used (e.g., EnbPI bagging, bootstrap)
+    params_snapshot: Record<string, any>;// full params used (window, λ, dist, df, EWMA λ, etc.)
+    regime_tag?: { id?: number|null, break_date?: string|null } | null;  // if latest regime detected
+    conformal?: {
+      mode?: string|null,
+      domain?: "log"|"price"|null,
+      cal_window?: number|null,
+      q_cal?: number|null,
+      q_cal_scaled?: number|null,
+      delta_L?: number|null,
+      delta_U?: number|null,
+      eta?: number|null,
+      theta?: number|null,
+      K?: number|null
+    } | null;
+  };
   locked: true;              // immutability flag
   created_at: string;        // ISO
 };

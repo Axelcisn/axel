@@ -1,0 +1,308 @@
+{
+  "NASDAQ": {
+    "country": "USA",
+    "region": "North America",
+    "suffix": "",
+    "prefix": "NASDAQ:",
+    "timezone": "America/New_York",
+    "currency": "USD",
+    "altNames": ["Nasdaq Stock Market", "US Tech", "NASDAQ Global Select Market"]
+  },
+  "NYSE": {
+    "country": "USA",
+    "region": "North America",
+    "suffix": "",
+    "prefix": "XNYS:",
+    "timezone": "America/New_York",
+    "currency": "USD",
+    "altNames": ["New York Stock Exchange", "NYSE American"]
+  },
+  "TSX": {
+    "country": "Canada",
+    "region": "North America",
+    "suffix": ".TO",
+    "prefix": "XTSE:",
+    "timezone": "America/Toronto",
+    "currency": "CAD",
+    "altNames": ["Toronto Stock Exchange", "TSX Venture Exchange"]
+  },
+  "ASX": {
+    "country": "Australia",
+    "region": "Asia-Pacific",
+    "suffix": ".AX",
+    "prefix": "XASX:",
+    "timezone": "Australia/Sydney",
+    "currency": "AUD",
+    "altNames": ["Australian Securities Exchange", "All Ordinaries"]
+  },
+  "LSE": {
+    "country": "United Kingdom",
+    "region": "Europe",
+    "suffix": ".L",
+    "prefix": "XLON:",
+    "timezone": "Europe/London",
+    "currency": "GBP",
+    "altNames": ["London Stock Exchange", "FTSE"]
+  },
+  "BSE": {
+    "country": "India",
+    "region": "Asia-Pacific",
+    "suffix": ".BO",
+    "prefix": "XBOM:",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "altNames": ["Bombay Stock Exchange", "BSE Sensex"]
+  },
+  "NSE": {
+    "country": "India",
+    "region": "Asia-Pacific",
+    "suffix": ".NS",
+    "prefix": "XNSE:",
+    "timezone": "Asia/Kolkata",
+    "currency": "INR",
+    "altNames": ["National Stock Exchange of India", "NSE Nifty"]
+  },
+  "HKEX": {
+    "country": "Hong Kong",
+    "region": "Asia-Pacific",
+    "suffix": ".HK",
+    "prefix": "XHKG:",
+    "timezone": "Asia/Hong_Kong",
+    "currency": "HKD",
+    "altNames": ["Hong Kong Stock Exchange", "Hang Seng"]
+  },
+  "TSE": {
+    "country": "Japan",
+    "region": "Asia-Pacific",
+    "suffix": ".T",
+    "prefix": "XTKS:",
+    "timezone": "Asia/Tokyo",
+    "currency": "JPY",
+    "altNames": ["Tokyo Stock Exchange", "Nikkei"]
+  },
+  "SGX": {
+    "country": "Singapore",
+    "region": "Asia-Pacific",
+    "suffix": ".SI",
+    "prefix": "XSES:",
+    "timezone": "Asia/Singapore",
+    "currency": "SGD",
+    "altNames": ["Singapore Exchange", "Straits Times Index"]
+  },
+  "BME": {
+    "country": "Spain",
+    "region": "Europe",
+    "suffix": ".MC",
+    "prefix": "BMAD:",
+    "timezone": "Europe/Madrid",
+    "currency": "EUR",
+    "altNames": ["Bolsa de Madrid", "IBEX 35"]
+  },
+  "Euronext_Paris": {
+    "country": "France",
+    "region": "Europe",
+    "suffix": ".PA",
+    "prefix": "XPAR:",
+    "timezone": "Europe/Paris",
+    "currency": "EUR",
+    "altNames": ["Euronext Paris", "CAC 40"]
+  },
+  "Euronext_Amsterdam": {
+    "country": "Netherlands",
+    "region": "Europe",
+    "suffix": ".AS",
+    "prefix": "XAMS:",
+    "timezone": "Europe/Amsterdam",
+    "currency": "EUR",
+    "altNames": ["Euronext Amsterdam", "AEX"]
+  },
+  "Euronext_Brussels": {
+    "country": "Belgium",
+    "region": "Europe",
+    "suffix": ".BR",
+    "prefix": "XBRU:",
+    "timezone": "Europe/Brussels",
+    "currency": "EUR",
+    "altNames": ["Euronext Brussels", "BEL 20"]
+  },
+  "Euronext_Dublin": {
+    "country": "Ireland",
+    "region": "Europe",
+    "suffix": ".IR",
+    "prefix": "XDUB:",
+    "timezone": "Europe/Dublin",
+    "currency": "EUR",
+    "altNames": ["Euronext Dublin", "ISEQ"]
+  },
+  "Euronext_Lisbon": {
+    "country": "Portugal",
+    "region": "Europe",
+    "suffix": ".LS",
+    "prefix": "XLIS:",
+    "timezone": "Europe/Lisbon",
+    "currency": "EUR",
+    "altNames": ["Euronext Lisbon", "PSI 20"]
+  },
+  "B3": {
+    "country": "Brazil",
+    "region": "Latin America",
+    "suffix": ".SA",
+    "prefix": "BVMF:",
+    "timezone": "America/Sao_Paulo",
+    "currency": "BRL",
+    "altNames": ["Brasil Bolsa Balcão", "Bovespa", "Ibovespa"]
+  },
+  "SSE": {
+    "country": "China",
+    "region": "Asia-Pacific",
+    "suffix": ".SS",
+    "prefix": "XSHG:",
+    "timezone": "Asia/Shanghai",
+    "currency": "CNY",
+    "altNames": ["Shanghai Stock Exchange", "SSE Composite"]
+  },
+  "SZSE": {
+    "country": "China",
+    "region": "Asia-Pacific",
+    "suffix": ".SZ",
+    "prefix": "XSHE:",
+    "timezone": "Asia/Shanghai",
+    "currency": "CNY",
+    "altNames": ["Shenzhen Stock Exchange", "SZSE Component"]
+  },
+  "XETRA": {
+    "country": "Germany",
+    "region": "Europe",
+    "suffix": ".DE",
+    "prefix": "XETR:",
+    "timezone": "Europe/Berlin",
+    "currency": "EUR",
+    "altNames": ["Deutsche Börse", "DAX", "Frankfurt Stock Exchange"]
+  },
+  "SIX": {
+    "country": "Switzerland",
+    "region": "Europe",
+    "suffix": ".SW",
+    "prefix": "XSWX:",
+    "timezone": "Europe/Zurich",
+    "currency": "CHF",
+    "altNames": ["SIX Swiss Exchange", "SMI"]
+  },
+  "MOEX": {
+    "country": "Russia",
+    "region": "Europe",
+    "suffix": ".ME",
+    "prefix": "MISX:",
+    "timezone": "Europe/Moscow",
+    "currency": "RUB",
+    "altNames": ["Moscow Exchange", "RTS Index"]
+  },
+  "TASE": {
+    "country": "Israel",
+    "region": "Middle East",
+    "suffix": ".TA",
+    "prefix": "XTAE:",
+    "timezone": "Asia/Jerusalem",
+    "currency": "ILS",
+    "altNames": ["Tel Aviv Stock Exchange", "TA-35"]
+  },
+  "JSE": {
+    "country": "South Africa",
+    "region": "Africa",
+    "suffix": ".JO",
+    "prefix": "XJSE:",
+    "timezone": "Africa/Johannesburg",
+    "currency": "ZAR",
+    "altNames": ["Johannesburg Stock Exchange", "JSE All Share"]
+  },
+  "KRX": {
+    "country": "South Korea",
+    "region": "Asia-Pacific",
+    "suffix": ".KS",
+    "prefix": "XKRX:",
+    "timezone": "Asia/Seoul",
+    "currency": "KRW",
+    "altNames": ["Korea Exchange", "KOSPI", "KOSDAQ"]
+  },
+  "SET": {
+    "country": "Thailand",
+    "region": "Asia-Pacific",
+    "suffix": ".BK",
+    "prefix": "XBKK:",
+    "timezone": "Asia/Bangkok",
+    "currency": "THB",
+    "altNames": ["Stock Exchange of Thailand", "SET Index"]
+  },
+  "IDX": {
+    "country": "Indonesia",
+    "region": "Asia-Pacific",
+    "suffix": ".JK",
+    "prefix": "XIDX:",
+    "timezone": "Asia/Jakarta",
+    "currency": "IDR",
+    "altNames": ["Indonesia Stock Exchange", "Jakarta Composite Index"]
+  },
+  "PSE": {
+    "country": "Philippines",
+    "region": "Asia-Pacific",
+    "suffix": ".PS",
+    "prefix": "XPHS:",
+    "timezone": "Asia/Manila",
+    "currency": "PHP",
+    "altNames": ["Philippine Stock Exchange", "PSEi"]
+  },
+  "BURSA": {
+    "country": "Malaysia",
+    "region": "Asia-Pacific",
+    "suffix": ".KL",
+    "prefix": "XKLS:",
+    "timezone": "Asia/Kuala_Lumpur",
+    "currency": "MYR",
+    "altNames": ["Bursa Malaysia", "KLCI"]
+  },
+  "TWSE": {
+    "country": "Taiwan",
+    "region": "Asia-Pacific",
+    "suffix": ".TW",
+    "prefix": "XTAI:",
+    "timezone": "Asia/Taipei",
+    "currency": "TWD",
+    "altNames": ["Taiwan Stock Exchange", "TAIEX"]
+  },
+  "BVL": {
+    "country": "Peru",
+    "region": "Latin America",
+    "suffix": ".LM",
+    "prefix": "XLIM:",
+    "timezone": "America/Lima",
+    "currency": "PEN",
+    "altNames": ["Bolsa de Valores de Lima", "S&P/BVL Peru General Index"]
+  },
+  "BCS": {
+    "country": "Chile",
+    "region": "Latin America",
+    "suffix": ".SN",
+    "prefix": "XSGO:",
+    "timezone": "America/Santiago",
+    "currency": "CLP",
+    "altNames": ["Bolsa de Comercio de Santiago", "IPSA"]
+  },
+  "BMV": {
+    "country": "Mexico",
+    "region": "Latin America",
+    "suffix": ".MX",
+    "prefix": "XMEX:",
+    "timezone": "America/Mexico_City",
+    "currency": "MXN",
+    "altNames": ["Bolsa Mexicana de Valores", "IPC"]
+  },
+  "CSE": {
+    "country": "Canada",
+    "region": "North America",
+    "suffix": ".CN",
+    "prefix": "XCNQ:",
+    "timezone": "America/Vancouver",
+    "currency": "CAD",
+    "altNames": ["Canadian Securities Exchange", "CSE Composite"]
+  }
+}

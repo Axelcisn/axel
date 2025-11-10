@@ -11,6 +11,16 @@ export async function parseExcelToRows(filePath: string): Promise<Record<string,
   return rawData;
 }
 
+export async function parseExcelFromBuffer(buffer: Buffer): Promise<Record<string, any>[]> {
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+  const firstSheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[firstSheetName];
+  
+  // Convert to array of objects
+  const rawData = XLSX.utils.sheet_to_json(worksheet) as Record<string, any>[];
+  return rawData;
+}
+
 export function mapColumns(raw: Record<string, any>[]): CanonicalRow[] {
   return raw.map(row => {
     // Find columns with case-insensitive matching
