@@ -1,6 +1,6 @@
 import { IngestionResult, CanonicalRow, CanonicalTableMeta, RepairRecord } from '../types/canonical';
 import { resolveExchangeAndTZ, listTradingDays } from '../calendar/service';
-import { parseExcelToRows, parseExcelFromBuffer, mapColumns } from './excel';
+import { parseExcelToRows, parseExcelFromBuffer, parseFileFromBuffer, mapColumns } from './excel';
 import { computeLogReturns, sortAndDedup, validateRows } from '../validation/rules';
 import { computeBadges } from '../validation/badges';
 import { saveRaw, saveCanonical, appendRepairs } from '../storage/fsStore';
@@ -8,18 +8,20 @@ import { saveRaw, saveCanonical, appendRepairs } from '../storage/fsStore';
 export async function ingestExcel({
   filePath,
   fileBuffer,
+  fileName,
   symbol,
   exchange
 }: {
   filePath?: string;
   fileBuffer?: Buffer;
+  fileName?: string;
   symbol?: string;
   exchange?: string;
 }): Promise<IngestionResult> {
   // Resolve symbol (param or from filename prefix)
   let resolvedSymbol = symbol;
-  if (!resolvedSymbol && filePath) {
-    const filename = filePath.split('/').pop() || '';
+  if (!resolvedSymbol) {
+    const filename = fileName || (filePath ? filePath.split('/').pop() : '') || '';
     const match = filename.match(/^([A-Z]+)/);
     if (match) {
       resolvedSymbol = match[1];
@@ -37,12 +39,13 @@ export async function ingestExcel({
   let rawPath = filePath || '';
   
   if (fileBuffer) {
-    // Parse directly from buffer
-    rawRows = await parseExcelFromBuffer(fileBuffer);
+    // Parse directly from buffer - determine if Excel or CSV from filename
+    const filename = fileName || (filePath ? filePath.split('/').pop() : '') || 'unknown';
+    rawRows = await parseFileFromBuffer(fileBuffer, filename);
     // Also save raw file for audit trail
     rawPath = await saveRaw(fileBuffer, resolvedSymbol);
   } else if (filePath) {
-    // Parse from file path
+    // Parse from file path - only handles Excel files currently
     rawRows = await parseExcelToRows(filePath);
     rawPath = filePath;
   } else {
@@ -70,7 +73,7 @@ export async function ingestExcel({
   // Detect calendar gaps (weekday approximation)
   const expectedDays = listTradingDays(tz, calendarSpan.start, calendarSpan.end);
   const actualDays = new Set(dates);
-  const missingTradingDays = expectedDays.filter(day => !actualDays.has(day));
+  const missingTradingDays = expectedDays.filter(day => !actualDays.has(day.date)).map(day => day.date);
 
   // Compute counts
   const inputCount = rawRows.length;

@@ -64,4 +64,5 @@ export type ForecastRecord = {
   };
   locked: true;              // immutability flag
   created_at: string;        // ISO
+  is_active?: boolean;       // Whether this forecast is currently active for its date
 };

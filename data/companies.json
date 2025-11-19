@@ -5,5 +5,19 @@
     "exchange": "NASDAQ",
     "createdAt": "2025-11-09T23:54:23.789Z",
     "updatedAt": "2025-11-09T23:54:23.789Z"
+  },
+  "PLTR": {
+    "ticker": "PLTR",
+    "name": "Palantir Technologies Inc.",
+    "exchange": "NASDAQ",
+    "createdAt": "2025-11-10T14:37:14.994Z",
+    "updatedAt": "2025-11-10T14:37:14.994Z"
+  },
+  "AAPL": {
+    "ticker": "AAPL",
+    "name": "Apple Inc.",
+    "exchange": "NASDAQ",
+    "createdAt": "2025-11-14T04:52:55.852Z",
+    "updatedAt": "2025-11-14T05:45:55.775Z"
   }
 }

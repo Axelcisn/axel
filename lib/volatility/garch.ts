@@ -2,6 +2,36 @@ import { SigmaForecast } from './types';
 import { loadCanonicalData } from '../storage/canonical';
 import { CanonicalRow } from '../types/canonical';
 
+function logGamma(x: number): number {
+  // Lanczos approximation for log-gamma function
+  const g = 7;
+  const c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+    771.32342877765313, -176.61502916214059, 12.507343278686905,
+    -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+  
+  if (x < 0.5) {
+    return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * x)) - logGamma(1 - x);
+  }
+  
+  x -= 1;
+  let a = c[0];
+  for (let i = 1; i < g + 2; i++) {
+    a += c[i] / (x + i);
+  }
+  
+  const t = x + g + 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (x + 0.5) * Math.log(t) - t + Math.log(a);
+}
+
+// standardized Student-t log-density (variance = 1)
+function stdTLogPdf(z: number, df: number): number {
+  // scale so Var(z)=1: s = sqrt((df-2)/df)
+  const s = Math.sqrt((df - 2) / df);
+  const y = z / s;
+  const c = logGamma((df + 1) / 2) - logGamma(df / 2) - 0.5 * Math.log((df - 2) * Math.PI);
+  return c - ((df + 1) / 2) * Math.log(1 + (y * y) / (df - 2));
+}
+
 export interface GarchParams {
   symbol: string;
   date_t?: string;
@@ -61,7 +91,7 @@ export async function fitAndForecastGarch(params: GarchParams): Promise<SigmaFor
   const unconditionalVar = residuals.reduce((sum, r) => sum + r * r, 0) / residuals.length;
   
   // GARCH parameter estimation using QMLE (simplified Nelder-Mead style optimization)
-  const result = estimateGarch(residuals, unconditionalVar, variance_targeting);
+  const result = estimateGarch(residuals, unconditionalVar, variance_targeting, dist, df || undefined);
   
   // Check stationarity
   if (result.alpha + result.beta >= 1) {
@@ -91,7 +121,7 @@ export async function fitAndForecastGarch(params: GarchParams): Promise<SigmaFor
     alpha_plus_beta: result.alpha + result.beta,
     unconditional_var: unconditionalVar,
     dist,
-    ...(dist === 'student-t' && df ? { df } : {})
+    ...(dist === 'student-t' ? { nu: result.df || df } : {})
   };
   
   return {
@@ -113,22 +143,24 @@ interface GarchResult {
 /**
  * Estimate GARCH(1,1) parameters using QMLE
  */
-function estimateGarch(residuals: number[], unconditionalVar: number, varianceTargeting: boolean): GarchResult {
+function estimateGarch(
+  residuals: number[], 
+  unconditionalVar: number, 
+  varianceTargeting: boolean,
+  dist: 'normal' | 'student-t' = 'normal',
+  df?: number
+): GarchResult & { df?: number } {
   const n = residuals.length;
-  
-  // Initial parameter guesses
-  let omega = varianceTargeting ? 0 : unconditionalVar * 0.1;
-  let alpha = 0.05;
-  let beta = 0.9;
-  
-  // Simple grid search optimization (in practice, would use proper BFGS)
-  let bestParams = { omega, alpha, beta };
-  let bestLogLikelihood = -Infinity;
   
   // Grid search over reasonable parameter space
   const alphaRange = [0.01, 0.03, 0.05, 0.07, 0.1, 0.15];
   const betaRange = [0.85, 0.88, 0.9, 0.92, 0.95];
+  const dfGrid = [5, 6, 7, 8, 10, 12, 15, 20, 30]; // small, safe values (df > 2)
   
+  let bestParams: { omega: number, alpha: number, beta: number, df?: number, sigma2_series: number[], loglikelihood: number } = { 
+    omega: 0, alpha: 0, beta: 0, sigma2_series: [], loglikelihood: -Infinity 
+  };
+
   for (const a of alphaRange) {
     for (const b of betaRange) {
       if (a + b >= 0.999) continue; // Ensure stationarity
@@ -136,31 +168,48 @@ function estimateGarch(residuals: number[], unconditionalVar: number, varianceTa
       const w = varianceTargeting ? (1 - a - b) * unconditionalVar : unconditionalVar * 0.1;
       if (w <= 0) continue;
       
-      const { sigma2_series, loglikelihood } = computeGarchLikelihood(residuals, w, a, b);
-      
-      if (loglikelihood > bestLogLikelihood) {
-        bestLogLikelihood = loglikelihood;
-        bestParams = { omega: w, alpha: a, beta: b };
+      if (dist === 'student-t') {
+        // If df provided, use it; otherwise estimate via grid search
+        const dfValues = df ? [df] : dfGrid;
+        
+        for (const d of dfValues) {
+          const { sigma2_series, loglikelihood } = computeGarchLikelihood(residuals, w, a, b, 'student-t', d);
+          
+          if (loglikelihood > bestParams.loglikelihood) {
+            bestParams = { omega: w, alpha: a, beta: b, df: d, sigma2_series, loglikelihood };
+          }
+        }
+      } else {
+        const { sigma2_series, loglikelihood } = computeGarchLikelihood(residuals, w, a, b, 'normal');
+        
+        if (loglikelihood > bestParams.loglikelihood) {
+          bestParams = { omega: w, alpha: a, beta: b, sigma2_series, loglikelihood };
+        }
       }
     }
   }
-  
-  // Compute final variance series with best parameters
-  const { sigma2_series } = computeGarchLikelihood(residuals, bestParams.omega, bestParams.alpha, bestParams.beta);
-  
+
   return {
     omega: bestParams.omega,
     alpha: bestParams.alpha,
     beta: bestParams.beta,
-    sigma2_series,
-    loglikelihood: bestLogLikelihood
+    sigma2_series: bestParams.sigma2_series,
+    loglikelihood: bestParams.loglikelihood,
+    ...(dist === 'student-t' ? { df: bestParams.df } : {})
   };
 }
 
 /**
  * Compute GARCH variance series and log-likelihood
  */
-function computeGarchLikelihood(residuals: number[], omega: number, alpha: number, beta: number): { sigma2_series: number[], loglikelihood: number } {
+function computeGarchLikelihood(
+  residuals: number[], 
+  omega: number, 
+  alpha: number, 
+  beta: number,
+  dist: 'normal' | 'student-t' = 'normal',
+  df?: number
+): { sigma2_series: number[], loglikelihood: number } {
   const n = residuals.length;
   const sigma2_series: number[] = [];
   
@@ -180,8 +229,15 @@ function computeGarchLikelihood(residuals: number[], omega: number, alpha: numbe
     
     sigma2_series[t] = sigma2_t;
     
-    // Add to log-likelihood (assuming normal distribution)
-    loglikelihood += -0.5 * (Math.log(2 * Math.PI) + Math.log(sigma2_t) + (residuals[t] * residuals[t]) / sigma2_t);
+    if (dist === 'student-t') {
+      if (!df || df <= 2) throw new Error('df must be > 2 for Student-t');
+      const z = residuals[t] / Math.sqrt(sigma2_series[t]);  // standardized
+      // Student-t log-density with unit variance
+      loglikelihood += stdTLogPdf(z, df) - 0.5 * Math.log(sigma2_series[t]); // include scale term
+    } else {
+      // Add to log-likelihood (assuming normal distribution)
+      loglikelihood += -0.5 * (Math.log(2 * Math.PI) + Math.log(sigma2_t) + (residuals[t] * residuals[t]) / sigma2_t);
+    }
   }
   
   return { sigma2_series, loglikelihood };

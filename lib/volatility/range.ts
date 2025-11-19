@@ -234,9 +234,11 @@ function checkGapWarnings(data: CanonicalRow[]): string[] {
   
   // Check for large gaps
   const largeGaps = gaps.filter(g => Math.abs(g) > 2 * closeStd);
+  const maxGapRatio = Math.max(...gaps.map(g => Math.abs(g) / closeStd));
+  const threshold = 2.0;
   
   if (largeGaps.length > 0) {
-    warnings.push(`Gap day detected: ${largeGaps.length} large overnight gaps (|g| > 2 * std(c)). Consider using RS or YZ estimators.`);
+    warnings.push(`Gap day detected: ${largeGaps.length} large overnight gaps (|g| > ${threshold} * std(c)). Max gap ratio: ${maxGapRatio.toFixed(2)}, threshold: ${threshold.toFixed(1)}. Consider using RS or YZ estimators.`);
   }
   
   return warnings;

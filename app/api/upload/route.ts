@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ingestExcel } from '@/lib/ingestion/pipeline';
+import { parseHistoricalPriceXlsx, parseHistoricalPriceCsv } from '@/lib/ingestion/excel';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -39,42 +39,46 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: Request) {
   try {
-    // Parse multipart/form-data
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const symbol = formData.get('symbol') as string;
-    const exchange = formData.get('exchange') as string;
-
+    const fd = await req.formData();
+    const file = fd.get("file") as File | null;
+    
     if (!file) {
-      return NextResponse.json(
-        { error: 'No file provided', detail: 'File is required' },
-        { status: 400 }
-      );
+      return NextResponse.json({ 
+        ok: false, 
+        rows: [], 
+        error: "Missing file" 
+      }, { status: 400 });
     }
 
-    // Convert file to buffer
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-
-    // Process through ingestion pipeline
-    const result = await ingestExcel({
-      fileBuffer,
-      symbol: symbol || undefined,
-      exchange: exchange || undefined
-    });
-
-    return NextResponse.json(result, { status: 200 });
-
-  } catch (error) {
-    console.error('Upload error:', error);
+    let rows: any[] = [];
     
-    return NextResponse.json(
-      { 
-        error: 'Ingestion failed', 
-        detail: error instanceof Error ? error.message : 'Unknown error'
-      },
-      { status: 500 }
-    );
+    if (file.name.toLowerCase().endsWith(".xlsx")) {
+      const ab = await file.arrayBuffer();
+      rows = parseHistoricalPriceXlsx(ab);
+    } else if (file.name.toLowerCase().endsWith(".csv")) {
+      const text = await file.text();
+      rows = await parseHistoricalPriceCsv(text);
+    } else {
+      return NextResponse.json({ 
+        ok: false, 
+        rows: [], 
+        error: "Unsupported file type. Use .xlsx or .csv" 
+      }, { status: 415 });
+    }
+
+    // Ensure we always return an array
+    if (!Array.isArray(rows)) {
+      rows = [];
+    }
+
+    return NextResponse.json({ ok: true, rows });
+  } catch (e: any) {
+    return NextResponse.json({ 
+      ok: false, 
+      rows: [], 
+      error: `Upload failed: ${e?.message ?? "unknown error"}` 
+    }, { status: 400 });
   }
 }

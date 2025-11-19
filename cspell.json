@@ -117,7 +117,10 @@
     "covariate",
     "Raphson",
     "terciles",
-    "trombadaria"
+    "trombadaria",
+    "spreadsheetml",
+    "refinitiv",
+    "Refinitiv"
   ],
   "flagWords": []
 }

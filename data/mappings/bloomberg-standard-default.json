@@ -1,0 +1,16 @@
+{
+  "id": "bloomberg-standard-default",
+  "name": "Bloomberg Terminal Export",
+  "vendor": "bloomberg",
+  "map": {
+    "Date": "date",
+    "PX_OPEN": "open",
+    "PX_HIGH": "high",
+    "PX_LOW": "low",
+    "PX_LAST": "close",
+    "PX_LAST_ADJ": "adj_close",
+    "PX_VOLUME": "volume"
+  },
+  "created_at": "2024-01-01T00:00:00.000Z",
+  "updated_at": "2024-01-01T00:00:00.000Z"
+}

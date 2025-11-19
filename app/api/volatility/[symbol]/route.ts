@@ -7,7 +7,9 @@ import { SigmaSource, VolParams, SigmaForecast, PiComposeInput } from '@/lib/vol
 import { getTargetSpec } from '@/lib/storage/targetSpecStore';
 import { loadCanonicalData } from '@/lib/storage/canonical';
 import { ForecastRecord } from '@/lib/forecast/types';
-import { saveForecast } from '@/lib/forecast/store';
+import { saveForecast, setActiveForecast } from '@/lib/forecast/store';
+import { specFileFor } from '@/lib/paths';
+import { getNormalCritical, getStudentTCritical } from '@/lib/forecast/critical';
 import fs from 'fs';
 import path from 'path';
 
@@ -21,18 +23,26 @@ export async function POST(
   { params }: { params: { symbol: string } }
 ) {
   try {
-    const { symbol } = params;
+    const symbol = (params.symbol || "").toUpperCase();
     const body: VolatilityRequest = await request.json();
     const { model, params: volParams } = body;
 
+    console.log("[VOL-API] Received request:", {
+      symbol,
+      model,
+      params: volParams,
+      fullBody: body
+    });
+
+    // Debug logging for target spec path
+    console.log("TARGET_SPEC_PATH", specFileFor(symbol));
+
     // Load target specification
-    const targetSpec = await getTargetSpec(symbol);
-    if (!targetSpec) {
-      return NextResponse.json(
-        { error: 'Target specification not found' },
-        { status: 400 }
-      );
+    const specRes = await getTargetSpec(symbol);
+    if (!specRes) {
+      return new Response(JSON.stringify({ error: "Target specification not found" }), { status: 400 });
     }
+    const { h, coverage, exchange_tz } = specRes;
 
     // Load canonical data to get latest price and determine date_t
     const canonicalData = await loadCanonicalData(symbol);
@@ -82,7 +92,6 @@ export async function POST(
 
     // Generate sigma forecast based on selected model
     let sigmaForecast: SigmaForecast;
-    let critical: { type: "normal" | "t"; value: number; df?: number };
 
     try {
       switch (model) {
@@ -103,20 +112,6 @@ export async function POST(
             variance_targeting: volParams.garch.variance_targeting,
             df: volParams.garch.df
           });
-
-          // Set critical value
-          if (volParams.garch.dist === 'student-t' && volParams.garch.df) {
-            critical = { 
-              type: 't', 
-              value: getStudentTCritical(volParams.garch.df, targetSpec.coverage),
-              df: volParams.garch.df
-            };
-          } else {
-            critical = { 
-              type: 'normal', 
-              value: getNormalCritical(targetSpec.coverage) 
-            };
-          }
           break;
 
         case 'HAR-RV':
@@ -133,11 +128,6 @@ export async function POST(
             window: volParams.har.window,
             use_intraday_rv: volParams.har.use_intraday_rv
           });
-
-          critical = { 
-            type: 'normal', 
-            value: getNormalCritical(targetSpec.coverage) 
-          };
           break;
 
         case 'Range-P':
@@ -159,11 +149,6 @@ export async function POST(
             window: volParams.range.window,
             ewma_lambda: volParams.range.ewma_lambda
           });
-
-          critical = { 
-            type: 'normal', 
-            value: getNormalCritical(targetSpec.coverage) 
-          };
           break;
 
         default:
@@ -196,19 +181,49 @@ export async function POST(
       throw error; // Re-throw unexpected errors
     }
 
+    // Derive method string from the chosen model
+    const method =
+      volParams.garch
+        ? (volParams.garch.dist === 'student-t' ? 'GARCH11-t' : 'GARCH11-N')
+        : volParams.har
+          ? 'HAR-RV'
+          : volParams.range
+            ? `Range-${String(model.split('-')[1] || '').toUpperCase()}`
+            : 'UNKNOWN';
+
+    // Build accurate window span for the fitted portion
+    const nObs =
+      (volParams.garch?.window)
+      ?? (volParams.har?.window)
+      ?? (volParams.range?.window)
+      ?? canonicalData.length;
+
+    const endIdx = canonicalData.length - 1;
+    const startIdx = Math.max(0, canonicalData.length - nObs);
+    const windowStart = canonicalData[startIdx].date;
+    const windowEnd = canonicalData[endIdx].date;
+
+    // Choose critical from server-side result (prefer server-estimated nu)
+    const dist = volParams.garch?.dist ?? 'normal';
+    const df = (sigmaForecast.diagnostics?.nu ?? volParams.garch?.df);
+
+    const critical = (dist === 'student-t' && typeof df === 'number' && df > 2)
+      ? { type: 't' as const, value: getStudentTCritical(df, coverage), df }
+      : { type: 'normal' as const, value: getNormalCritical(coverage) };
+
     // Compose prediction interval
     const piComposeInput: PiComposeInput = {
       symbol,
       date_t,
-      h: targetSpec.h,
-      coverage: targetSpec.coverage,
+      h: h,
+      coverage: coverage,
       mu_star_used,
       S_t,
       sigma_forecast: sigmaForecast,
       critical,
       window_span: {
-        start: canonicalData[Math.max(0, canonicalData.length - (volParams.garch?.window || volParams.har?.window || volParams.range?.window || 252))].date,
-        end: date_t
+        start: windowStart,
+        end: windowEnd
       }
     };
 
@@ -217,30 +232,38 @@ export async function POST(
     // Create forecast record
     const forecastRecord: ForecastRecord = {
       symbol,
-      method: model,
+      method: method as any, // Cast to handle the type mismatch for now
       date_t,
       created_at: new Date().toISOString(),
       locked: true,
       target: {
-        h: targetSpec.h,
-        coverage: targetSpec.coverage,
+        h: h,
+        coverage: coverage,
         window_requirements: {
-          min_days: volParams.garch?.window || volParams.har?.window || volParams.range?.window || 252
+          min_days: nObs
         }
       },
       estimates: {
         mu_star_hat: 0, // Placeholder for volatility models
         sigma_hat: sigmaForecast.sigma_1d,
         mu_star_used,
-        window_start: piComposeInput.window_span?.start || date_t,
-        window_end: piComposeInput.window_span?.end || date_t,
+        window_start: windowStart,
+        window_end: windowEnd,
         n: canonicalData.length,
         S_t,
         sigma_forecast: sigmaForecast.sigma_1d,
         sigma2_forecast: sigmaForecast.sigma2_1d,
         critical_value: critical.value,
         window_span: piComposeInput.window_span,
-        volatility_diagnostics: sigmaForecast.diagnostics
+        volatility_diagnostics: sigmaForecast.diagnostics || {
+          alpha: 0,
+          beta: 0,
+          omega: 0,
+          alpha_plus_beta: 0,
+          unconditional_var: 0,
+          dist,
+          ...(df ? { nu: df } : {})
+        }
       },
       intervals: {
         L_h: piResult.L_h,
@@ -250,16 +273,16 @@ export async function POST(
       provenance: {
         rng_seed: null, // Most volatility models don't use randomness (except EnbPI)
         params_snapshot: {
-          model,
-          h: targetSpec.h,
-          coverage: targetSpec.coverage,
+          model: method,
+          h: h,
+          coverage: coverage,
           ...volParams // Include all model-specific parameters
         },
         regime_tag: null, // TODO: Add regime detection from backtest
         conformal: null   // Not a conformal method yet
       },
       diagnostics: {
-        method_source: model,
+        method_source: method as any,
         m_log: piResult.m_log,
         s_scale: piResult.s_scale,
         critical_type: critical.type,
@@ -267,55 +290,37 @@ export async function POST(
       }
     };
 
+    // Add additional properties for UI consumption
+    (forecastRecord as any).critical = critical;
+    (forecastRecord as any).window_period = { 
+      start: windowStart, 
+      end: windowEnd, 
+      n_obs: nObs 
+    };
+
     // Save forecast record
     await saveForecast(forecastRecord);
 
-    return NextResponse.json(forecastRecord);
+    // Deactivate other forecasts for this date and mark this one as active
+    await setActiveForecast(symbol, date_t, model);
+    
+    // Mark this forecast as active
+    forecastRecord.is_active = true;
+
+    // Return the full active record
+    return NextResponse.json(forecastRecord, { status: 200 });
 
   } catch (error: any) {
     console.error('Volatility API error:', error);
+    console.error('Error stack:', error.stack);
+    console.error('Error message:', error.message);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { 
+        error: 'Internal server error',
+        details: error.message,
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      },
       { status: 500 }
     );
   }
-}
-
-/**
- * Get normal critical value for given coverage
- */
-function getNormalCritical(coverage: number): number {
-  const alpha = 1 - coverage;
-  
-  // Inverse normal CDF approximation (Beasley-Springer-Moro)
-  // For common coverage levels
-  if (coverage === 0.95) return 1.96;
-  if (coverage === 0.99) return 2.576;
-  if (coverage === 0.90) return 1.645;
-  
-  // Approximation for other levels
-  const p = 1 - alpha / 2;
-  const t = Math.sqrt(-2 * Math.log(1 - p));
-  const c0 = 2.515517;
-  const c1 = 0.802853;
-  const c2 = 0.010328;
-  const d1 = 1.432788;
-  const d2 = 0.189269;
-  const d3 = 0.001308;
-  
-  return t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
-}
-
-/**
- * Get Student-t critical value for given degrees of freedom and coverage
- */
-function getStudentTCritical(df: number, coverage: number): number {
-  // Simplified approximation - in practice would use proper t-distribution
-  const normalCrit = getNormalCritical(coverage);
-  
-  if (df <= 1) return Infinity;
-  if (df >= 100) return normalCrit;
-  
-  // Rough approximation: t_critical ≈ normal_critical * sqrt(df/(df-2))
-  return normalCrit * Math.sqrt(df / (df - 2));
 }

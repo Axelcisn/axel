@@ -1,0 +1,17 @@
+{
+  "symbol": "AAPL",
+  "mode": "ICP",
+  "domain": "log",
+  "cal_window": 500,
+  "params": {
+    "eta": null,
+    "K": null,
+    "q_cal": 0.03915346975925947
+  },
+  "coverage": {
+    "last60": 1,
+    "lastCal": 0.984,
+    "miss_count": 8
+  },
+  "updated_at": "2025-11-19T05:29:36.699Z"
+}

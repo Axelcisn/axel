@@ -1,0 +1,16 @@
+{
+  "id": "yahoo-standard-default",
+  "name": "Yahoo Finance Standard",
+  "vendor": "yahoo",
+  "map": {
+    "Date": "date",
+    "Open": "open",
+    "High": "high",
+    "Low": "low",
+    "Close": "close",
+    "Adj Close": "adj_close",
+    "Volume": "volume"
+  },
+  "created_at": "2024-01-01T00:00:00.000Z",
+  "updated_at": "2024-01-01T00:00:00.000Z"
+}

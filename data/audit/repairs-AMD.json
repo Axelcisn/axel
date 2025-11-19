@@ -2239,5 +2239,2246 @@
     "newValue": "removed",
     "reason": "duplicate_date_removed",
     "timestamp": "2025-11-06T07:31:25.006Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "adj_close",
+    "oldValue": null,
+    "newValue": null,
+    "reason": "adj_close_filled_from_close",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
+  },
+  {
+    "symbol": "AMD",
+    "date": "1970-01-01",
+    "field": "date",
+    "oldValue": "duplicate",
+    "newValue": "removed",
+    "reason": "duplicate_date_removed",
+    "timestamp": "2025-11-10T14:37:28.386Z"
   }
 ]

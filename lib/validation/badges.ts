@@ -23,7 +23,7 @@ export function computeBadges(
       meta.calendar_span.end
     );
     const actualDays = new Set(rows.map(row => row.date));
-    const missingDays = expectedDays.filter(day => !actualDays.has(day));
+    const missingDays = expectedDays.filter(day => !actualDays.has(day.date));
     calendarOK = missingDays.length === 0;
   }
 

@@ -191,3 +191,80 @@ export async function getLatestFinalForecast(symbol: string): Promise<ForecastRe
     return null;
   }
 }
+
+/**
+ * Get all forecasts for a specific date
+ */
+export async function getForecastsForDate(symbol: string, date_t: string): Promise<ForecastRecord[]> {
+  const symbolDir = path.join(FORECASTS_DIR, symbol);
+  
+  try {
+    const files = await fs.promises.readdir(symbolDir);
+    const forecastFiles = files
+      .filter(f => f.match(/^\d{4}-\d{2}-\d{2}-.+\.json$/))
+      .filter(f => f.startsWith(date_t))
+      .sort();
+    
+    const forecasts: ForecastRecord[] = [];
+    for (const file of forecastFiles) {
+      try {
+        const filePath = path.join(symbolDir, file);
+        const content = await fs.promises.readFile(filePath, 'utf-8');
+        const forecast = JSON.parse(content) as ForecastRecord;
+        if (forecast.locked) {
+          forecasts.push(forecast);
+        }
+      } catch (err) {
+        console.warn(`Failed to load forecast ${file}:`, err);
+      }
+    }
+    
+    return forecasts;
+  } catch (error) {
+    return [];
+  }
+}
+
+/**
+ * Update an existing forecast file
+ */
+export async function updateForecast(symbol: string, date_t: string, method: string, updates: Partial<ForecastRecord>): Promise<boolean> {
+  const symbolDir = path.join(FORECASTS_DIR, symbol);
+  const methodSlug = method.replace(/[^a-zA-Z0-9]/g, '-');
+  const filename = `${date_t}-${methodSlug}.json`;
+  const filePath = path.join(symbolDir, filename);
+  
+  try {
+    // Read existing forecast
+    const content = await fs.promises.readFile(filePath, 'utf-8');
+    const forecast = JSON.parse(content) as ForecastRecord;
+    
+    // Apply updates
+    const updatedForecast = { ...forecast, ...updates };
+    
+    // Atomic write
+    const tempPath = `${filePath}.tmp`;
+    await fs.promises.writeFile(tempPath, JSON.stringify(updatedForecast, null, 2));
+    await fs.promises.rename(tempPath, filePath);
+    
+    return true;
+  } catch (error) {
+    console.warn(`Failed to update forecast ${filename}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Deactivate all other forecasts for the same date and activate the specified one
+ */
+export async function setActiveForecast(symbol: string, date_t: string, method: string): Promise<void> {
+  // Get all forecasts for this date
+  const forecasts = await getForecastsForDate(symbol, date_t);
+  
+  // Deactivate all other forecasts for this date
+  for (const forecast of forecasts) {
+    if (forecast.method !== method) {
+      await updateForecast(symbol, forecast.date_t, forecast.method, { is_active: false });
+    }
+  }
+}

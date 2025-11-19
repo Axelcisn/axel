@@ -1,0 +1,33 @@
+{
+  "rows": [
+    {
+      "date": "1970-01-01",
+      "open": 37.21,
+      "high": 37.56,
+      "low": 36.05,
+      "close": 36.46,
+      "adj_close": 36.46,
+      "volume": 52858036,
+      "split_factor": null,
+      "cash_dividend": null,
+      "valid": true,
+      "issues": [
+        "adj_close_filled_from_close"
+      ],
+      "r": null
+    }
+  ],
+  "meta": {
+    "symbol": "PLTR",
+    "exchange": "NASDAQ",
+    "exchange_tz": "America/New_York",
+    "calendar_span": {
+      "start": "1970-01-01",
+      "end": "1970-01-01"
+    },
+    "rows": 1,
+    "missing_trading_days": [],
+    "invalid_rows": 0,
+    "generated_at": "2025-11-13T07:06:12.954Z"
+  }
+}

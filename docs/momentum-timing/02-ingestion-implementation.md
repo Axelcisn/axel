@@ -70,7 +70,7 @@ Response: IngestionResult with paths, counts, meta, badges
 ```
 
 #### ✅ File Paths Generated
-- Raw: `/data/uploads/{ISO}-{symbol}.xlsx`
+- Raw: `/data/uploads/{ISO}-{symbol}.xlsx|csv`
 - Canonical: `/data/canonical/{symbol}.json`
 - Audit: `/data/audit/repairs-{symbol}.json`
 
@@ -101,7 +101,7 @@ Ready for **Step 3: GBM Baseline** implementation.
 
 ### Usage Example
 1. Navigate to `/company/AMD/timing`
-2. Upload `AMD-history.xlsx` 
+2. Upload `AMD-history.xlsx` or `AMD-history.csv`
 3. View badges and data quality metrics
 4. Check generated files in `/data/` directories
 

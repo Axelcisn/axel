@@ -1,0 +1,10 @@
+{
+  "symbol": "PLTR",
+  "exchange": "NASDAQ",
+  "exchange_tz": "America/New_York",
+  "h": 1,
+  "coverage": 0.95,
+  "variable": "NEXT_CLOSE_ADJ",
+  "cutoff_note": "compute at t close; verify at t+1 close",
+  "updated_at": "2025-11-12T13:41:49.730Z"
+}

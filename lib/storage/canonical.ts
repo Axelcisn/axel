@@ -36,3 +36,8 @@ export async function loadCanonicalDataWithMeta(symbol: string): Promise<Canonic
     throw new Error(`No canonical data found for ${symbol}`);
   }
 }
+
+/**
+ * Alias for compatibility
+ */
+export const loadCanonical = loadCanonicalDataWithMeta;

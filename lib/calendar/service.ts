@@ -1,52 +1,154 @@
 /**
- * Calendar & TZ service (stubs now, replace later)
+ * Enhanced Calendar & TZ service with holiday support
  */
 
-const EXCHANGE_TZ_MAP: Record<string, string> = {
-  'NASDAQ': 'America/New_York',
-  'NYSE': 'America/New_York',
-  'TSX': 'America/Toronto',
-  'LSE': 'Europe/London',
-  'ASX': 'Australia/Sydney',
-};
+import exchangeMap from '../data/exchange_map.json';
+
+export interface TradingDay {
+  date: string;
+  isFullDay: boolean;
+  earlyCloseTime?: string; // e.g., "13:00" for 1 PM ET close
+  reason?: string; // e.g., "Thanksgiving Friday"
+}
+
+export interface ExchangeInfo {
+  exchange: string;
+  tz: string;
+  currency: string;
+  country: string;
+}
+
+// Common US market holidays (simplified)
+const US_HOLIDAYS_2024_2025 = new Set([
+  '2024-01-01', '2024-01-15', '2024-02-19', '2024-03-29', '2024-05-27', '2024-06-19',
+  '2024-07-04', '2024-09-02', '2024-11-28', '2024-12-25',
+  '2025-01-01', '2025-01-20', '2025-02-17', '2025-04-18', '2025-05-26', '2025-06-19',
+  '2025-07-04', '2025-09-01', '2025-11-27', '2025-12-25'
+]);
+
+const US_EARLY_CLOSE_DAYS = new Set([
+  '2024-07-03', '2024-11-29', '2024-12-24', // Day before/after holidays
+  '2025-07-03', '2025-11-28', '2025-12-24'
+]);
 
 export async function resolveExchangeAndTZ(
   symbol?: string, 
   exchange?: string
-): Promise<{ exchange: string; tz: string }> {
-  // If exchange given, map to IANA TZ
-  if (exchange && EXCHANGE_TZ_MAP[exchange.toUpperCase()]) {
-    return {
-      exchange: exchange.toUpperCase(),
-      tz: EXCHANGE_TZ_MAP[exchange.toUpperCase()]
-    };
+): Promise<ExchangeInfo> {
+  // If exchange given, look up in exchange map
+  if (exchange) {
+    const exchangeKey = exchange.toUpperCase();
+    const exchangeData = (exchangeMap as any)[exchangeKey];
+    
+    if (exchangeData) {
+      return {
+        exchange: exchangeKey,
+        tz: exchangeData.timezone,
+        currency: exchangeData.currency,
+        country: exchangeData.country
+      };
+    }
   }
 
-  // If not, use a simple mapping for common US listings
-  // TODO: Add more sophisticated symbol->exchange resolution
-  const defaultExchange = 'NASDAQ'; // Default for US symbols
+  // Symbol-based inference for common patterns
+  if (symbol) {
+    if (symbol.endsWith('.TO')) {
+      return { exchange: 'TSX', tz: 'America/Toronto', currency: 'CAD', country: 'Canada' };
+    }
+    if (symbol.endsWith('.L')) {
+      return { exchange: 'LSE', tz: 'Europe/London', currency: 'GBP', country: 'United Kingdom' };
+    }
+    if (symbol.endsWith('.AX')) {
+      return { exchange: 'ASX', tz: 'Australia/Sydney', currency: 'AUD', country: 'Australia' };
+    }
+  }
+
+  // Default to NASDAQ for US symbols
+  const defaultExchange = 'NASDAQ';
+  const exchangeData = (exchangeMap as any)[defaultExchange];
   return {
     exchange: defaultExchange,
-    tz: EXCHANGE_TZ_MAP[defaultExchange]
+    tz: exchangeData.timezone,
+    currency: exchangeData.currency,
+    country: exchangeData.country
   };
 }
 
-export function listTradingDays(tz: string, startISO: string, endISO: string): string[] {
-  const tradingDays: string[] = [];
+export function listTradingDays(
+  tz: string, 
+  startISO: string, 
+  endISO: string,
+  options: { includeEarlyClose?: boolean; blockEarlyCloseUploads?: boolean } = {}
+): TradingDay[] {
+  const tradingDays: TradingDay[] = [];
   const start = new Date(startISO);
   const end = new Date(endISO);
   
-  // For now: weekdays only (Mon–Fri), exclude weekends
-  // TODO: Add proper holiday calendar integration
   const current = new Date(start);
   while (current <= end) {
+    const dateStr = current.toISOString().split('T')[0];
     const dayOfWeek = current.getDay();
-    // Monday = 1, Friday = 5 (exclude Saturday = 6, Sunday = 0)
-    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
-      tradingDays.push(current.toISOString().split('T')[0]);
+    
+    // Skip weekends
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      current.setDate(current.getDate() + 1);
+      continue;
     }
+    
+    // Check for holidays (US markets for now)
+    if (tz === 'America/New_York' && US_HOLIDAYS_2024_2025.has(dateStr)) {
+      current.setDate(current.getDate() + 1);
+      continue;
+    }
+    
+    // Check for early close days
+    const isEarlyClose = tz === 'America/New_York' && US_EARLY_CLOSE_DAYS.has(dateStr);
+    
+    if (options.includeEarlyClose || !isEarlyClose) {
+      tradingDays.push({
+        date: dateStr,
+        isFullDay: !isEarlyClose,
+        earlyCloseTime: isEarlyClose ? '13:00' : undefined,
+        reason: isEarlyClose ? 'Holiday early close' : undefined
+      });
+    }
+    
     current.setDate(current.getDate() + 1);
   }
   
   return tradingDays;
+}
+
+/**
+ * Validate if upload contains data after market close on early-close days
+ */
+export function validateEarlyCloseConstraints(
+  uploadTime: string, // ISO timestamp of upload
+  tradingDays: TradingDay[],
+  tz: string
+): { valid: boolean; violations: string[]; warnings: string[] } {
+  const violations: string[] = [];
+  const warnings: string[] = [];
+  
+  const uploadDate = new Date(uploadTime);
+  
+  for (const day of tradingDays) {
+    if (!day.isFullDay && day.earlyCloseTime) {
+      // Check if upload contains data that would be after early close
+      const earlyCloseDateTime = new Date(`${day.date}T${day.earlyCloseTime}:00`);
+      
+      if (uploadDate > earlyCloseDateTime) {
+        warnings.push(
+          `Upload contains data for ${day.date} (early close at ${day.earlyCloseTime}). ` +
+          `Verify data is from pre-close trading only.`
+        );
+      }
+    }
+  }
+  
+  return {
+    valid: violations.length === 0,
+    violations,
+    warnings
+  };
 }

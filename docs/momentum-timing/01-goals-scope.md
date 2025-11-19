@@ -1,11 +1,11 @@
 # Momentum Timing — 01. Goals & Scope
 
 ## 1.1 Goal
-User uploads an Excel file (e.g., AMD-history.xlsx) → the app ingests it, builds a canonical daily dataset, computes final **prediction intervals (PIs)**, detects abnormal **PI breakouts** (events), measures continuation **T** (time to reversion), learns the **magnitude → duration** mapping, evaluates calibration (OOS), and renders **watchlist rows + alerts**, with full **provenance**.
+User uploads an Excel or CSV file (e.g., AMD-history.xlsx, AMD-history.csv) → the app ingests it, builds a canonical daily dataset, computes final **prediction intervals (PIs)**, detects abnormal **PI breakouts** (events), measures continuation **T** (time to reversion), learns the **magnitude → duration** mapping, evaluates calibration (OOS), and renders **watchlist rows + alerts**, with full **provenance**.
 
 ## 1.2 Scope
 - **Single-company first** (e.g., AMD), pipeline is **multi-ticker-ready**.
-- **Ingestion:** Excel → canonical dataset (split-adjusted OHLC, adj_close, volume, calendar/TZ binding, corporate actions).
+- **Ingestion:** Excel/CSV → canonical dataset (split-adjusted OHLC, adj_close, volume, calendar/TZ binding, corporate actions).
 - **Forecast target:** Next trading-day **Adjusted Close** (future observation), with **PIs** at nominal coverage (default 95%).
 - **Model stack:** 
   - Baseline GBM PIs (μ* MLE with denom N; drift shrinkage λ).

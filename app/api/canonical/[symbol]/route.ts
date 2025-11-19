@@ -14,7 +14,16 @@ export async function GET(
       const content = await fs.promises.readFile(canonicalPath, 'utf-8');
       const data = JSON.parse(content);
       
-      return NextResponse.json({ meta: data.meta || null });
+      // Include row count in the response
+      const meta = data.meta || {};
+      const rowCount = data.rows ? data.rows.length : 0;
+      
+      return NextResponse.json({ 
+        meta: {
+          ...meta,
+          rows: rowCount
+        }
+      });
     } catch (error) {
       // File doesn't exist or is invalid
       return NextResponse.json({ meta: null });

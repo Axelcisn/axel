@@ -1,0 +1,74 @@
+{
+  "symbol": "AAPL",
+  "method": "Range-RS",
+  "date_t": "2025-10-10",
+  "created_at": "2025-11-18T15:21:23.475Z",
+  "locked": true,
+  "target": {
+    "h": 1,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 63
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0,
+    "sigma_hat": 0.011630489308014792,
+    "mu_star_used": 0,
+    "window_start": "2025-07-15",
+    "window_end": "2025-10-10",
+    "n": 11296,
+    "S_t": 245.27,
+    "sigma_forecast": 0.011630489308014792,
+    "sigma2_forecast": 0.0001352682815438464,
+    "critical_value": 1.96,
+    "window_span": {
+      "start": "2025-07-15",
+      "end": "2025-10-10"
+    },
+    "volatility_diagnostics": {
+      "estimator": "RS",
+      "window": 63,
+      "ewma_lambda": 0.94,
+      "gap_warnings": [
+        "Gap day detected: 1 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 2.42, threshold: 2.0. Consider using RS or YZ estimators."
+      ]
+    }
+  },
+  "intervals": {
+    "L_h": 239.74212955687034,
+    "U_h": 250.92532969150022,
+    "band_width_bp": 466.46787343135986
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "model": "Range-RS",
+      "h": 1,
+      "coverage": 0.95,
+      "range": {
+        "estimator": "rs",
+        "window": 63,
+        "ewma_lambda": 0.94
+      }
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "diagnostics": {
+    "method_source": "Range-RS",
+    "m_log": 5.502359644559846,
+    "s_scale": 0.011630489308014792,
+    "critical_type": "normal"
+  },
+  "critical": {
+    "type": "normal",
+    "value": 1.96
+  },
+  "window_period": {
+    "start": "2025-07-15",
+    "end": "2025-10-10",
+    "n_obs": 63
+  },
+  "is_active": false
+}

@@ -2,7 +2,7 @@ import { getTargetSpec } from '@/lib/storage/targetSpecStore';
 import { loadCanonicalData } from '@/lib/storage/canonical';
 import { getLatestFinalForecast } from '@/lib/forecast/store';
 import { loadState as loadConformalState } from '@/lib/conformal/store';
-import { loadRepairs } from '@/lib/storage/fsStore';
+import { loadRepairs, getForecasts } from '@/lib/storage/fsStore';
 
 export type AssertResult = {
   pass: boolean;
@@ -48,6 +48,139 @@ export async function assertForecastExists(symbol: string): Promise<AssertResult
     return { pass: true, message: `Step 4-6: Forecast exists (${forecast.method}, ${forecast.date_t})` };
   } catch (error) {
     return { pass: false, message: `Step 4-6: Failed to check forecast - ${error}` };
+  }
+}
+
+/**
+ * Step 4-6: GBM Forecast Generation Smoke Test
+ */
+export async function assertGbmGenerateSmoke(symbol: string): Promise<AssertResult> {
+  try {
+    // Test GBM generation by calling the API
+    const response = await fetch(`/api/forecast/gbm/${symbol}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        windowN: 252,  // Use smaller window for faster test
+        lambdaDrift: 0.25,
+        coverage: 0.95
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return { pass: false, message: `GBM Generate Smoke: API failed - ${errorData.error || response.statusText}` };
+    }
+
+    const forecast = await response.json();
+    
+    // Validate forecast structure
+    if (!forecast.pi || !forecast.estimates || !forecast.params) {
+      return { pass: false, message: `GBM Generate Smoke: Invalid forecast structure` };
+    }
+
+    // Validate PI values
+    if (forecast.pi.L1 <= 0 || forecast.pi.U1 <= 0 || forecast.pi.L1 >= forecast.pi.U1) {
+      return { pass: false, message: `GBM Generate Smoke: Invalid PI bounds (L1=${forecast.pi.L1.toFixed(2)}, U1=${forecast.pi.U1.toFixed(2)})` };
+    }
+
+    // Validate estimates
+    if (isNaN(forecast.estimates.mu_star_hat) || isNaN(forecast.estimates.sigma_hat) || forecast.estimates.sigma_hat <= 0) {
+      return { pass: false, message: `GBM Generate Smoke: Invalid MLE estimates` };
+    }
+
+    // Check if forecast was persisted
+    const savedForecasts = await getForecasts(symbol);
+    if (savedForecasts.length === 0) {
+      return { pass: false, message: `GBM Generate Smoke: Forecast not persisted` };
+    }
+
+    return { 
+      pass: true, 
+      message: `GBM Generate Smoke: ✓ API working, PI=[${forecast.pi.L1.toFixed(2)}, ${forecast.pi.U1.toFixed(2)}], σ=${forecast.estimates.sigma_hat.toFixed(6)}` 
+    };
+  } catch (error) {
+    return { pass: false, message: `GBM Generate Smoke: Failed - ${error}` };
+  }
+}
+
+/**
+ * Step 5: Volatility Generate Smoke Test
+ */
+export async function assertVolatilityGenerateSmoke(symbol: string): Promise<AssertResult> {
+  try {
+    // Ensure Target Spec exists first
+    const targetSpec = await getTargetSpec(symbol);
+    if (!targetSpec) {
+      return { pass: false, message: `Volatility Generate Smoke: No target spec found for ${symbol}` };
+    }
+
+    // Ensure canonical data exists
+    const canonicalData = await loadCanonicalData(symbol);
+    if (!canonicalData || canonicalData.length < 1000) {
+      return { pass: false, message: `Volatility Generate Smoke: Insufficient canonical data for ${symbol}` };
+    }
+
+    // Test GARCH(1,1)-t generation
+    const response = await fetch(`/api/volatility/${symbol}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'GARCH11-t',
+        params: {
+          garch: {
+            window: 1000,
+            variance_targeting: true,
+            dist: 'student-t',
+            df: 8
+          }
+        }
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      return { pass: false, message: `Volatility Generate Smoke: API failed - ${errorData.error || response.statusText}` };
+    }
+
+    const forecast = await response.json();
+    
+    // Validate forecast structure
+    if (!forecast.method || !forecast.estimates || !forecast.intervals) {
+      return { pass: false, message: `Volatility Generate Smoke: Invalid forecast structure` };
+    }
+
+    // Validate method
+    if (forecast.method !== 'GARCH11-t') {
+      return { pass: false, message: `Volatility Generate Smoke: Expected method GARCH11-t, got ${forecast.method}` };
+    }
+
+    // Validate intervals
+    if (forecast.intervals.L_h <= 0 || forecast.intervals.U_h <= 0 || forecast.intervals.L_h >= forecast.intervals.U_h) {
+      return { pass: false, message: `Volatility Generate Smoke: Invalid PI bounds (L=${forecast.intervals.L_h.toFixed(2)}, U=${forecast.intervals.U_h.toFixed(2)})` };
+    }
+
+    // Validate critical type is t-distribution
+    if (!forecast.estimates.volatility_diagnostics || !forecast.estimates.volatility_diagnostics.df) {
+      return { pass: false, message: `Volatility Generate Smoke: Expected t-distribution diagnostics` };
+    }
+
+    // Check Final PI card shows active method
+    const latestForecast = await getLatestFinalForecast(symbol);
+    if (!latestForecast || latestForecast.method !== 'GARCH11-t') {
+      return { pass: false, message: `Volatility Generate Smoke: Final PI card not updated` };
+    }
+
+    return { 
+      pass: true, 
+      message: `Volatility Generate Smoke: ✓ API working, PI=[${forecast.intervals.L_h.toFixed(2)}, ${forecast.intervals.U_h.toFixed(2)}], method=${forecast.method}` 
+    };
+  } catch (error) {
+    return { pass: false, message: `Volatility Generate Smoke: Failed - ${error}` };
   }
 }
 
@@ -233,6 +366,8 @@ export async function runAllAssertions(symbol: string): Promise<AssertResult[]> 
     assertTargetSpecExists(symbol),
     assertCanonicalDataExists(symbol),
     assertForecastExists(symbol),
+    assertGbmGenerateSmoke(symbol),  // Add GBM smoke test
+    assertVolatilityGenerateSmoke(symbol),  // Add Volatility smoke test
     assertForecastHasProvenance(symbol),
     assertEventsWorkflow(symbol),
     assertMappingWorkflow(symbol),
