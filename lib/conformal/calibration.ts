@@ -18,7 +18,8 @@ import path from 'path';
 export async function calibrate(
   symbol: string, 
   params: ConformalParams,
-  base_method?: string
+  base_method?: string,
+  coverageOverride?: number
 ): Promise<ConformalState> {
   const { mode, domain, cal_window, eta, K } = params;
   
@@ -28,7 +29,9 @@ export async function calibrate(
     throw new Error('Target specification not found');
   }
   
-  const alpha = 1 - targetSpec.coverage;
+  // Use override coverage if provided, otherwise use target spec
+  const effectiveCoverage = coverageOverride || targetSpec.coverage;
+  const alpha = 1 - effectiveCoverage;
   
   // Load canonical data for realized values
   const canonicalData = await loadCanonicalData(symbol);
@@ -107,7 +110,8 @@ export async function calibrate(
 export async function applyConformalToday(
   symbol: string, 
   params: ConformalParams,
-  base_method?: string
+  base_method?: string,
+  coverageOverride?: number
 ): Promise<{
   state: ConformalState;
   L: number;
@@ -117,7 +121,7 @@ export async function applyConformalToday(
   critical: { type: "normal" | "t"; value: number; df?: number };
 }> {
   // Get calibrated state
-  const state = await calibrate(symbol, params, base_method);
+  const state = await calibrate(symbol, params, base_method, coverageOverride);
   
   // Load latest base forecast
   const latestForecast = await loadLatestBaseForecast(symbol, base_method);
@@ -433,7 +437,20 @@ function calibrateACI(pairs: ForecastPair[], alpha: number, eta: number): number
 /**
  * Compute coverage statistics
  */
-function computeCoverageStats(pairs: ForecastPair[]): { last60: number | null; lastCal: number | null; miss_count: number } {
+function computeCoverageStats(pairs: ForecastPair[]): { 
+  last60: number | null; 
+  lastCal: number | null; 
+  miss_count: number;
+  miss_details: Array<{
+    date: string;
+    realized: number;
+    y_pred: number;
+    L_base: number;
+    U_base: number;
+    miss_type: 'below' | 'above';
+    miss_magnitude: number;
+  }>;
+} {
   const total = pairs.length;
   const last60_pairs = pairs.slice(-Math.min(60, total));
   
@@ -446,12 +463,28 @@ function computeCoverageStats(pairs: ForecastPair[]): { last60: number | null; l
     pair.realized >= pair.L_base && pair.realized <= pair.U_base
   ).length;
   
-  const miss_count = total - hits_total;
+  // Collect detailed miss information
+  const miss_details = pairs
+    .filter(pair => pair.realized < pair.L_base || pair.realized > pair.U_base)
+    .map(pair => ({
+      date: pair.forecast.date_t,
+      realized: pair.realized,
+      y_pred: pair.y_pred,
+      L_base: pair.L_base,
+      U_base: pair.U_base,
+      miss_type: pair.realized < pair.L_base ? 'below' as const : 'above' as const,
+      miss_magnitude: pair.realized < pair.L_base 
+        ? Math.abs(pair.realized - pair.L_base)
+        : Math.abs(pair.realized - pair.U_base)
+    }));
+  
+  const miss_count = miss_details.length;
   
   return {
     last60: last60_pairs.length > 0 ? hits_60 / last60_pairs.length : null,
     lastCal: total > 0 ? hits_total / total : null,
-    miss_count
+    miss_count,
+    miss_details
   };
 }
 

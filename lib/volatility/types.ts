@@ -1,4 +1,5 @@
 export type SigmaSource =
+  | "GBM-CC"
   | "GARCH11-N"
   | "GARCH11-t"
   | "HAR-RV"
@@ -8,6 +9,11 @@ export type SigmaSource =
   | "Range-YZ";
 
 export type VolParams = {
+  // GBM (baseline)
+  gbm?: {
+    windowN: number;              // 252 | 504 | 756
+    lambdaDrift: number;          // 0..1, shrinkage factor
+  };
   // GARCH(1,1)
   garch?: {
     window: number;               // e.g., 1000

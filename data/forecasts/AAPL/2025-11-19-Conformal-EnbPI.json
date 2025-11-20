@@ -1,0 +1,76 @@
+{
+  "symbol": "AAPL",
+  "method": "Conformal:EnbPI",
+  "date_t": "2025-11-19",
+  "created_at": "2025-11-19T06:12:07.448Z",
+  "locked": true,
+  "target": {
+    "h": 1,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 500
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0,
+    "sigma_hat": 0.02391275577528901,
+    "mu_star_used": 0,
+    "window_start": "2024-07-07",
+    "window_end": "2025-11-19",
+    "n": 500,
+    "sigma_forecast": 0.02391275577528901,
+    "sigma2_forecast": 0.0005718198887686179,
+    "critical_value": 1.96,
+    "window_span": {
+      "start": "2024-07-07",
+      "end": "2025-11-19"
+    }
+  },
+  "intervals": {
+    "L_h": 235.94865348959343,
+    "U_h": 254.9595940061311,
+    "band_width_bp": 805.7236282289759
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "mode": "EnbPI",
+      "domain": "log",
+      "cal_window": 500,
+      "coverage": 0.95,
+      "h": 1,
+      "base_method": "auto"
+    },
+    "regime_tag": null,
+    "conformal": {
+      "mode": "EnbPI",
+      "domain": "log",
+      "cal_window": 500,
+      "q_cal": 0.03874543316536272,
+      "eta": null,
+      "K": 20
+    }
+  },
+  "diagnostics": {
+    "method_source": "EnbPI",
+    "m_log": 5.502359644559846,
+    "s_scale": 0.02391275577528901,
+    "critical_type": "normal",
+    "base_method": "auto",
+    "conformal": {
+      "mode": "EnbPI",
+      "domain": "log",
+      "cal_window": 500,
+      "params": {
+        "eta": null,
+        "K": 20,
+        "q_cal": 0.03874543316536272
+      },
+      "coverage": {
+        "last60": 1,
+        "lastCal": 0.984,
+        "miss_count": 8
+      }
+    }
+  }
+}

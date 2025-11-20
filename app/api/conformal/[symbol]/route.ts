@@ -46,7 +46,7 @@ export async function POST(
   try {
     const { symbol } = params;
     const body: ConformalApplyInput = await request.json();
-    const { date_t, base_method, params: conformalParams } = body;
+    const { date_t, base_method, params: conformalParams, coverage: requestCoverage } = body;
     
     // Validate target specification exists
     const targetSpec = await getTargetSpec(symbol);
@@ -56,6 +56,9 @@ export async function POST(
         { status: 400 }
       );
     }
+    
+    // Use request coverage if provided, otherwise fall back to target spec
+    const effectiveCoverage = requestCoverage || targetSpec.coverage;
     
     // Check for domain conflicts with existing state
     const existingState = await loadState(symbol);
@@ -76,7 +79,7 @@ export async function POST(
     
     try {
       // Apply conformal prediction
-      const result = await applyConformalToday(symbol, conformalParams, base_method);
+      const result = await applyConformalToday(symbol, conformalParams, base_method, effectiveCoverage);
       const { state, L, U, m_log, s_scale, critical } = result;
       
       // Create conformal forecast record
@@ -88,7 +91,7 @@ export async function POST(
         locked: true,
         target: {
           h: targetSpec.h,
-          coverage: targetSpec.coverage,
+          coverage: effectiveCoverage,
           window_requirements: {
             min_days: conformalParams.cal_window
           }
@@ -119,7 +122,7 @@ export async function POST(
             mode: conformalParams.mode,
             domain: conformalParams.domain,
             cal_window: conformalParams.cal_window,
-            coverage: targetSpec.coverage,
+            coverage: effectiveCoverage,
             h: targetSpec.h,
             base_method: base_method || 'auto'
           },

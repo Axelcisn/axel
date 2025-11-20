@@ -1,0 +1,41 @@
+{
+  "as_of": "2025-11-20",
+  "rows": [
+    {
+      "symbol": "AAPL",
+      "as_of": "2025-11-20",
+      "deviation": {
+        "direction": "none",
+        "z_B": null,
+        "z_excess_B": null,
+        "pct_outside_B": null,
+        "ndist_B": null,
+        "vol_regime_pct": null
+      },
+      "forecast": {
+        "source": "none",
+        "T_hat_median": null,
+        "I60": null,
+        "I80": null,
+        "P_ge_k": {},
+        "next_review_date": null
+      },
+      "bands": {
+        "L_1": null,
+        "U_1": null,
+        "sigma_forecast": null,
+        "critical": {
+          "type": "none"
+        }
+      },
+      "quality": {},
+      "provenance": {
+        "pi_engine": null,
+        "range_sigma": null,
+        "conformal_mode": null,
+        "surv_model": null,
+        "evaluation": "rolling-origin"
+      }
+    }
+  ]
+}

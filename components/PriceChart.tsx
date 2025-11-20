@@ -44,6 +44,7 @@ interface PriceChartProps {
 }
 
 type TimeRange = '5d' | '1m' | '6m' | 'ytd' | '1y' | '5y' | 'all';
+type SelectedModel = 'auto' | 'gbm' | 'active'; // 'auto' shows appropriate model, 'gbm'/'active' forces specific model
 
 interface TimeRangeOption {
   key: TimeRange;
@@ -104,9 +105,15 @@ export default function PriceChart({
 }: PriceChartProps) {
   const [data, setData] = useState<PriceData[]>([]);
   const [selectedRange, setSelectedRange] = useState<TimeRange>('1y');
+  const [selectedModel, setSelectedModel] = useState<SelectedModel>('auto');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1); // 1 = normal, higher = more zoomed in
+
+  // Reset model selection when forecasts change
+  useEffect(() => {
+    setSelectedModel('auto');
+  }, [activeForecast, gbmForecast]);
 
   // Load historical price data
   useEffect(() => {
@@ -455,7 +462,7 @@ export default function PriceChart({
     return `${day} ${month} '${year}`;
   };
 
-  // Custom tooltip with TradingView style
+  // Custom tooltip with TradingView style - now model-aware
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (!active || !payload || !payload.length) return null;
     
@@ -479,7 +486,37 @@ export default function PriceChart({
     }
     
     // Check if this is in the forecast area
-    const isForecastArea = forecastInfo && new Date(label) > new Date(filteredData[filteredData.length - 1].date);
+    const isForecastArea = (forecastInfo || gbmInfo) && new Date(label) > new Date(filteredData[filteredData.length - 1].date);
+    
+    // Determine which model info to show based on selection and availability
+    let displayInfo = null;
+    let displayColor = 'text-green-400';
+    let displayName = '';
+    
+    if (isForecastArea) {
+      if (selectedModel === 'gbm' && gbmInfo) {
+        displayInfo = gbmInfo;
+        displayColor = 'text-green-400';
+        displayName = 'GBM';
+      } else if (selectedModel === 'active' && forecastInfo) {
+        displayInfo = forecastInfo;
+        displayColor = 'text-purple-400';
+        displayName = forecastInfo.method || 'Active Model';
+      } else if (selectedModel === 'auto') {
+        // Auto mode: show the most relevant model
+        if (forecastInfo && (!gbmInfo || !areForeccastsSame(forecastInfo, gbmInfo))) {
+          // Show active forecast if it's different from GBM
+          displayInfo = forecastInfo;
+          displayColor = 'text-purple-400';
+          displayName = forecastInfo.method || 'Active Model';
+        } else if (gbmInfo) {
+          // Show GBM if active is same or not available
+          displayInfo = gbmInfo;
+          displayColor = 'text-green-400';
+          displayName = 'GBM';
+        }
+      }
+    }
     
     return (
       <div className="bg-gray-900 p-3 rounded-lg shadow-xl border border-gray-600">
@@ -488,26 +525,38 @@ export default function PriceChart({
           {isForecastArea && <span className="ml-2 text-green-400 text-xs">[FORECAST]</span>}
         </p>
         
-        {isForecastArea && forecastInfo ? (
+        {isForecastArea && displayInfo ? (
           <div className="space-y-1 text-sm">
-            <div className="text-green-400 text-xs font-medium mb-1">
-              {forecastInfo.method} • {(forecastInfo.coverage * 100).toFixed(1)}% PI
+            <div className={`text-xs font-medium mb-1 flex items-center justify-between ${displayColor}`}>
+              <span>{displayName} • {(displayInfo.coverage * 100).toFixed(1)}% PI</span>
+              {(gbmInfo && forecastInfo && !areForeccastsSame(forecastInfo, gbmInfo)) && (
+                <div className="text-xs text-gray-400">
+                  Click cone to switch: 
+                  <span className="text-green-400 ml-1">Green=GBM</span>
+                  <span className="text-purple-400 ml-1">Purple=Other</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2 text-green-300">
               <span className="font-mono text-xs">U</span>
-              <span className="font-medium">{formatPrice(forecastInfo.U_h)}</span>
+              <span className="font-medium">{formatPrice(displayInfo.U_h)}</span>
             </div>
             <div className="flex items-center gap-2 text-gray-300">
               <span className="font-mono text-xs">M</span>
-              <span className="font-medium">{formatPrice((forecastInfo.U_h + forecastInfo.L_h) / 2)}</span>
+              <span className="font-medium">{formatPrice((displayInfo.U_h + displayInfo.L_h) / 2)}</span>
             </div>
             <div className="flex items-center gap-2 text-red-300">
               <span className="font-mono text-xs">L</span>
-              <span className="font-medium">{formatPrice(forecastInfo.L_h)}</span>
+              <span className="font-medium">{formatPrice(displayInfo.L_h)}</span>
             </div>
             <div className="text-xs text-gray-400 mt-1">
-              Band: {forecastInfo.bandWidthBp} bp
+              Band: {displayInfo.bandWidthBp} bp
             </div>
+            {displayInfo.method && displayInfo.method !== displayName && (
+              <div className="text-xs text-gray-400">
+                Method: {displayInfo.method}
+              </div>
+            )}
           </div>
         ) : (
           <div className={`space-y-1 text-sm ${tooltipColor}`}>
@@ -623,6 +672,47 @@ export default function PriceChart({
             <span className="text-xs text-gray-500">
               {zoomLevel}x
             </span>
+          </div>
+        )}
+
+        {/* Model Selector - only show if we have both GBM and active forecasts */}
+        {gbmInfo && forecastInfo && !areForeccastsSame(forecastInfo, gbmInfo) && (
+          <div className="mb-3 flex items-center gap-3">
+            <span className="text-xs text-gray-600 font-medium">Tooltip Model:</span>
+            <div className="flex gap-1 bg-gray-100 rounded-md p-1">
+              <button
+                onClick={() => setSelectedModel('auto')}
+                className={`px-3 py-1 text-xs rounded transition-colors ${
+                  selectedModel === 'auto'
+                    ? 'bg-white shadow-sm text-gray-900 font-medium'
+                    : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                Auto
+              </button>
+              <button
+                onClick={() => setSelectedModel('gbm')}
+                className={`px-3 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
+                  selectedModel === 'gbm'
+                    ? 'bg-white shadow-sm text-green-700 font-medium'
+                    : 'text-gray-600 hover:text-green-700'
+                }`}
+              >
+                <div className="w-2 h-2 bg-green-500 rounded-sm"></div>
+                GBM
+              </button>
+              <button
+                onClick={() => setSelectedModel('active')}
+                className={`px-3 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
+                  selectedModel === 'active'
+                    ? 'bg-white shadow-sm text-purple-700 font-medium'
+                    : 'text-gray-600 hover:text-purple-700'
+                }`}
+              >
+                <div className="w-2 h-2 bg-purple-500 rounded-sm"></div>
+                {forecastInfo?.method || 'Active'}
+              </button>
+            </div>
           </div>
         )}
         
@@ -757,6 +847,8 @@ export default function PriceChart({
                     fillOpacity={1}
                     connectNulls={false}
                     dot={false}
+                    onClick={() => setSelectedModel('gbm')}
+                    style={{ cursor: 'pointer' }}
                   />
                   {/* GBM Lower cone area (white to create the cone effect) */}
                   <Area
@@ -767,6 +859,8 @@ export default function PriceChart({
                     fillOpacity={0.9}
                     connectNulls={false}
                     dot={false}
+                    onClick={() => setSelectedModel('gbm')}
+                    style={{ cursor: 'pointer' }}
                   />
                 </>
               )}
@@ -783,6 +877,8 @@ export default function PriceChart({
                     fillOpacity={1}
                     connectNulls={false}
                     dot={false}
+                    onClick={() => setSelectedModel('active')}
+                    style={{ cursor: 'pointer' }}
                   />
                   {/* Active forecast Lower cone area (white to create the cone effect) */}
                   <Area
@@ -793,6 +889,8 @@ export default function PriceChart({
                     fillOpacity={0.9}
                     connectNulls={false}
                     dot={false}
+                    onClick={() => setSelectedModel('active')}
+                    style={{ cursor: 'pointer' }}
                   />
                 </>
               )}

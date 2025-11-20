@@ -2,51 +2,51 @@
   "symbol": "AAPL",
   "method": "Conformal:ICP",
   "date_t": "2025-11-19",
-  "created_at": "2025-11-19T05:29:36.699Z",
+  "created_at": "2025-11-19T08:45:53.787Z",
   "locked": true,
   "target": {
-    "h": 3,
+    "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 500
+      "min_days": 250
     }
   },
   "estimates": {
     "mu_star_hat": 0,
     "sigma_hat": 0.02391275577528901,
     "mu_star_used": 0,
-    "window_start": "2024-07-07",
+    "window_start": "2025-03-14",
     "window_end": "2025-11-19",
-    "n": 500,
+    "n": 250,
     "sigma_forecast": 0.02391275577528901,
     "sigma2_forecast": 0.0005718198887686179,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2024-07-07",
+      "start": "2025-03-14",
       "end": "2025-11-19"
     }
   },
   "intervals": {
-    "L_h": 235.85239744401895,
-    "U_h": 255.06364807794156,
-    "band_width_bp": 814.5454887089932
+    "L_h": 236.37736013149814,
+    "U_h": 254.49718562951267,
+    "band_width_bp": 766.5634935568444
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 500,
+      "cal_window": 250,
       "coverage": 0.95,
-      "h": 3,
+      "h": 1,
       "base_method": "auto"
     },
     "regime_tag": null,
     "conformal": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 500,
-      "q_cal": 0.03915346975925947,
+      "cal_window": 250,
+      "q_cal": 0.03693013293938083,
       "eta": null,
       "K": null
     }
@@ -60,16 +60,16 @@
     "conformal": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 500,
+      "cal_window": 250,
       "params": {
         "eta": null,
         "K": null,
-        "q_cal": 0.03915346975925947
+        "q_cal": 0.03693013293938083
       },
       "coverage": {
         "last60": 1,
-        "lastCal": 0.984,
-        "miss_count": 8
+        "lastCal": 0.992,
+        "miss_count": 2
       }
     }
   }

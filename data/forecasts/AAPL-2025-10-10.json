@@ -1,7 +1,7 @@
 {
   "symbol": "AAPL",
   "date_t": "2025-10-10",
-  "date_forecast": "2025-11-19T05:27:43.157Z",
+  "date_forecast": "2025-11-20T07:22:08.124Z",
   "S_t": 245.27,
   "estimates": {
     "mu_star_hat": 0.0006417566969436298,

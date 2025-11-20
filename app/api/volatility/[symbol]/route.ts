@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fitAndForecastGarch } from '@/lib/volatility/garch';
-import { fitAndForecastHar } from '@/lib/volatility/har';
-import { computeRangeSigma } from '@/lib/volatility/range';
-import { composePi } from '@/lib/volatility/piComposer';
-import { SigmaSource, VolParams, SigmaForecast, PiComposeInput } from '@/lib/volatility/types';
-import { getTargetSpec } from '@/lib/storage/targetSpecStore';
-import { loadCanonicalData } from '@/lib/storage/canonical';
-import { ForecastRecord } from '@/lib/forecast/types';
-import { saveForecast, setActiveForecast } from '@/lib/forecast/store';
-import { specFileFor } from '@/lib/paths';
-import { getNormalCritical, getStudentTCritical } from '@/lib/forecast/critical';
-import fs from 'fs';
-import path from 'path';
+import { fitAndForecastGarch } from '../../../../lib/volatility/garch';
+import { fitAndForecastHar } from '../../../../lib/volatility/har';
+import { computeRangeSigma } from '../../../../lib/volatility/range';
+import { composePi } from '../../../../lib/volatility/piComposer';
+import { SigmaSource, VolParams, SigmaForecast, PiComposeInput } from '../../../../lib/volatility/types';
+import { getTargetSpec } from '../../../../lib/storage/targetSpecStore';
+import { loadCanonicalData } from '../../../../lib/storage/canonical';
+import { ForecastRecord } from '../../../../lib/forecast/types';
+import { saveForecast, setActiveForecast } from '../../../../lib/forecast/store';
+import { specFileFor } from '../../../../lib/paths';
+import { getNormalCritical, getStudentTCritical } from '../../../../lib/forecast/critical';
+import { computeGbmForecast } from '../../../../lib/gbm/engine_old';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface VolatilityRequest {
   model: SigmaSource;
@@ -95,6 +96,32 @@ export async function POST(
 
     try {
       switch (model) {
+        case 'GBM-CC':
+          if (!volParams.gbm) {
+            return NextResponse.json(
+              { error: 'GBM parameters required' },
+              { status: 400 }
+            );
+          }
+          
+          // Call the GBM computation function directly and return the ForecastRecord
+          const gbmForecast = await computeGbmForecast({
+            symbol,
+            date_t,
+            window: volParams.gbm.windowN,
+            lambda_drift: volParams.gbm.lambdaDrift
+          });
+          
+          // Save and activate the forecast
+          await setActiveForecast(symbol, date_t, 'GBM-CC');
+          
+          return NextResponse.json({
+            ...gbmForecast,
+            is_active: true,
+            saved_at: new Date().toISOString(),
+            success: true
+          });
+        
         case 'GARCH11-N':
         case 'GARCH11-t':
           if (!volParams.garch) {

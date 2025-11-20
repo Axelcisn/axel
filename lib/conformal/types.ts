@@ -27,6 +27,15 @@ export type ConformalState = {
     last60: number | null;
     lastCal: number | null;
     miss_count: number;
+    miss_details?: Array<{
+      date: string;
+      realized: number;
+      y_pred: number;
+      L_base: number;
+      U_base: number;
+      miss_type: 'below' | 'above';
+      miss_magnitude: number;
+    }>;
   };
   updated_at: string;
 };
@@ -35,6 +44,7 @@ export type ConformalApplyInput = {
   symbol: string;
   date_t?: string;            // as-of date (default latest)
   base_method?: string;       // e.g., "GARCH11-t", optional
+  coverage?: number;          // coverage override from active forecast
   params: ConformalParams;
 };
 

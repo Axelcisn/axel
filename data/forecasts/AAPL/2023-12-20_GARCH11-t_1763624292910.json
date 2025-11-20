@@ -1,0 +1,56 @@
+{
+  "symbol": "AAPL",
+  "method": "GARCH11-t",
+  "date_t": "2023-12-20",
+  "created_at": "2025-11-20T07:38:12.910Z",
+  "locked": true,
+  "target": {
+    "h": 1,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 252
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0.0006804688427968658,
+    "sigma_hat": 0.028427866484410542,
+    "mu_star_used": 0.0006804688427968658,
+    "window_start": "1980-12-15",
+    "window_end": "2023-12-20",
+    "n": 10844,
+    "sigma_forecast": 0.028427866484410546,
+    "sigma2_forecast": 0.0008081435928554724,
+    "critical_value": 2,
+    "window_span": {
+      "start": "1980-12-15",
+      "end": "2023-12-20"
+    }
+  },
+  "intervals": {
+    "L_h": 184.18710562438332,
+    "U_h": 206.36853706133527,
+    "band_width_bp": 1204.2879636855264
+  },
+  "diagnostics": {
+    "method_source": "GARCH11-t",
+    "m_log": 5.272807852300592,
+    "s_scale": 0.028427866484410546,
+    "garch_params": {
+      "omega": 0.00008081435928554723,
+      "alpha": 0.1,
+      "beta": 0.8
+    }
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "omega": 0.00008081435928554723,
+      "alpha": 0.1,
+      "beta": 0.8,
+      "h": 1,
+      "coverage": 0.95
+    },
+    "regime_tag": null,
+    "conformal": null
+  }
+}

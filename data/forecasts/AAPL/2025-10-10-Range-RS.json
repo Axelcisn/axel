@@ -2,53 +2,53 @@
   "symbol": "AAPL",
   "method": "Range-RS",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-18T15:21:23.475Z",
+  "created_at": "2025-11-20T09:46:51.633Z",
   "locked": true,
   "target": {
     "h": 1,
-    "coverage": 0.95,
+    "coverage": 0.9,
     "window_requirements": {
-      "min_days": 63
+      "min_days": 1000
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.011630489308014792,
+    "sigma_hat": 0.011660371531303039,
     "mu_star_used": 0,
-    "window_start": "2025-07-15",
+    "window_start": "2021-10-18",
     "window_end": "2025-10-10",
     "n": 11296,
     "S_t": 245.27,
-    "sigma_forecast": 0.011630489308014792,
-    "sigma2_forecast": 0.0001352682815438464,
-    "critical_value": 1.96,
+    "sigma_forecast": 0.011660371531303039,
+    "sigma2_forecast": 0.0001359642642480224,
+    "critical_value": 1.645,
     "window_span": {
-      "start": "2025-07-15",
+      "start": "2021-10-18",
       "end": "2025-10-10"
     },
     "volatility_diagnostics": {
       "estimator": "RS",
-      "window": 63,
+      "window": 1000,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 1 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 2.42, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 23 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 6.50, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 239.74212955687034,
-    "U_h": 250.92532969150022,
-    "band_width_bp": 466.46787343135986
+    "L_h": 240.6102328995762,
+    "U_h": 250.02001026742704,
+    "band_width_bp": 391.07968328920606
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "model": "Range-RS",
       "h": 1,
-      "coverage": 0.95,
+      "coverage": 0.9,
       "range": {
-        "estimator": "rs",
-        "window": 63,
+        "estimator": "RS",
+        "window": 1000,
         "ewma_lambda": 0.94
       }
     },
@@ -58,17 +58,16 @@
   "diagnostics": {
     "method_source": "Range-RS",
     "m_log": 5.502359644559846,
-    "s_scale": 0.011630489308014792,
+    "s_scale": 0.011660371531303039,
     "critical_type": "normal"
   },
   "critical": {
     "type": "normal",
-    "value": 1.96
+    "value": 1.645
   },
   "window_period": {
-    "start": "2025-07-15",
+    "start": "2021-10-18",
     "end": "2025-10-10",
-    "n_obs": 63
-  },
-  "is_active": false
+    "n_obs": 1000
+  }
 }

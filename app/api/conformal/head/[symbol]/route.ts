@@ -4,10 +4,13 @@ import fs from 'fs';
 import path from 'path';
 
 export async function GET(
-  _req: Request,
+  request: Request,
   { params }: { params: { symbol: string } }
 ) {
   const symbol = params.symbol;
+  const url = new URL(request.url);
+  const baseMethod = url.searchParams.get('base_method');
+  
   try {
     const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
     
@@ -27,10 +30,12 @@ export async function GET(
         const content = fs.readFileSync(path.join(forecastsDir, file), 'utf-8');
         const forecast: ForecastRecord = JSON.parse(content);
         
-        // Count only locked, non-Conformal forecasts (same logic as calibration)
-        if (forecast.locked && !forecast.method.startsWith('Conformal:')) {
-          baseForecastCount++;
-        }
+        // Apply same filtering as calibration
+        if (!forecast.locked) continue;
+        if (forecast.method.startsWith('Conformal:')) continue;
+        if (baseMethod && forecast.method !== baseMethod) continue;
+        
+        baseForecastCount++;
       } catch (err) {
         // Skip malformed files
         continue;
