@@ -519,40 +519,40 @@ export default function PriceChart({
     }
     
     return (
-      <div className="bg-gray-900 p-3 rounded-lg shadow-xl border border-gray-600">
-        <p className={`text-sm text-gray-300 mb-2 ${tooltipColor}`}>
+      <div className="bg-white p-3 rounded-lg shadow-xl border border-gray-300">
+        <p className={`text-sm text-gray-700 mb-2 ${tooltipColor === 'text-white' ? 'text-gray-900' : tooltipColor === 'text-green-400' ? 'text-green-600' : tooltipColor === 'text-red-400' ? 'text-red-600' : 'text-gray-900'}`}>
           {formatTooltipDate(label)}
-          {isForecastArea && <span className="ml-2 text-green-400 text-xs">[FORECAST]</span>}
+          {isForecastArea && <span className="ml-2 text-green-600 text-xs">[FORECAST]</span>}
         </p>
         
         {isForecastArea && displayInfo ? (
           <div className="space-y-1 text-sm">
-            <div className="text-xs font-medium mb-1 text-white">
+            <div className="text-xs font-medium mb-1 text-gray-900">
               <span>{displayName} • {(displayInfo.coverage * 100).toFixed(1)}% PI</span>
             </div>
-            <div className="flex items-center gap-2 text-white">
+            <div className="flex items-center gap-2 text-gray-900">
               <span className="font-mono text-xs">U</span>
               <span className="font-medium">{formatPrice(displayInfo.U_h)}</span>
             </div>
-            <div className="flex items-center gap-2 text-white">
+            <div className="flex items-center gap-2 text-gray-900">
               <span className="font-mono text-xs">M</span>
               <span className="font-medium">{formatPrice((displayInfo.U_h + displayInfo.L_h) / 2)}</span>
             </div>
-            <div className="flex items-center gap-2 text-white">
+            <div className="flex items-center gap-2 text-gray-900">
               <span className="font-mono text-xs">L</span>
               <span className="font-medium">{formatPrice(displayInfo.L_h)}</span>
             </div>
-            <div className="text-xs text-white mt-1">
+            <div className="text-xs text-gray-700 mt-1">
               Band: {Math.round(displayInfo.bandWidthBp)} bp
             </div>
             {displayInfo.method && displayInfo.method !== displayName && (
-              <div className="text-xs text-white">
+              <div className="text-xs text-gray-700">
                 Method: {displayInfo.method}
               </div>
             )}
           </div>
         ) : (
-          <div className={`space-y-1 text-sm ${tooltipColor}`}>
+          <div className={`space-y-1 text-sm ${tooltipColor === 'text-white' ? 'text-gray-900' : tooltipColor === 'text-green-400' ? 'text-green-600' : tooltipColor === 'text-red-400' ? 'text-red-600' : 'text-gray-900'}`}>
             <div className="flex items-center gap-2">
               <span className="font-mono text-xs">O</span>
               <span className="font-medium">{formatPrice(data.open)}</span>
