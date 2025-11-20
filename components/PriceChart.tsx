@@ -674,47 +674,6 @@ export default function PriceChart({
             </span>
           </div>
         )}
-
-        {/* Model Selector - only show if we have both GBM and active forecasts */}
-        {gbmInfo && forecastInfo && !areForeccastsSame(forecastInfo, gbmInfo) && (
-          <div className="mb-3 flex items-center gap-3">
-            <span className="text-xs text-gray-600 font-medium">Tooltip Model:</span>
-            <div className="flex gap-1 bg-gray-100 rounded-md p-1">
-              <button
-                onClick={() => setSelectedModel('auto')}
-                className={`px-3 py-1 text-xs rounded transition-colors ${
-                  selectedModel === 'auto'
-                    ? 'bg-white shadow-sm text-gray-900 font-medium'
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                Auto
-              </button>
-              <button
-                onClick={() => setSelectedModel('gbm')}
-                className={`px-3 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
-                  selectedModel === 'gbm'
-                    ? 'bg-white shadow-sm text-green-700 font-medium'
-                    : 'text-gray-600 hover:text-green-700'
-                }`}
-              >
-                <div className="w-2 h-2 bg-green-500 rounded-sm"></div>
-                GBM
-              </button>
-              <button
-                onClick={() => setSelectedModel('active')}
-                className={`px-3 py-1 text-xs rounded transition-colors flex items-center gap-1 ${
-                  selectedModel === 'active'
-                    ? 'bg-white shadow-sm text-purple-700 font-medium'
-                    : 'text-gray-600 hover:text-purple-700'
-                }`}
-              >
-                <div className="w-2 h-2 bg-purple-500 rounded-sm"></div>
-                {forecastInfo?.method || 'Active'}
-              </button>
-            </div>
-          </div>
-        )}
         
         <div 
           style={{ width: '100%', height: '400px' }} 
