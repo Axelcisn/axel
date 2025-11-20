@@ -716,11 +716,17 @@ export default function PriceChart({
           </div>
         )}
         
-        <div style={{ width: '100%', height: '400px' }}>
+        <div 
+          style={{ width: '100%', height: '400px' }} 
+          className="[&_*]:outline-none [&_*]:focus:outline-none [&_.recharts-wrapper]:outline-none [&_.recharts-surface]:outline-none [&_.recharts-surface]:focus:outline-none"
+          onFocus={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+        >
           <ResponsiveContainer>
             <ComposedChart 
               data={chartData} 
               margin={{ top: 5, right: 5, left: 20, bottom: 5 }}
+              style={{ outline: 'none' }}
             >
               <defs>
                 {/* Green GBM baseline gradient */}

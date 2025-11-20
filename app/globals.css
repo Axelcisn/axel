@@ -1,3 +1,26 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Remove focus outlines from Recharts components */
+.recharts-wrapper,
+.recharts-wrapper *,
+.recharts-surface,
+.recharts-cartesian-grid,
+.recharts-area,
+.recharts-line,
+.recharts-line-curve,
+.recharts-area-curve {
+  outline: none !important;
+}
+
+.recharts-wrapper:focus,
+.recharts-wrapper *:focus,
+.recharts-surface:focus,
+.recharts-cartesian-grid:focus,
+.recharts-area:focus,
+.recharts-line:focus {
+  outline: none !important;
+  border: none !important;
+  box-shadow: none !important;
+}
