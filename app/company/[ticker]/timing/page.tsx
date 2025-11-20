@@ -769,10 +769,28 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log("[VOL][handler] resp.body =", bodyText);
 
       const data = JSON.parse(bodyText);
-      setVolForecast(data);            // volatility models state
-      setActiveForecast(data);         // Final PI switches to this model (Range, GARCH, HAR)
+      
+      if (volModel === 'GBM') {
+        // GBM from Volatility card is our baseline
+        setGbmForecast(data);    // feed green cone baseline
+        setVolForecast(null);    // GBM is not considered a "vol" model
+        setActiveForecast(data); // Final PI + purple cone follow GBM when it's the only model
+      } else {
+        // GARCH / HAR / Range
+        setVolForecast(data);    // last volatility model run
+        setActiveForecast(data); // purple cone overlays GBM
+        // NOTE: DO NOT touch gbmForecast here – we keep the baseline
+      }
+      
       setCurrentForecast(data);        // keep for legacy compatibility if needed elsewhere
-      console.log("[VOL][handler] setVolForecast", { method: data?.method, date: data?.date_t, is_active: data?.is_active });
+      console.log("[VOL][handler] setForecast", { 
+        volModel,
+        method: data?.method, 
+        date: data?.date_t, 
+        is_active: data?.is_active,
+        gbmUpdated: volModel === 'GBM',
+        volUpdated: volModel !== 'GBM'
+      });
 
       // Only reload if the server didn't mark it active (fallback)
       if (!data?.is_active) {
@@ -783,7 +801,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsGeneratingVolatility(false);
     }
-  }, [persistedCoverage, canonicalCount, persistedTZ, volModel, garchEstimator, rangeEstimator, volWindow, garchVarianceTargeting, garchDist, garchDf, harUseIntradayRv, rangeEwmaLambda, gbmWindow, gbmLambda, tickerParam, loadLatestForecast, rvAvailable]);
+  }, [persistedCoverage, canonicalCount, persistedTZ, volModel, garchEstimator, rangeEstimator, volWindow, garchVarianceTargeting, garchDist, garchDf, harUseIntradayRv, rangeEwmaLambda, gbmWindow, gbmLambda, tickerParam, loadLatestForecast, rvAvailable, setGbmForecast]);
 
   const applyConformalPrediction = async () => {
     // Check validation gates first
