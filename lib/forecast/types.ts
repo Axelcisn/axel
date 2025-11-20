@@ -38,6 +38,7 @@ export type ForecastRecord = {
     U_h: number;
     band_width_bp: number;
   };
+  S_t?: number;              // Current price at date_t (for chart display)
   critical?: { type: "normal" | "t"; z_alpha?: number; value?: number; df?: number };
   m_log?: number;            // m_t(h) on log scale
   s_scale?: number;          // s_t(h)

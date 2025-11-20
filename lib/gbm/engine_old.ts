@@ -3,6 +3,20 @@
  * prediction interval computation with MLE estimation and drift shrinkage.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { TargetSpec } from '../types/targetSpec';
+import { CanonicalRow, CanonicalTableMeta } from '../types/canonical';
+import { ForecastRecord, GbmEstimates } from '../forecast/types';
+import { saveForecast } from '../forecast/store';
+
+export type ComputeGbmForecastParams = {
+  symbol: string;
+  date_t?: string;
+  window?: number;
+  lambda_drift?: number;
+};
+
 export type GbmInputs = {
   dates: string[];                 // ascending trading dates
   adjClose: number[];              // same length as dates, > 0
@@ -11,7 +25,7 @@ export type GbmInputs = {
   coverage: number;                // e.g., 0.95
 };
 
-export type GbmEstimates = {
+export type GbmEstimatesLocal = {
   mu_star_hat: number;             // mean log-return
   sigma_hat: number;               // MLE sd, denom N
   mu_star_used: number;            // lambda * mu_star_hat
@@ -39,7 +53,7 @@ export function validateSeriesForGBM(adjClose: number[]): void {
 /**
  * Compute GBM parameter estimates using MLE with drift shrinkage
  */
-export function computeGbmEstimates(input: GbmInputs): GbmEstimates {
+export function computeGbmEstimates(input: GbmInputs): GbmEstimatesLocal {
   const { dates, adjClose, windowN, lambdaDrift, coverage } = input;
   
   // Validate inputs
@@ -88,7 +102,7 @@ export function computeGbmEstimates(input: GbmInputs): GbmEstimates {
 /**
  * Compute prediction intervals from GBM estimates
  */
-export function computeGbmPI(S_t: number, est: GbmEstimates): GbmPI {
+export function computeGbmPI(S_t: number, est: GbmEstimatesLocal): GbmPI {
   const { mu_star_used, sigma_hat, z_alpha } = est;
   
   // m_t = ln(S_t) + mu_star_used
@@ -317,6 +331,11 @@ export async function computeGbmForecast({
       h
     },
     estimates,
+    target: {
+      h,
+      coverage
+    },
+    S_t, // Add current price for chart display
     critical: {
       type: "normal",
       z_alpha

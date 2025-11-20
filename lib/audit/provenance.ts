@@ -2,6 +2,8 @@
  * Enhanced provenance and audit tracking system
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { RepairRecord } from '../types/canonical';
 
 export interface ProvenanceRecord {

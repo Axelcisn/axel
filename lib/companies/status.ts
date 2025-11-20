@@ -2,6 +2,9 @@
  * Company status and delisting management
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 export interface CompanyStatus {
   symbol: string;
   exchange: string;

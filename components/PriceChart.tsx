@@ -43,7 +43,7 @@ interface PriceChartProps {
   onApplyConformalPrediction?: () => void;
 }
 
-type TimeRange = '1d' | '5d' | '1m' | '6m' | 'ytd' | '1y' | '5y' | 'all';
+type TimeRange = '5d' | '1m' | '6m' | 'ytd' | '1y' | '5y' | 'all';
 
 interface TimeRangeOption {
   key: TimeRange;
@@ -52,7 +52,6 @@ interface TimeRangeOption {
 }
 
 const timeRanges: TimeRangeOption[] = [
-  { key: '1d', label: '1 day', days: 1 },
   { key: '5d', label: '5 days', days: 5 },
   { key: '1m', label: '1 month', days: 30 },
   { key: '6m', label: '6 months', days: 180 },
@@ -61,6 +60,18 @@ const timeRanges: TimeRangeOption[] = [
   { key: '5y', label: '5 years', days: 1825 },
   { key: 'all', label: 'All time', days: null }
 ];
+
+// Helper function to compare if two forecasts are essentially the same
+function areForeccastsSame(forecast1: any, forecast2: any): boolean {
+  if (!forecast1 || !forecast2) return false;
+  
+  // Compare the key forecast values with a small tolerance for floating point differences
+  const tolerance = 0.001;
+  
+  return Math.abs(forecast1.L_h - forecast2.L_h) < tolerance &&
+         Math.abs(forecast1.U_h - forecast2.U_h) < tolerance &&
+         Math.abs(forecast1.currentPrice - forecast2.currentPrice) < tolerance;
+}
 
 export default function PriceChart({ 
   symbol, 
@@ -158,18 +169,28 @@ export default function PriceChart({
     const selectedOption = timeRanges.find(r => r.key === selectedRange);
     let baseDays = selectedOption?.days || 365; // default to 1 year
     
+    // Get the latest date in the data to calculate ranges relative to data, not current date
+    const latestDataDate = data[data.length - 1].date;
+    
     if (selectedRange === 'ytd') {
-      // Year to date - from Jan 1 of current year
-      const currentYear = new Date().getFullYear();
+      // Year to date - from Jan 1 of the latest data year
+      const latestDate = new Date(latestDataDate);
+      const currentYear = latestDate.getFullYear();
       const ytdStart = `${currentYear}-01-01`;
       baseFilteredData = data.filter(row => row.date >= ytdStart);
     } else if (selectedRange === 'all') {
-      // For 'all' range, use zoom to reduce from full dataset
-      baseDays = Math.floor(data.length / zoomLevel);
+      // For 'all' range, show all data but apply zoom by taking subset
+      if (zoomLevel > 1) {
+        const zoomedLength = Math.max(5, Math.floor(data.length / zoomLevel));
+        baseFilteredData = data.slice(-zoomedLength);
+      } else {
+        baseFilteredData = data;
+      }
     } else if (baseDays) {
       // Apply zoom to reduce the time range (higher zoom = fewer days)
+      // Calculate cutoff relative to the latest data date, not current date
       const zoomedDays = Math.max(5, Math.floor(baseDays / zoomLevel)); // minimum 5 days
-      const cutoffDate = new Date();
+      const cutoffDate = new Date(latestDataDate);
       cutoffDate.setDate(cutoffDate.getDate() - zoomedDays);
       const cutoffString = cutoffDate.toISOString().split('T')[0];
       baseFilteredData = data.filter(row => row.date >= cutoffString);
@@ -203,8 +224,8 @@ export default function PriceChart({
     };
   }, [filteredData]);
 
-  // Process forecast data and create extended dataset for visualization
-  const { chartData, forecastInfo, windowHighlightData } = useMemo(() => {
+  // Process forecast data and create extended dataset for visualization with persistent GBM layer
+  const { chartData, forecastInfo, gbmInfo, windowHighlightData } = useMemo(() => {
     let baseChartData = [...filteredData];
     let windowHighlightData = null;
 
@@ -231,88 +252,188 @@ export default function PriceChart({
       });
     }
     
-    if (!activeForecast || filteredData.length === 0) {
-      return { chartData: baseChartData, forecastInfo: null, windowHighlightData };
+    if (filteredData.length === 0) {
+      return { chartData: baseChartData, forecastInfo: null, gbmInfo: null, windowHighlightData };
     }
     
-    const isGbmForecast = 'pi' in activeForecast;
-    let L_h, U_h, bandWidthBp, basePrice, forecastDate;
-    
-    if (isGbmForecast) {
-      L_h = activeForecast.pi?.L1;
-      U_h = activeForecast.pi?.U1;
-      bandWidthBp = activeForecast.pi?.band_width_bp;
-      basePrice = activeForecast.S_t;
-      forecastDate = activeForecast.date_forecast || activeForecast.date_t;
-    } else {
-      L_h = activeForecast.L_h || activeForecast.intervals?.L_h;
-      U_h = activeForecast.U_h || activeForecast.intervals?.U_h;
-      bandWidthBp = activeForecast.band_width_bp || activeForecast.intervals?.band_width_bp;
-      basePrice = activeForecast.S_t || activeForecast.estimates?.S_t;
-      forecastDate = activeForecast.date_t;
+    // Process GBM forecast for persistent green baseline layer
+    let gbmInfo = null;
+    if (gbmForecast) {
+      const isLegacyGbmFormat = 'pi' in gbmForecast;
+      let gbmL_h, gbmU_h, gbmBandWidthBp, gbmBasePrice;
+      
+      if (isLegacyGbmFormat) {
+        gbmL_h = gbmForecast.pi?.L1;
+        gbmU_h = gbmForecast.pi?.U1;
+        gbmBandWidthBp = gbmForecast.pi?.band_width_bp;
+        gbmBasePrice = gbmForecast.S_t;
+      } else {
+        gbmL_h = gbmForecast.L_h || gbmForecast.intervals?.L_h;
+        gbmU_h = gbmForecast.U_h || gbmForecast.intervals?.U_h;
+        gbmBandWidthBp = gbmForecast.band_width_bp || gbmForecast.intervals?.band_width_bp;
+        gbmBasePrice = gbmForecast.S_t || gbmForecast.estimates?.S_t;
+      }
+      
+      if (gbmL_h && gbmU_h && gbmBasePrice) {
+        gbmInfo = {
+          L_h: gbmL_h,
+          U_h: gbmU_h,
+          bandWidthBp: gbmBandWidthBp,
+          currentPrice: gbmBasePrice,
+          method: 'GBM-CC',
+          coverage: isLegacyGbmFormat ? 
+            (gbmForecast.params?.coverage || 0.95) : 
+            (gbmForecast.target?.coverage || gbmForecast.coverage || gbmForecast.params?.coverage || 0.95),
+          horizon: isLegacyGbmFormat ? 
+            1 : 
+            (gbmForecast.target?.h || gbmForecast.h || gbmForecast.params?.h || 1)
+        };
+      }
     }
     
-    if (!L_h || !U_h || !basePrice) {
-      return { chartData: filteredData, forecastInfo: null };
+    // Process active forecast (which could be the same GBM or a different model)
+    let forecastInfo = null;
+    if (activeForecast) {
+      const isLegacyForecastFormat = 'pi' in activeForecast;
+      let L_h, U_h, bandWidthBp, basePrice;
+      
+      if (isLegacyForecastFormat) {
+        L_h = activeForecast.pi?.L1;
+        U_h = activeForecast.pi?.U1;
+        bandWidthBp = activeForecast.pi?.band_width_bp;
+        basePrice = activeForecast.S_t;
+      } else {
+        L_h = activeForecast.L_h || activeForecast.intervals?.L_h;
+        U_h = activeForecast.U_h || activeForecast.intervals?.U_h;
+        bandWidthBp = activeForecast.band_width_bp || activeForecast.intervals?.band_width_bp;
+        basePrice = activeForecast.S_t || activeForecast.estimates?.S_t;
+      }
+      
+      if (L_h && U_h && basePrice) {
+        forecastInfo = {
+          L_h,
+          U_h,
+          bandWidthBp,
+          currentPrice: basePrice,
+          method: isLegacyForecastFormat ? 'GBM-CC' : (activeForecast.method || 'Unknown'),
+          coverage: isLegacyForecastFormat ? 
+            (activeForecast.params?.coverage || 0.95) : 
+            (activeForecast.target?.coverage || activeForecast.coverage || activeForecast.params?.coverage || 0.95),
+          horizon: isLegacyForecastFormat ? 
+            1 : 
+            (activeForecast.target?.h || activeForecast.h || activeForecast.params?.h || 1)
+        };
+      }
     }
     
-    const forecastInfo = {
-      L_h,
-      U_h,
-      bandWidthBp,
-      currentPrice: basePrice,
-      method: isGbmForecast ? 'GBM-CC' : (activeForecast.method || 'Unknown'),
-      coverage: isGbmForecast ? 
-        (activeForecast.params?.coverage || 0.95) : 
-        (activeForecast.target?.coverage || activeForecast.coverage || 0.95),
-      horizon: isGbmForecast ? 
-        1 : // GBM is always 1D horizon
-        (activeForecast.target?.h || activeForecast.h || activeForecast.params?.h || 1)
-    };
+    // If we don't have an active forecast, use GBM as the active forecast for display
+    if (!forecastInfo && gbmInfo) {
+      forecastInfo = gbmInfo;
+    }
     
     // Create extended chart data with forecast points
     const finalChartData = [...baseChartData];
-    
-    // Add forecast points based on the actual horizon
     const latestData = filteredData[filteredData.length - 1];
-    const baseDate = new Date(latestData.date);
     const latestPrice = latestData.adj_close || latestData.close;
     
-    for (let i = 1; i <= forecastInfo.horizon; i++) {
-      const forecastDate = new Date(baseDate);
-      forecastDate.setDate(forecastDate.getDate() + i);
-      const forecastDateStr = forecastDate.toISOString().split('T')[0];
+    // Add GBM forecast points for persistent green layer
+    if (gbmInfo) {
+      const baseDate = new Date(latestData.date);
       
-      finalChartData.push({
-        date: forecastDateStr,
-        open: null,
-        high: U_h,
-        low: L_h,
-        close: null,
-        adj_close: null,
-        volume: null,
-        // Forecast-specific fields
-        forecast_upper: U_h,
-        forecast_lower: L_h,
-        forecast_mid: (U_h + L_h) / 2,
-        forecast_area_upper: U_h,
-        forecast_area_lower: L_h,
-        is_forecast: true
-      } as any);
+      for (let i = 1; i <= gbmInfo.horizon; i++) {
+        const forecastDate = new Date(baseDate);
+        forecastDate.setDate(forecastDate.getDate() + i);
+        const forecastDateStr = forecastDate.toISOString().split('T')[0];
+        
+        const existingIndex = finalChartData.findIndex(item => item.date === forecastDateStr);
+        if (existingIndex >= 0) {
+          // Update existing forecast point
+          finalChartData[existingIndex] = {
+            ...finalChartData[existingIndex],
+            gbm_area_upper: gbmInfo.U_h,
+            gbm_area_lower: gbmInfo.L_h,
+          } as any;
+        } else {
+          // Add new forecast point
+          finalChartData.push({
+            date: forecastDateStr,
+            open: null,
+            high: gbmInfo.U_h,
+            low: gbmInfo.L_h,
+            close: null,
+            adj_close: null,
+            volume: null,
+            gbm_area_upper: gbmInfo.U_h,
+            gbm_area_lower: gbmInfo.L_h,
+            is_forecast: true
+          } as any);
+        }
+      }
+      
+      // Add GBM connection point at current price for smooth area transition
+      const lastHistoricalIndex = filteredData.length - 1;
+      if (finalChartData[lastHistoricalIndex]) {
+        finalChartData[lastHistoricalIndex] = {
+          ...finalChartData[lastHistoricalIndex],
+          gbm_area_upper: latestPrice,
+          gbm_area_lower: latestPrice
+        } as any;
+      }
     }
     
-    // Add the connection point at current price for smooth area transition
-    const lastHistoricalIndex = filteredData.length - 1;
-    if (finalChartData[lastHistoricalIndex]) {
-      finalChartData[lastHistoricalIndex] = {
-        ...finalChartData[lastHistoricalIndex],
-        forecast_area_upper: latestPrice,
-        forecast_area_lower: latestPrice
-      } as any;
+    // Add active forecast points (if different from GBM or if there's no GBM)
+    if (forecastInfo) {
+      const baseDate = new Date(latestData.date);
+      
+      for (let i = 1; i <= forecastInfo.horizon; i++) {
+        const forecastDate = new Date(baseDate);
+        forecastDate.setDate(forecastDate.getDate() + i);
+        const forecastDateStr = forecastDate.toISOString().split('T')[0];
+        
+        const existingIndex = finalChartData.findIndex(item => item.date === forecastDateStr);
+        if (existingIndex >= 0) {
+          // Update existing forecast point
+          finalChartData[existingIndex] = {
+            ...finalChartData[existingIndex],
+            forecast_upper: forecastInfo.U_h,
+            forecast_lower: forecastInfo.L_h,
+            forecast_mid: (forecastInfo.U_h + forecastInfo.L_h) / 2,
+            forecast_area_upper: forecastInfo.U_h,
+            forecast_area_lower: forecastInfo.L_h,
+          } as any;
+        } else {
+          // Add new forecast point
+          finalChartData.push({
+            date: forecastDateStr,
+            open: null,
+            high: forecastInfo.U_h,
+            low: forecastInfo.L_h,
+            close: null,
+            adj_close: null,
+            volume: null,
+            forecast_upper: forecastInfo.U_h,
+            forecast_lower: forecastInfo.L_h,
+            forecast_mid: (forecastInfo.U_h + forecastInfo.L_h) / 2,
+            forecast_area_upper: forecastInfo.U_h,
+            forecast_area_lower: forecastInfo.L_h,
+            is_forecast: true
+          } as any);
+        }
+      }
+      
+      // Add active forecast connection point at current price for smooth area transition
+      const lastHistoricalIndex = filteredData.length - 1;
+      if (finalChartData[lastHistoricalIndex]) {
+        finalChartData[lastHistoricalIndex] = {
+          ...finalChartData[lastHistoricalIndex],
+          forecast_area_upper: latestPrice,
+          forecast_area_lower: latestPrice
+        } as any;
+      }
     }
     
-    return { chartData: finalChartData, forecastInfo, windowHighlightData };
-  }, [activeForecast, filteredData, gbmWindowLength]);
+    return { chartData: finalChartData, forecastInfo, gbmInfo, windowHighlightData };
+  }, [activeForecast, gbmForecast, filteredData, gbmWindowLength]);
 
   // Format price for display
   const formatPrice = (price: number) => {
@@ -330,13 +451,8 @@ export default function PriceChart({
     const day = date.getDate();
     const month = date.toLocaleDateString('en-US', { month: 'short' });
     const year = date.getFullYear().toString().slice(-2); // Last 2 digits
-    const time = date.toLocaleTimeString('en-US', { 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      hour12: false 
-    });
     
-    return `${day} ${month} '${year} ${time}`;
+    return `${day} ${month} '${year}`;
   };
 
   // Custom tooltip with TradingView style
@@ -514,10 +630,21 @@ export default function PriceChart({
           <ResponsiveContainer>
             <ComposedChart 
               data={chartData} 
-              margin={{ top: 5, right: 30, left: 5, bottom: 5 }}
+              margin={{ top: 5, right: 5, left: 20, bottom: 5 }}
             >
               <defs>
-                {forecastInfo && (
+                {/* Green GBM baseline gradient */}
+                {gbmInfo && (
+                  <>
+                    <linearGradient id="gbmCone" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
+                      <stop offset="50%" stopColor="#34d399" stopOpacity={0.25} />
+                      <stop offset="100%" stopColor="#6ee7b7" stopOpacity={0.2} />
+                    </linearGradient>
+                  </>
+                )}
+                {/* Active forecast cone gradient (purple/blue) - only if different from GBM */}
+                {forecastInfo && (!gbmInfo || forecastInfo.method !== 'GBM-CC') && (
                   <>
                     <linearGradient id="forecastCone" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#8b5cf6" stopOpacity={0.4} />
@@ -550,43 +677,41 @@ export default function PriceChart({
                   const currentMonth = date.getMonth();
                   const currentYear = date.getFullYear();
                   
-                  if (selectedRange === '1d') {
-                    // For 1 day, show time
-                    return date.toLocaleTimeString('en-US', { 
-                      hour: '2-digit', 
-                      minute: '2-digit',
-                      hour12: false
-                    });
+                  // Check if this is a new month
+                  const monthYearKey = currentYear * 12 + currentMonth;
+                  
+                  if (index === 0 || lastShownMonthRef.current !== monthYearKey) {
+                    // New month or first tick - show month name and update tracker
+                    lastShownMonthRef.current = monthYearKey;
+                    return month;
                   } else {
-                    // Check if this is a new month
-                    const monthYearKey = currentYear * 12 + currentMonth;
-                    
-                    if (index === 0 || lastShownMonthRef.current !== monthYearKey) {
-                      // New month or first tick - show month name and update tracker
-                      lastShownMonthRef.current = monthYearKey;
-                      return month;
-                    } else {
-                      // Same month - show day number
-                      return day.toString();
-                    }
+                    // Same month - show day number
+                    return day.toString();
                   }
                 }}
               />
               <YAxis 
+                orientation="right"
                 tick={{ fontSize: 12, fill: '#64748b' }}
                 axisLine={{ stroke: '#e2e8f0' }}
                 tickLine={{ stroke: '#e2e8f0' }}
                 tickFormatter={(value) => `$${value.toFixed(0)}`}
                 domain={
-                  zoomLevel > 2 && forecastInfo
+                  zoomLevel > 2 && (forecastInfo || gbmInfo)
                     ? [
                         Math.min(
                           Math.min(...filteredData.map(d => d.adj_close || d.close)),
-                          forecastInfo.L_h * 0.98
+                          Math.min(
+                            forecastInfo?.L_h || Infinity,
+                            gbmInfo?.L_h || Infinity
+                          ) * 0.98
                         ),
                         Math.max(
                           Math.max(...filteredData.map(d => d.adj_close || d.close)),
-                          forecastInfo.U_h * 1.02
+                          Math.max(
+                            forecastInfo?.U_h || 0,
+                            gbmInfo?.U_h || 0
+                          ) * 1.02
                         )
                       ]
                     : ['auto', 'auto']
@@ -620,10 +745,36 @@ export default function PriceChart({
                 />
               )}
 
-              {/* Forecast cone/fan shape - normal distribution */}
-              {forecastInfo && (
+              {/* Green GBM baseline cone - always visible when available */}
+              {gbmInfo && (
                 <>
-                  {/* Upper cone area */}
+                  {/* GBM Upper cone area */}
+                  <Area
+                    type="monotone"
+                    dataKey="gbm_area_upper"
+                    stroke="none"
+                    fill="url(#gbmCone)"
+                    fillOpacity={1}
+                    connectNulls={false}
+                    dot={false}
+                  />
+                  {/* GBM Lower cone area (white to create the cone effect) */}
+                  <Area
+                    type="monotone"
+                    dataKey="gbm_area_lower"
+                    stroke="none"
+                    fill="#ffffff"
+                    fillOpacity={0.9}
+                    connectNulls={false}
+                    dot={false}
+                  />
+                </>
+              )}
+
+              {/* Active forecast cone - only if different from GBM */}
+              {forecastInfo && (!gbmInfo || !areForeccastsSame(forecastInfo, gbmInfo)) && (
+                <>
+                  {/* Active forecast Upper cone area */}
                   <Area
                     type="monotone"
                     dataKey="forecast_area_upper"
@@ -633,7 +784,7 @@ export default function PriceChart({
                     connectNulls={false}
                     dot={false}
                   />
-                  {/* Lower cone area (white to create the cone effect) */}
+                  {/* Active forecast Lower cone area (white to create the cone effect) */}
                   <Area
                     type="monotone"
                     dataKey="forecast_area_lower"
@@ -663,33 +814,51 @@ export default function PriceChart({
                 connectNulls={false}
               />
               
-              {/* Forecast dots */}
+              {/* Active forecast dots - show green if it's same as GBM, purple if different */}
               {forecastInfo && (
                 <>
                   <Line
                     type="monotone"
                     dataKey="forecast_upper"
-                    stroke="#10b981"
+                    stroke={gbmInfo && areForeccastsSame(forecastInfo, gbmInfo) ? '#10b981' : '#8b5cf6'}
                     strokeWidth={0}
-                    dot={{ r: 3, fill: '#10b981', fillOpacity: 1, stroke: '#ffffff', strokeWidth: 1 }}
+                    dot={{ 
+                      r: 3, 
+                      fill: gbmInfo && areForeccastsSame(forecastInfo, gbmInfo) ? '#10b981' : '#8b5cf6', 
+                      fillOpacity: 1, 
+                      stroke: '#ffffff', 
+                      strokeWidth: 1 
+                    }}
                     activeDot={false}
                     connectNulls={false}
                   />
                   <Line
                     type="monotone"
                     dataKey="forecast_lower"
-                    stroke="#10b981"
+                    stroke={gbmInfo && areForeccastsSame(forecastInfo, gbmInfo) ? '#10b981' : '#8b5cf6'}
                     strokeWidth={0}
-                    dot={{ r: 3, fill: '#10b981', fillOpacity: 1, stroke: '#ffffff', strokeWidth: 1 }}
+                    dot={{ 
+                      r: 3, 
+                      fill: gbmInfo && areForeccastsSame(forecastInfo, gbmInfo) ? '#10b981' : '#8b5cf6', 
+                      fillOpacity: 1, 
+                      stroke: '#ffffff', 
+                      strokeWidth: 1 
+                    }}
                     activeDot={false}
                     connectNulls={false}
                   />
                   <Line
                     type="monotone"
                     dataKey="forecast_mid"
-                    stroke="#10b981"
+                    stroke={gbmInfo && areForeccastsSame(forecastInfo, gbmInfo) ? '#10b981' : '#8b5cf6'}
                     strokeWidth={0}
-                    dot={{ r: 3, fill: '#10b981', fillOpacity: 1, stroke: '#ffffff', strokeWidth: 1 }}
+                    dot={{ 
+                      r: 3, 
+                      fill: gbmInfo && areForeccastsSame(forecastInfo, gbmInfo) ? '#10b981' : '#8b5cf6', 
+                      fillOpacity: 1, 
+                      stroke: '#ffffff', 
+                      strokeWidth: 1 
+                    }}
                     activeDot={false}
                     connectNulls={false}
                   />
@@ -700,59 +869,61 @@ export default function PriceChart({
         </div>
       </div>
 
-      {/* Time range selector */}
+      {/* Performance summary */}
       <div className="px-4 pb-4">
-        <div className="flex flex-wrap gap-1">
-          {timeRanges.map((range) => (
-            <button
-              key={range.key}
-              onClick={() => setSelectedRange(range.key)}
-              className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
-                selectedRange === range.key
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {range.label}
-            </button>
-          ))}
-        </div>
-        
-        {/* Performance summary */}
         {performance && (
-          <div className="mt-3 pt-3 border-t grid grid-cols-4 gap-4 text-xs">
-            {timeRanges.filter(r => r.key !== 'all').map((range) => {
-              let rangeData;
-              
-              if (range.key === 'ytd') {
-                // Year to date calculation
-                const currentYear = new Date().getFullYear();
-                rangeData = data.filter(row => row.date >= `${currentYear}-01-01`);
-              } else if (range.days) {
-                // Days-based calculation
-                const cutoff = new Date();
-                cutoff.setDate(cutoff.getDate() - range.days);
-                rangeData = data.filter(row => row.date >= cutoff.toISOString().split('T')[0]);
-              } else {
-                // All data
-                rangeData = data;
-              }
-              
-              if (rangeData.length < 2) return null;
-              
-              const first = rangeData[0].adj_close || rangeData[0].close;
-              const last = rangeData[rangeData.length - 1].adj_close || rangeData[rangeData.length - 1].close;
-              const pct = ((last - first) / first) * 100;
-              
-              return (
-                <div key={range.key} className="text-center">
-                  <div className="font-medium text-gray-900">{range.label}</div>
-                  <div className={`${pct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
-                  </div>
-                </div>
-              );
-            })}
+          <div className="mt-3 pt-3 border-t">
+            <div className="grid grid-cols-7 gap-2">
+              {timeRanges.map((range) => {
+                let rangeData;
+                
+                // Get the latest date in the data to calculate ranges relative to data, not current date
+                const latestDataDate = data.length > 0 ? data[data.length - 1].date : new Date().toISOString().split('T')[0];
+                
+                if (range.key === 'ytd') {
+                  // Year to date calculation based on latest data year
+                  const latestDate = new Date(latestDataDate);
+                  const currentYear = latestDate.getFullYear();
+                  rangeData = data.filter(row => row.date >= `${currentYear}-01-01`);
+                } else if (range.days) {
+                  // Days-based calculation relative to latest data date
+                  const cutoff = new Date(latestDataDate);
+                  cutoff.setDate(cutoff.getDate() - range.days);
+                  rangeData = data.filter(row => row.date >= cutoff.toISOString().split('T')[0]);
+                } else {
+                  // All data
+                  rangeData = data;
+                }
+                
+                if (rangeData.length < 2) return null;
+                
+                const first = rangeData[0].adj_close || rangeData[0].close;
+                const last = rangeData[rangeData.length - 1].adj_close || rangeData[rangeData.length - 1].close;
+                const pct = ((last - first) / first) * 100;
+                const isSelected = selectedRange === range.key;
+                
+                return (
+                  <button
+                    key={range.key}
+                    onClick={() => setSelectedRange(range.key)}
+                    className={`text-center p-2 rounded transition-colors text-xs ${
+                      isSelected 
+                        ? 'bg-blue-100 border border-blue-300' 
+                        : 'hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className={`font-medium ${isSelected ? 'text-blue-900' : 'text-gray-700'}`}>
+                      {range.label}
+                    </div>
+                    <div className={`font-semibold mt-1 ${
+                      pct >= 0 ? 'text-green-600' : 'text-red-600'
+                    }`}>
+                      {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -762,12 +933,12 @@ export default function PriceChart({
             {(() => {
               // Prefer active forecast, fallback to GBM forecast
               const f = activeForecast ?? gbmForecast;
-              const isGbmForecast = 'pi' in f;
-              const method = f?.method ?? (isGbmForecast ? 'GBM-CC' : 'Unknown');
+              const isLegacyGbmForecast = 'pi' in f;
+              const method = f?.method ?? (isLegacyGbmForecast ? 'GBM-CC' : 'Unknown');
               const critType = f?.critical?.type ?? f?.estimates?.critical_type ?? 'normal';
-              const critVal = (f?.critical?.value ?? f?.estimates?.critical_value ?? f?.estimates?.z_alpha) ?? null;
+              const critVal = (f?.critical?.value ?? f?.estimates?.critical_value ?? f?.estimates?.z_alpha ?? f?.z_alpha) ?? null;
               const df = f?.critical?.df ?? f?.estimates?.volatility_diagnostics?.nu;
-              const windowN = f?.window_period?.n_obs ?? f?.params?.window ?? 'N/A';
+              const windowN = f?.window_period?.n_obs ?? f?.params?.window ?? f?.estimates?.n ?? 'N/A';
               
               return (
                 <>
@@ -784,7 +955,7 @@ export default function PriceChart({
                     <div className="bg-gray-50 p-3 rounded">
                       <div className="text-sm text-gray-600">L₁ (Lower)</div>
                       <div className="text-lg font-mono">${
-                        isGbmForecast 
+                        isLegacyGbmForecast 
                           ? f.pi.L1.toFixed(2)
                           : (f.L_h || f.intervals?.L_h || 0).toFixed(2)
                       }</div>
@@ -792,7 +963,7 @@ export default function PriceChart({
                     <div className="bg-gray-50 p-3 rounded">
                       <div className="text-sm text-gray-600">U₁ (Upper)</div>
                       <div className="text-lg font-mono">${
-                        isGbmForecast 
+                        isLegacyGbmForecast 
                           ? f.pi.U1.toFixed(2)
                           : (f.U_h || f.intervals?.U_h || 0).toFixed(2)
                       }</div>
@@ -800,7 +971,7 @@ export default function PriceChart({
                     <div className="bg-gray-50 p-3 rounded">
                       <div className="text-sm text-gray-600">Band Width</div>
                       <div className="text-lg font-mono">{
-                        isGbmForecast 
+                        isLegacyGbmForecast 
                           ? f.pi.band_width_bp.toFixed(0)
                           : (f.band_width_bp || f.intervals?.band_width_bp || 0).toFixed(0)
                       } bp</div>
@@ -824,7 +995,7 @@ export default function PriceChart({
                         <div className="flex justify-between">
                           <span className="text-gray-600">Coverage:</span>
                           <span className="font-mono text-gray-900">{
-                            isGbmForecast
+                            isLegacyGbmForecast
                               ? ((f.coverage || f.params?.coverage || 0.95) * 100).toFixed(1)
                               : ((f.coverage || f.params?.coverage || f.target?.coverage || 0) * 100).toFixed(1)
                           }%</span>
@@ -832,7 +1003,7 @@ export default function PriceChart({
                         <div className="flex justify-between">
                           <span className="text-gray-600">Horizon:</span>
                           <span className="font-mono text-gray-900">{
-                            isGbmForecast ? '1D' : (f.h || f.params?.h || f.target?.h || 1) + 'D'
+                            isLegacyGbmForecast ? '1D' : (f.h || f.params?.h || f.target?.h || 1) + 'D'
                           }</span>
                         </div>
                         <div className="flex justify-between">
@@ -846,7 +1017,7 @@ export default function PriceChart({
                         <div className="flex justify-between">
                           <span className="text-gray-600">Drift Shrinkage:</span>
                           <span className="font-mono text-gray-900">λ = {
-                            isGbmForecast 
+                            isLegacyGbmForecast 
                               ? (f.lambdaDrift || f.params?.lambdaDrift || 0).toFixed(3)
                               : (f.lambda_drift || f.params?.lambda_drift || 0).toFixed(3)
                           }</span>
@@ -855,7 +1026,7 @@ export default function PriceChart({
                     </div>
 
                     {/* MLE Estimates - Only for GBM forecasts */}
-                    {isGbmForecast && f.estimates && (
+                    {isLegacyGbmForecast && f.estimates && (
                       <div className="p-3 bg-blue-50 rounded-lg">
                         <h4 className="font-semibold text-blue-800 mb-2 text-sm">MLE Estimates</h4>
                         <div className="grid grid-cols-1 gap-3 text-sm">
@@ -881,7 +1052,7 @@ export default function PriceChart({
                     )}
 
                     {/* Diagnostics - Show for all volatility models */}
-                    {!isGbmForecast && f.estimates?.volatility_diagnostics && (
+                    {!isLegacyGbmForecast && f.estimates?.volatility_diagnostics && (
                       <div className="p-3 bg-yellow-50 rounded-lg">
                         <h4 className="font-semibold text-yellow-800 mb-2 text-sm">Diagnostics</h4>
                         <div className="grid grid-cols-1 gap-3 text-sm">
@@ -1000,263 +1171,9 @@ export default function PriceChart({
                     )}
 
                     {/* Empty div for non-GBM forecasts without diagnostics to maintain layout */}
-                    {!isGbmForecast && !f.estimates?.volatility_diagnostics && (
+                    {!isLegacyGbmForecast && !f.estimates?.volatility_diagnostics && (
                       <div></div>
                     )}
-                  </div>
-
-                  {/* Conformal Prediction Intervals Section */}
-                  <div className="mt-6 pt-6 border-t border-gray-200">
-                    <h3 className="text-lg font-semibold mb-4">Conformal Prediction Intervals</h3>
-                    
-                    {/* Mode, Domain, and Calibration Window - 3 Column Layout */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Mode:</label>
-                        <select 
-                          value={conformalMode} 
-                          onChange={(e) => onConformalModeChange?.(e.target.value as any)}
-                          className="w-full p-2 border rounded-md"
-                        >
-                          <option value="ICP">ICP</option>
-                          <option value="ICP-SCALED">ICP-scaled</option>
-                          <option value="CQR">CQR</option>
-                          <option value="EnbPI">EnbPI</option>
-                          <option value="ACI">ACI</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Domain:</label>
-                        <select 
-                          value={conformalDomain} 
-                          onChange={(e) => onConformalDomainChange?.(e.target.value as 'log' | 'price')}
-                          className="w-full p-2 border rounded-md"
-                        >
-                          <option value="log">log (default)</option>
-                          <option value="price">price</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Calibration Window:</label>
-                        <select 
-                          value={conformalCalWindow} 
-                          onChange={(e) => onConformalCalWindowChange?.(Number(e.target.value))}
-                          className="w-full p-2 border rounded-md"
-                        >
-                          <option value={125} className={baseForecastCount !== null && baseForecastCount >= 125 ? 'text-green-700' : 'text-red-600'}>
-                            125 days {baseForecastCount !== null && baseForecastCount >= 125 ? '✓' : baseForecastCount !== null ? `(need ${125 - baseForecastCount} more)` : ''}
-                          </option>
-                          <option value={250} className={baseForecastCount !== null && baseForecastCount >= 250 ? 'text-green-700' : 'text-red-600'}>
-                            250 days (default) {baseForecastCount !== null && baseForecastCount >= 250 ? '✓' : baseForecastCount !== null ? `(need ${250 - baseForecastCount} more)` : ''}
-                          </option>
-                          <option value={500} className={baseForecastCount !== null && baseForecastCount >= 500 ? 'text-green-700' : 'text-red-600'}>
-                            500 days {baseForecastCount !== null && baseForecastCount >= 500 ? '✓' : baseForecastCount !== null ? `(need ${500 - baseForecastCount} more)` : ''}
-                          </option>
-                        </select>
-                        {baseForecastCount !== null && (
-                          <p className="text-xs text-gray-600 mt-1">
-                            Available forecasts: {baseForecastCount}
-                            {baseForecastCount < conformalCalWindow && (
-                              <span className="text-amber-600 ml-2">
-                                — Consider selecting {baseForecastCount >= 125 ? '125' : 'generating more forecasts'}
-                              </span>
-                            )}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Mode-specific Parameters */}
-                    {conformalMode === 'ACI' && (
-                      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                        <h3 className="font-medium mb-3">ACI Parameters</h3>
-                        <div>
-                          <label className="block text-sm mb-1">Step size η:</label>
-                          <select 
-                            value={conformalEta} 
-                            onChange={(e) => onConformalEtaChange?.(Number(e.target.value))}
-                            className="w-full p-2 border rounded text-sm"
-                          >
-                            <option value={0.01}>0.01</option>
-                            <option value={0.02}>0.02 (default)</option>
-                            <option value={0.05}>0.05</option>
-                          </select>
-                        </div>
-                      </div>
-                    )}
-
-                    {conformalMode === 'EnbPI' && (
-                      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                        <h3 className="font-medium mb-3">EnbPI Parameters</h3>
-                        <div>
-                          <label className="block text-sm mb-1">Ensemble size K:</label>
-                          <input 
-                            type="number" 
-                            value={conformalK} 
-                            onChange={(e) => onConformalKChange?.(Number(e.target.value))}
-                            className="w-full p-2 border rounded text-sm"
-                            min="5"
-                            step="1"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">Minimum 5, default 20</p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Apply Button and Generate Button - Side by Side */}
-                    <div className="mb-4 flex gap-4">
-                      <button
-                        onClick={onApplyConformalPrediction}
-                        disabled={
-                          isApplyingConformal || 
-                          !targetSpecResult || 
-                          (baseForecastCount !== null && baseForecastCount < conformalCalWindow)
-                        }
-                        className="px-6 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                      >
-                        {isApplyingConformal ? 'Applying...' : 'Apply Conformal PI'}
-                      </button>
-                      
-                      <button
-                        type="button"
-                        onClick={onGenerateBaseForecasts}
-                        disabled={isGeneratingBase || !activeBaseMethod || (baseForecastCount !== null && baseForecastCount >= conformalCalWindow)}
-                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                      >
-                        {isGeneratingBase ? (
-                          <span className="flex items-center gap-1">
-                            <span className="animate-spin">⟳</span>
-                            Generating...
-                          </span>
-                        ) : (
-                          `Generate for ${conformalCalWindow}-day window`
-                        )}
-                      </button>
-                    </div>
-                    
-                    {/* Status Messages */}
-                    <div className="mb-4 space-y-2">
-                      {!targetSpecResult && (
-                        <p className="text-sm text-gray-500">Please save target specification first</p>
-                      )}
-                      {baseForecastCount !== null && baseForecastCount < conformalCalWindow && (
-                        <p className="text-sm text-red-600">
-                          Need {conformalCalWindow - baseForecastCount} more base forecasts for calibration
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Error Display */}
-                    {conformalError && (
-                      <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-md text-red-700">
-                        <p className="font-medium">Error:</p>
-                        <p className="text-sm">{conformalError}</p>
-                      </div>
-                    )}
-
-                    {/* Coverage Chips */}
-                    {conformalState && (
-                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-                        <h4 className="font-medium mb-2">Coverage Statistics</h4>
-                        <div className="grid grid-cols-3 gap-2 text-sm">
-                          <div className="text-center">
-                            <div className="font-mono text-lg">
-                              {conformalState.coverage.last60 !== null 
-                                ? `${(conformalState.coverage.last60 * 100).toFixed(1)}%` 
-                                : 'N/A'}
-                            </div>
-                            <div className="text-xs text-gray-600">Last 60d</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="font-mono text-lg">
-                              {conformalState.coverage.lastCal !== null 
-                                ? `${(conformalState.coverage.lastCal * 100).toFixed(1)}%` 
-                                : 'N/A'}
-                            </div>
-                            <div className="text-xs text-gray-600">Cal Window</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="font-mono text-lg">{conformalState.coverage.miss_count}</div>
-                            <div className="text-xs text-gray-600">Misses</div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Parameters Display */}
-                    {conformalState && (
-                      <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
-                        <h4 className="font-medium mb-2">Calibrated Parameters</h4>
-                        <div className="text-sm font-mono">
-                          {conformalMode === 'ICP' && conformalState.params.q_cal !== null && (
-                            <p>q_cal = {conformalState.params.q_cal.toFixed(6)}</p>
-                          )}
-                          {conformalMode === 'ICP-SCALED' && conformalState.params.q_cal_scaled != null && (
-                            <p>q_cal_scaled = {conformalState.params.q_cal_scaled.toFixed(6)}</p>
-                          )}
-                          {conformalMode === 'CQR' && (
-                            <div>
-                              {conformalState.params.delta_L != null && (
-                                <p>Δ_L = {conformalState.params.delta_L.toFixed(6)}</p>
-                              )}
-                              {conformalState.params.delta_U != null && (
-                                <p>Δ_U = {conformalState.params.delta_U.toFixed(6)}</p>
-                              )}
-                            </div>
-                          )}
-                          {conformalMode === 'EnbPI' && (
-                            <div>
-                              {conformalState.params.K && <p>K = {conformalState.params.K}</p>}
-                              {conformalState.params.q_cal != null && (
-                                <p>q_cal = {conformalState.params.q_cal.toFixed(6)}</p>
-                              )}
-                            </div>
-                          )}
-                          {conformalMode === 'ACI' && (
-                            <div>
-                              {conformalState.params.eta && <p>η = {conformalState.params.eta}</p>}
-                              {conformalState.params.theta != null && (
-                                <p>θ = {conformalState.params.theta.toFixed(6)}</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Warnings */}
-                    {conformalState && conformalState.domain !== conformalDomain && (
-                      <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-md text-yellow-700">
-                        <p className="font-medium">⚠️ Domain Switch Warning</p>
-                        <p className="text-sm">Domain switched {conformalState.domain} ↔ {conformalDomain}: recalibration required</p>
-                      </div>
-                    )}
-
-                    {/* Formula Tooltip */}
-                    <details className="mt-4">
-                      <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
-                        Methods & Formulas
-                      </summary>
-                      <div className="mt-2 text-xs bg-blue-50 p-3 rounded font-mono">
-                        <div className="space-y-2">
-                          <div>
-                            <strong>ICP:</strong> q_cal = Q&#123;1−α&#125;(|y_i − ŷ_i|); PI: [ ŷ ± q_cal ]
-                          </div>
-                          <div>
-                            <strong>ICP scaled:</strong> q_cal_s = Q&#123;1−α&#125;(|y_i − ŷ_i| / σ_pred_i); width = q_cal_s·σ_pred_t
-                          </div>
-                          <div>
-                            <strong>CQR:</strong> L = L^0 − Δ_L ; U = U^0 + Δ_U
-                          </div>
-                          <div>
-                            <strong>EnbPI:</strong> OOB residuals → q_cal ; PI: [ ŷ ± q_cal ]
-                          </div>
-                          <div>
-                            <strong>ACI:</strong> θ&#123;t+1&#125; = θ_t + η ( miss_t − α )
-                          </div>
-                        </div>
-                      </div>
-                    </details>
                   </div>
                 </>
               );
