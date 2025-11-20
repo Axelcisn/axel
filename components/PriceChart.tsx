@@ -527,33 +527,26 @@ export default function PriceChart({
         
         {isForecastArea && displayInfo ? (
           <div className="space-y-1 text-sm">
-            <div className={`text-xs font-medium mb-1 flex items-center justify-between ${displayColor}`}>
+            <div className="text-xs font-medium mb-1 text-white">
               <span>{displayName} • {(displayInfo.coverage * 100).toFixed(1)}% PI</span>
-              {(gbmInfo && forecastInfo && !areForeccastsSame(forecastInfo, gbmInfo)) && (
-                <div className="text-xs text-gray-400">
-                  Click cone to switch: 
-                  <span className="text-green-400 ml-1">Green=GBM</span>
-                  <span className="text-purple-400 ml-1">Purple=Other</span>
-                </div>
-              )}
             </div>
-            <div className="flex items-center gap-2 text-green-300">
+            <div className="flex items-center gap-2 text-white">
               <span className="font-mono text-xs">U</span>
               <span className="font-medium">{formatPrice(displayInfo.U_h)}</span>
             </div>
-            <div className="flex items-center gap-2 text-gray-300">
+            <div className="flex items-center gap-2 text-white">
               <span className="font-mono text-xs">M</span>
               <span className="font-medium">{formatPrice((displayInfo.U_h + displayInfo.L_h) / 2)}</span>
             </div>
-            <div className="flex items-center gap-2 text-red-300">
+            <div className="flex items-center gap-2 text-white">
               <span className="font-mono text-xs">L</span>
               <span className="font-medium">{formatPrice(displayInfo.L_h)}</span>
             </div>
-            <div className="text-xs text-gray-400 mt-1">
-              Band: {displayInfo.bandWidthBp} bp
+            <div className="text-xs text-white mt-1">
+              Band: {Math.round(displayInfo.bandWidthBp)} bp
             </div>
             {displayInfo.method && displayInfo.method !== displayName && (
-              <div className="text-xs text-gray-400">
+              <div className="text-xs text-white">
                 Method: {displayInfo.method}
               </div>
             )}
