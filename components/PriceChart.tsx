@@ -416,7 +416,7 @@ export default function PriceChart({
     }
     
     if (filteredData.length === 0) {
-      return { chartData: baseChartData, forecastInfo: null, gbmInfo: null, windowHighlightData, missSegments: [] };
+      return { chartData: baseChartData, forecastInfo: null, gbmInfo: null, windowHighlightData, yDomain: ['auto', 'auto'] as const };
     }
     
     // Process GBM forecast for persistent green baseline layer
