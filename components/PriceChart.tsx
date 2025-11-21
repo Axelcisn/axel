@@ -416,7 +416,14 @@ export default function PriceChart({
     }
     
     if (filteredData.length === 0) {
-      return { chartData: baseChartData, forecastInfo: null, gbmInfo: null, windowHighlightData, missSegments: [] };
+      return {
+        chartData: baseChartData,
+        forecastInfo: null,
+        gbmInfo: null,
+        windowHighlightData,
+        missSegments: [],
+        yDomain: ['auto', 'auto'] as const
+      };
     }
     
     // Process GBM forecast for persistent green baseline layer
@@ -1281,7 +1288,7 @@ export default function PriceChart({
                 axisLine={false}
                 tickLine={false}
                 tickFormatter={(value) => `$${value.toFixed(0)}`}
-                domain={yDomain ?? ['auto', 'auto']}
+                domain={yDomain ?? ['dataMin', 'dataMax']}
               />
               <Tooltip 
                 content={<CustomTooltip />} 
