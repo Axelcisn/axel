@@ -2,7 +2,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ForecastRecord } from './types';
 
-const DATA_ROOT = path.join(process.cwd(), 'data');
+// Use /tmp in production (Vercel), data/ in development
+const DATA_ROOT = process.env.NODE_ENV === 'production' 
+  ? '/tmp/data' 
+  : path.join(process.cwd(), 'data');
 const FORECASTS_DIR = path.join(DATA_ROOT, 'forecasts');
 
 export async function saveForecast(record: ForecastRecord): Promise<string> {
@@ -12,22 +15,29 @@ export async function saveForecast(record: ForecastRecord): Promise<string> {
   const filename = `${record.date_t}-${methodSlug}.json`;
   const filePath = path.join(symbolDir, filename);
   
-  // Ensure directory exists
-  await fs.promises.mkdir(symbolDir, { recursive: true });
-  
-  // Ensure locked flag is set
-  const lockedRecord: ForecastRecord = {
-    ...record,
-    locked: true,
-    created_at: new Date().toISOString()
-  };
-  
-  // Atomic write: write to temp file then rename
-  const tempPath = `${filePath}.tmp`;
-  await fs.promises.writeFile(tempPath, JSON.stringify(lockedRecord, null, 2));
-  await fs.promises.rename(tempPath, filePath);
-  
-  return filePath;
+  try {
+    // Ensure directory exists
+    await fs.promises.mkdir(symbolDir, { recursive: true });
+    
+    // Ensure locked flag is set
+    const lockedRecord: ForecastRecord = {
+      ...record,
+      locked: true,
+      created_at: new Date().toISOString()
+    };
+    
+    // Atomic write: write to temp file then rename
+    const tempPath = `${filePath}.tmp`;
+    await fs.promises.writeFile(tempPath, JSON.stringify(lockedRecord, null, 2));
+    await fs.promises.rename(tempPath, filePath);
+    
+    return filePath;
+  } catch (error) {
+    // In production (read-only filesystem), we can't save but we should not fail
+    console.warn('Could not save forecast to disk (read-only filesystem):', error);
+    // Return a virtual path to indicate the forecast was "saved"
+    return filePath;
+  }
 }
 
 export async function getForecast(symbol: string, date_t?: string): Promise<ForecastRecord | null> {

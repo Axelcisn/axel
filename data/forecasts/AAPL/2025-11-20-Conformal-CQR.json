@@ -2,52 +2,52 @@
   "symbol": "AAPL",
   "method": "Conformal:CQR",
   "date_t": "2025-11-20",
-  "created_at": "2025-11-20T09:09:55.960Z",
+  "created_at": "2025-11-20T10:32:36.703Z",
   "locked": true,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 500
+      "min_days": 250
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.01698304980701409,
+    "sigma_hat": 0.012841430079960784,
     "mu_star_used": 0,
-    "window_start": "2024-07-08",
+    "window_start": "2025-03-15",
     "window_end": "2025-11-20",
-    "n": 500,
-    "sigma_forecast": 0.01698304980701409,
-    "sigma2_forecast": 0.00028842398074752134,
+    "n": 250,
+    "sigma_forecast": 0.012841430079960784,
+    "sigma2_forecast": 0.0001649023264985216,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2024-07-08",
+      "start": "2025-03-15",
       "end": "2025-11-20"
     }
   },
   "intervals": {
-    "L_h": 243.76458136309984,
-    "U_h": 245.13549852024292,
-    "band_width_bp": 56.23939086954577
+    "L_h": 326.449467954332,
+    "U_h": 182.74789335954256,
+    "band_width_bp": -4401.954627014197
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "mode": "CQR",
       "domain": "log",
-      "cal_window": 500,
+      "cal_window": 250,
       "coverage": 0.95,
       "h": 1,
-      "base_method": "GARCH11-N"
+      "base_method": "Range-P"
     },
     "regime_tag": null,
     "conformal": {
       "mode": "CQR",
       "domain": "log",
-      "cal_window": 500,
-      "delta_L": -0.027130062127475263,
-      "delta_U": -0.033835309330856156,
+      "cal_window": 250,
+      "delta_L": -0.31108472623597905,
+      "delta_U": -0.3194212763974863,
       "eta": null,
       "K": null
     }
@@ -55,79 +55,24 @@
   "diagnostics": {
     "method_source": "CQR",
     "m_log": 5.502359644559846,
-    "s_scale": 0.01698304980701409,
+    "s_scale": 0.012841430079960784,
     "critical_type": "normal",
-    "base_method": "GARCH11-N",
+    "base_method": "Range-P",
     "conformal": {
       "mode": "CQR",
       "domain": "log",
-      "cal_window": 500,
+      "cal_window": 250,
       "params": {
         "eta": null,
         "K": null,
-        "delta_L": -0.027130062127475263,
-        "delta_U": -0.033835309330856156
+        "delta_L": -0.31108472623597905,
+        "delta_U": -0.3194212763974863
       },
       "coverage": {
         "last60": 1,
-        "lastCal": 0.988,
-        "miss_count": 6,
-        "miss_details": [
-          {
-            "date": "2024-05-02",
-            "realized": 5.211560502621754,
-            "y_pred": 5.15412894279236,
-            "L_base": 5.098591429691667,
-            "U_base": 5.2096664558930526,
-            "miss_type": "above",
-            "miss_magnitude": 0.0018940467287018592
-          },
-          {
-            "date": "2024-06-10",
-            "realized": 5.333443168523411,
-            "y_pred": 5.2639841577175,
-            "L_base": 5.208494728824482,
-            "U_base": 5.319473586610519,
-            "miss_type": "above",
-            "miss_magnitude": 0.013969581912892437
-          },
-          {
-            "date": "2025-04-02",
-            "realized": 5.314141501894922,
-            "y_pred": 5.411828276557693,
-            "L_base": 5.35669128819732,
-            "U_base": 5.466965264918066,
-            "miss_type": "below",
-            "miss_magnitude": 0.042549786302397585
-          },
-          {
-            "date": "2025-04-03",
-            "realized": 5.238461199394671,
-            "y_pred": 5.314806168482246,
-            "L_base": 5.259641878834996,
-            "U_base": 5.369970458129496,
-            "miss_type": "below",
-            "miss_magnitude": 0.021180679440325534
-          },
-          {
-            "date": "2025-04-08",
-            "realized": 5.2925507716536995,
-            "y_pred": 5.1505831440395715,
-            "L_base": 5.095395221271645,
-            "U_base": 5.205771066807498,
-            "miss_type": "above",
-            "miss_magnitude": 0.08677970484620179
-          },
-          {
-            "date": "2025-05-09",
-            "realized": 5.350862377211803,
-            "y_pred": 5.291601330127586,
-            "L_base": 5.236371008096837,
-            "U_base": 5.346831652158334,
-            "miss_type": "above",
-            "miss_magnitude": 0.00403072505346902
-          }
-        ]
+        "lastCal": 1,
+        "miss_count": 0,
+        "miss_details": []
       }
     }
   }

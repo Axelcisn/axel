@@ -2616,7 +2616,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                     Processing...
                   </span>
                 ) : (
-                  'Generate Forecast Bands'
+                  'Generate'
                 )}
               </button>
             </div>

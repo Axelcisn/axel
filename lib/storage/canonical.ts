@@ -11,7 +11,11 @@ export interface CanonicalData {
  * Load canonical data for a symbol
  */
 export async function loadCanonicalData(symbol: string): Promise<CanonicalRow[]> {
-  const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
+  // Use /tmp in production (Vercel), data/ in development
+  const dataRoot = process.env.NODE_ENV === 'production' 
+    ? '/tmp/data' 
+    : path.join(process.cwd(), 'data');
+  const canonicalPath = path.join(dataRoot, 'canonical', `${symbol}.json`);
   
   try {
     const canonicalContent = await fs.promises.readFile(canonicalPath, 'utf-8');

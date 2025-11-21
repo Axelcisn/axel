@@ -2,7 +2,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { CanonicalRow, CanonicalTableMeta, RepairRecord } from '../types/canonical';
 
-const DATA_ROOT = path.join(process.cwd(), 'data');
+// Use /tmp in production (Vercel), data/ in development
+const DATA_ROOT = process.env.NODE_ENV === 'production' 
+  ? '/tmp/data' 
+  : path.join(process.cwd(), 'data');
 
 export type GbmForecast = {
   symbol: string;

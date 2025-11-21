@@ -2,8 +2,9 @@
   "symbol": "AAPL",
   "method": "Range-P",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-20T08:19:21.113Z",
+  "created_at": "2025-11-20T18:37:11.910Z",
   "locked": true,
+  "y_hat": 245.27,
   "target": {
     "h": 1,
     "coverage": 0.95,

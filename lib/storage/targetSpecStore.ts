@@ -2,7 +2,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TargetSpec } from '../types/targetSpec';
 
-const DATA_ROOT = path.join(process.cwd(), 'data');
+// Use /tmp in production (Vercel), data/ in development
+const DATA_ROOT = process.env.NODE_ENV === 'production' 
+  ? '/tmp/data' 
+  : path.join(process.cwd(), 'data');
 const SPECS_DIR = path.join(DATA_ROOT, 'specs');
 
 export async function getTargetSpec(symbol: string): Promise<TargetSpec | null> {
