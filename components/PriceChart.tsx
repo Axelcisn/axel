@@ -415,14 +415,51 @@ export default function PriceChart({
       });
     }
     
+    const computeRangeFromChart = () => {
+      let min = Infinity;
+      let max = -Infinity;
+
+      for (const row of baseChartData) {
+        const anyRow = row as any;
+        const candidates: number[] = [];
+
+        if (typeof anyRow.adj_close === 'number') candidates.push(anyRow.adj_close);
+        if (typeof anyRow.close === 'number') candidates.push(anyRow.close);
+        if (typeof anyRow.gbm_area_lower === 'number') candidates.push(anyRow.gbm_area_lower);
+        if (typeof anyRow.gbm_area_upper === 'number') candidates.push(anyRow.gbm_area_upper);
+        if (typeof anyRow.forecast_area_lower === 'number') candidates.push(anyRow.forecast_area_lower);
+        if (typeof anyRow.forecast_area_upper === 'number') candidates.push(anyRow.forecast_area_upper);
+        if (typeof anyRow.model_price === 'number') candidates.push(anyRow.model_price);
+
+        for (const val of candidates) {
+          if (!Number.isFinite(val)) continue;
+          if (val < min) min = val;
+          if (val > max) max = val;
+        }
+      }
+
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        return null;
+      }
+
+      if (min === max) {
+        const padding = Math.max(Math.abs(min) * 0.05, 1);
+        return [min - padding, max + padding] as const;
+      }
+
+      const padding = Math.max((max - min) * 0.05, 1);
+      return [min - padding, max + padding] as const;
+    };
+
     if (filteredData.length === 0) {
+      const fallbackRange = computeRangeFromChart();
       return {
         chartData: baseChartData,
         forecastInfo: null,
         gbmInfo: null,
         windowHighlightData,
         missSegments: [],
-        yDomain: ['auto', 'auto'] as const
+        yDomain: fallbackRange ?? (['dataMin', 'dataMax'] as const)
       };
     }
     
@@ -666,8 +703,9 @@ export default function PriceChart({
     }
 
     if (!Number.isFinite(baseMin) || !Number.isFinite(baseMax)) {
-      console.debug('[Y-DOMAIN] no finite price data; using auto domain');
-      return buildChartResult(['auto', 'auto'] as const);
+      console.debug('[Y-DOMAIN] no finite price data; using chart-derived domain');
+      const range = computeRangeFromChart();
+      return buildChartResult(range ?? (['dataMin', 'dataMax'] as const));
     }
 
     // 2. Extend min/max to include cones + model line
