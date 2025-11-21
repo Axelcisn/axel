@@ -628,56 +628,64 @@ export default function PriceChart({
     })));
 
     // Compute dynamic Y domain from every numeric series visible on the chart (historical + cones + model)
-    const collectNumericValues = (rows: any[]) => {
-      const values: number[] = [];
-      for (const row of rows) {
-        const candidates = [
-          row.adj_close,
-          row.close,
-          row.gbm_area_lower,
-          row.gbm_area_upper,
-          row.forecast_area_lower,
-          row.forecast_area_upper,
-          row.model_price,
+    const computeYDomain = (rows: any[]) => {
+      try {
+        const values: number[] = [];
+        const numericKeys = [
+          'adj_close',
+          'close',
+          'gbm_area_lower',
+          'gbm_area_upper',
+          'forecast_area_lower',
+          'forecast_area_upper',
+          'model_price',
         ];
 
-        for (const value of candidates) {
-          if (typeof value === 'number' && Number.isFinite(value)) {
-            values.push(value);
+        for (const row of rows) {
+          for (const key of numericKeys) {
+            const value = (row as any)[key];
+            if (typeof value === 'number' && Number.isFinite(value) && !Number.isNaN(value)) {
+              values.push(value);
+            }
           }
         }
+
+        if (values.length === 0) {
+          return null;
+        }
+
+        const minValue = Math.min(...values);
+        const maxValue = Math.max(...values);
+
+        if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) {
+          return null;
+        }
+
+        const span = maxValue - minValue;
+        const padding = span === 0
+          ? Math.max(Math.abs(minValue) * 0.05, 1)
+          : Math.max(span * 0.05, 1);
+
+        return [minValue - padding, maxValue + padding] as [number, number];
+      } catch (err) {
+        console.error('[Y-DOMAIN] failed to compute domain', err);
+        return null;
       }
-      return values;
     };
 
-    const seriesValues = collectNumericValues(finalChartData);
-    if (seriesValues.length === 0) {
+    const yDomain = computeYDomain(finalChartData);
+    if (yDomain) {
+      console.debug('[Y-DOMAIN] computed from chart series:', yDomain);
+    } else {
       console.debug('[Y-DOMAIN] no numeric values found; using auto domain');
-      return {
-        chartData: finalChartData,
-        forecastInfo: shouldShowForecasts ? forecastInfo : null,
-        gbmInfo: shouldShowForecasts ? gbmInfo : null,
-        windowHighlightData,
-        yDomain: ['dataMin', 'dataMax'] as const,
-      };
     }
-
-    const minValue = Math.min(...seriesValues);
-    const maxValue = Math.max(...seriesValues);
-    const span = maxValue - minValue;
-    const padding = span === 0
-      ? Math.max(Math.abs(minValue) * 0.05, 1)
-      : Math.max(span * 0.05, 1);
-
-    const domain: [number, number] = [minValue - padding, maxValue + padding];
-    console.debug('[Y-DOMAIN] computed from chart series:', domain);
 
     return {
       chartData: finalChartData,
       forecastInfo: shouldShowForecasts ? forecastInfo : null,
       gbmInfo: shouldShowForecasts ? gbmInfo : null,
       windowHighlightData,
-      yDomain: domain,
+      yDomain: yDomain ?? ['dataMin', 'dataMax'] as const,
     };
   }, [activeForecast, gbmForecast, filteredData, gbmWindowLength, data, modelLine]);
 
