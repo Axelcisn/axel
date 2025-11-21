@@ -490,6 +490,16 @@ export default function PriceChart({
       forecastInfo = gbmInfo;
     }
     
+    if (filteredData.length === 0) {
+      return {
+        chartData: [],
+        forecastInfo: null,
+        gbmInfo: null,
+        windowHighlightData: [],
+        yDomain: ['dataMin', 'dataMax'] as const,
+      };
+    }
+
     // Create extended chart data with forecast points
     const finalChartData = [...baseChartData];
     const latestData = filteredData[filteredData.length - 1];
@@ -714,7 +724,7 @@ export default function PriceChart({
 
   // Custom tooltip with TradingView style - now model-aware and miss-band aware
   const CustomTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload || !payload.length) return null;
+    if (!active || !payload || !payload.length || filteredData.length === 0) return null;
     
     const data = payload[0].payload;
     
@@ -800,7 +810,9 @@ export default function PriceChart({
     }
     
     // Check if this is in the forecast area
-    const isForecastArea = (forecastInfo || gbmInfo) && new Date(label) > new Date(filteredData[filteredData.length - 1].date);
+    const lastHistoricalDate = filteredData[filteredData.length - 1]?.date;
+    const isForecastArea =
+      !!lastHistoricalDate && (forecastInfo || gbmInfo) && new Date(label) > new Date(lastHistoricalDate);
     
     // Determine which model info to show based on selection and availability
     let displayInfo = null;
