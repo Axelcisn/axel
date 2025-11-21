@@ -121,7 +121,9 @@
     "spreadsheetml",
     "refinitiv",
     "Refinitiv",
-    "XETRA"
+    "XETRA",
+    "Forecasts",
+    "Uncond"
   ],
   "flagWords": []
 }
