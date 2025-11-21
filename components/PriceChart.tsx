@@ -415,54 +415,6 @@ export default function PriceChart({
       });
     }
     
-    const computeRangeFromChart = () => {
-      let min = Infinity;
-      let max = -Infinity;
-
-      for (const row of baseChartData) {
-        const anyRow = row as any;
-        const candidates: number[] = [];
-
-        if (typeof anyRow.adj_close === 'number') candidates.push(anyRow.adj_close);
-        if (typeof anyRow.close === 'number') candidates.push(anyRow.close);
-        if (typeof anyRow.gbm_area_lower === 'number') candidates.push(anyRow.gbm_area_lower);
-        if (typeof anyRow.gbm_area_upper === 'number') candidates.push(anyRow.gbm_area_upper);
-        if (typeof anyRow.forecast_area_lower === 'number') candidates.push(anyRow.forecast_area_lower);
-        if (typeof anyRow.forecast_area_upper === 'number') candidates.push(anyRow.forecast_area_upper);
-        if (typeof anyRow.model_price === 'number') candidates.push(anyRow.model_price);
-
-        for (const val of candidates) {
-          if (!Number.isFinite(val)) continue;
-          if (val < min) min = val;
-          if (val > max) max = val;
-        }
-      }
-
-      if (!Number.isFinite(min) || !Number.isFinite(max)) {
-        return null;
-      }
-
-      if (min === max) {
-        const padding = Math.max(Math.abs(min) * 0.05, 1);
-        return [min - padding, max + padding] as const;
-      }
-
-      const padding = Math.max((max - min) * 0.05, 1);
-      return [min - padding, max + padding] as const;
-    };
-
-    if (filteredData.length === 0) {
-      const fallbackRange = computeRangeFromChart();
-      return {
-        chartData: baseChartData,
-        forecastInfo: null,
-        gbmInfo: null,
-        windowHighlightData,
-        missSegments: [],
-        yDomain: fallbackRange ?? (['dataMin', 'dataMax'] as const)
-      };
-    }
-    
     // Process GBM forecast for persistent green baseline layer
     let gbmInfo = null;
     if (gbmForecast) {
@@ -675,77 +627,58 @@ export default function PriceChart({
       model_price: (r as any).model_price,
     })));
 
-    // Compute dynamic Y domain - ALWAYS anchor to actual prices first
-    const buildChartResult = (domain: [number, number] | ['auto', 'auto']) => ({
+    // Compute dynamic Y domain from every numeric series visible on the chart (historical + cones + model)
+    const collectNumericValues = (rows: any[]) => {
+      const values: number[] = [];
+      for (const row of rows) {
+        const candidates = [
+          row.adj_close,
+          row.close,
+          row.gbm_area_lower,
+          row.gbm_area_upper,
+          row.forecast_area_lower,
+          row.forecast_area_upper,
+          row.model_price,
+        ];
+
+        for (const value of candidates) {
+          if (typeof value === 'number' && Number.isFinite(value)) {
+            values.push(value);
+          }
+        }
+      }
+      return values;
+    };
+
+    const seriesValues = collectNumericValues(finalChartData);
+    if (seriesValues.length === 0) {
+      console.debug('[Y-DOMAIN] no numeric values found; using auto domain');
+      return {
+        chartData: finalChartData,
+        forecastInfo: shouldShowForecasts ? forecastInfo : null,
+        gbmInfo: shouldShowForecasts ? gbmInfo : null,
+        windowHighlightData,
+        yDomain: ['dataMin', 'dataMax'] as const,
+      };
+    }
+
+    const minValue = Math.min(...seriesValues);
+    const maxValue = Math.max(...seriesValues);
+    const span = maxValue - minValue;
+    const padding = span === 0
+      ? Math.max(Math.abs(minValue) * 0.05, 1)
+      : Math.max(span * 0.05, 1);
+
+    const domain: [number, number] = [minValue - padding, maxValue + padding];
+    console.debug('[Y-DOMAIN] computed from chart series:', domain);
+
+    return {
       chartData: finalChartData,
       forecastInfo: shouldShowForecasts ? forecastInfo : null,
       gbmInfo: shouldShowForecasts ? gbmInfo : null,
       windowHighlightData,
-      yDomain: domain
-    });
-
-    // 1. Base min/max from actual prices ONLY (filteredData)
-    let baseMin = Infinity;
-    let baseMax = -Infinity;
-
-    for (const row of filteredData) {
-      const price =
-        typeof row.adj_close === 'number'
-          ? row.adj_close
-          : typeof row.close === 'number'
-            ? row.close
-            : null;
-
-      if (typeof price === 'number' && Number.isFinite(price)) {
-        if (price < baseMin) baseMin = price;
-        if (price > baseMax) baseMax = price;
-      }
-    }
-
-    if (!Number.isFinite(baseMin) || !Number.isFinite(baseMax)) {
-      console.debug('[Y-DOMAIN] no finite price data; using chart-derived domain');
-      const range = computeRangeFromChart();
-      return buildChartResult(range ?? (['dataMin', 'dataMax'] as const));
-    }
-
-    // 2. Extend min/max to include cones + model line
-    let minY = baseMin;
-    let maxY = baseMax;
-
-    for (const row of finalChartData) {
-      const rowAny = row as any;
-      const candidates: number[] = [];
-
-      if (typeof rowAny.gbm_area_lower === 'number') candidates.push(rowAny.gbm_area_lower);
-      if (typeof rowAny.gbm_area_upper === 'number') candidates.push(rowAny.gbm_area_upper);
-      if (typeof rowAny.forecast_area_lower === 'number') candidates.push(rowAny.forecast_area_lower);
-      if (typeof rowAny.forecast_area_upper === 'number') candidates.push(rowAny.forecast_area_upper);
-      if (typeof rowAny.model_price === 'number') candidates.push(rowAny.model_price);
-
-      for (const value of candidates) {
-        if (!Number.isFinite(value)) continue;
-        if (value < minY) minY = value;
-        if (value > maxY) maxY = value;
-      }
-    }
-
-    const padding = Math.max((maxY - minY) * 0.05, 1);
-    const domainMin = minY - padding;
-    const domainMax = maxY + padding;
-
-    console.debug(
-      '[Y-DOMAIN] base price range:',
-      baseMin,
-      baseMax,
-      '-> extended:',
-      minY,
-      maxY,
-      '-> domain:',
-      domainMin,
-      domainMax
-    );
-    
-    return buildChartResult([domainMin, domainMax] as const);
+      yDomain: domain,
+    };
   }, [activeForecast, gbmForecast, filteredData, gbmWindowLength, data, modelLine]);
 
   // Guard for miss details using the computed missSegments
