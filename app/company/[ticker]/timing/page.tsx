@@ -1,7 +1,7 @@
 // cspell:words OHLC Delistings delisted ndist cooldown efron Backtest
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { IngestionResult } from '@/lib/types/canonical';
 import { TargetSpec, TargetSpecResult } from '@/lib/types/targetSpec';
 import { ForecastRecord } from '@/lib/forecast/types';
@@ -16,6 +16,7 @@ import PriceChart from '@/components/PriceChart';
 import { formatTicker, getAllExchanges, getExchangesByRegion, getExchangeInfo } from '@/lib/utils/formatTicker';
 import { parseExchange, normalizeTicker } from '@/lib/utils/parseExchange';
 import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 // Client-side type for gates status
 type GateStatus = {
@@ -64,6 +65,9 @@ interface TimingPageProps {
 }
 
 export default function TimingPage({ params }: TimingPageProps) {
+  // Dark mode hook
+  const isDarkMode = useDarkMode();
+  
   // Server-confirmed Target Spec (what the API route reads)  
   const [serverTargetSpec, setServerTargetSpec] = useState<any | null>(null);
   const [isLoadingServerSpec, setIsLoadingServerSpec] = useState(false);
@@ -140,6 +144,11 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [baseForecastCount, setBaseForecastCount] = useState<number | null>(null);
   const [isLoadingBaseForecasts, setIsLoadingBaseForecasts] = useState(false);
   const [showMissDetails, setShowMissDetails] = useState(false);
+
+  // Model prediction line for the active method
+  const [modelLine, setModelLine] = useState<
+    Array<{ date: string; model_price: number }> | null
+  >(null);
 
   // Base forecast generation state
   const [isGeneratingBase, setIsGeneratingBase] = useState(false);
@@ -292,6 +301,9 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Data Quality modal state
   const [showDataQualityModal, setShowDataQualityModal] = useState(false);
+
+  // Coverage details toggle state
+  const [showCoverageDetails, setShowCoverageDetails] = useState(false);
 
   // Stable accessors to prevent variable shadowing - using server spec
   const persistedCoverage = typeof serverTargetSpec?.spec?.coverage === "number" ? serverTargetSpec.spec.coverage : null;
@@ -484,8 +496,58 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [tickerParam, activeBaseMethod]);
 
+  // Load model line data
+  const loadModelLine = useCallback(async () => {
+    if (!activeBaseMethod) return;
+
+    try {
+      const url = `/api/forecast/model-line/${encodeURIComponent(
+        params.ticker
+      )}?method=${encodeURIComponent(
+        activeBaseMethod
+      )}&window=${conformalCalWindow}`;
+
+      const resp = await fetch(url, { cache: 'no-store' });
+      if (!resp.ok) {
+        console.error('Failed to load model line', await resp.text());
+        return;
+      }
+
+      const json = await resp.json();
+      setModelLine(json.data ?? null);
+    } catch (err) {
+      console.error('Error loading model line', err);
+    }
+  }, [params.ticker, activeBaseMethod, conformalCalWindow]);
+
   // Load base forecast count when dependencies change
   useEffect(() => { loadBaseForecastCount(); }, [loadBaseForecastCount]);
+
+  // Load model line when dependencies change
+  useEffect(() => { loadModelLine(); }, [loadModelLine]);
+
+  // Load conformal state
+  const loadConformalState = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/conformal/${encodeURIComponent(params.ticker)}`);
+      if (response.ok) {
+        const data = await response.json();
+        setConformalState(data);
+      } else if (response.status !== 404) {
+        console.error('Failed to load conformal state:', response.statusText);
+      }
+    } catch (error) {
+      console.error('Failed to load conformal state:', error);
+    }
+  }, [params.ticker]);
+
+  // Load conformal state on mount and when ticker changes
+  useEffect(() => { loadConformalState(); }, [loadConformalState]);
+
+  // Clear conformal state when key parameters change to avoid stale data
+  useEffect(() => {
+    setConformalState(null);
+  }, [conformalMode, conformalDomain, conformalCalWindow, activeBaseMethod]);
 
   // Handle generation of base forecasts for conformal prediction
   const handleGenerateBaseForecasts = useCallback(async () => {
@@ -530,6 +592,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       
       // Refresh the base forecast count to update the panel
       await loadBaseForecastCount();
+      await loadModelLine();
       
       // You could also show a temporary success message
       // setConformalError(null); // Clear any previous errors
@@ -540,7 +603,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsGeneratingBase(false);
     }
-  }, [tickerParam, activeBaseMethod, conformalCalWindow, conformalDomain, loadBaseForecastCount]);
+  }, [tickerParam, activeBaseMethod, conformalCalWindow, conformalDomain, loadBaseForecastCount, loadModelLine]);
 
   const generateGbmForecast = async () => {
     setIsGeneratingForecast(true);
@@ -803,7 +866,39 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [persistedCoverage, canonicalCount, persistedTZ, volModel, garchEstimator, rangeEstimator, volWindow, garchVarianceTargeting, garchDist, garchDf, harUseIntradayRv, rangeEwmaLambda, gbmWindow, gbmLambda, tickerParam, loadLatestForecast, rvAvailable, setGbmForecast]);
 
-  const applyConformalPrediction = async () => {
+  // Validation Gates Functions
+  const checkGatesBeforeAction = useCallback(async (actionName: string): Promise<boolean> => {
+    setIsCheckingGates(true);
+    try {
+      const response = await fetch(`/api/validation/gates/${params.ticker}`);
+      if (!response.ok) {
+        throw new Error(`Gates API failed: ${response.status}`);
+      }
+      const gates: GateStatus = await response.json();
+      setGatesStatus(gates);
+      
+      if (!gates.ok) {
+        const errorMsg = `Cannot proceed with ${actionName}:\n${gates.errors.join('\n')}`;
+        alert(errorMsg);
+        return false;
+      }
+      
+      if (gates.warnings.length > 0) {
+        const warningMsg = `Warnings for ${actionName}:\n${gates.warnings.join('\n')}\n\nProceed anyway?`;
+        return confirm(warningMsg);
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('Gates check failed:', err);
+      const proceedAnyway = confirm(`Gates validation failed (${err}). Proceed anyway?`);
+      return proceedAnyway;
+    } finally {
+      setIsCheckingGates(false);
+    }
+  }, [params.ticker]);
+
+  const applyConformalPrediction = useCallback(async () => {
     // Check validation gates first
     const canProceed = await checkGatesBeforeAction('conformal prediction');
     if (!canProceed) return;
@@ -891,6 +986,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           }
           // Refresh the base forecast count
           await loadBaseForecastCount();
+          await loadModelLine();
           return;
         }
         throw new Error(data.error || 'Failed to apply conformal prediction');
@@ -899,12 +995,59 @@ export default function TimingPage({ params }: TimingPageProps) {
       setConformalState(data.state);
       setCurrentForecast(null); // Will be loaded by loadLatestForecast
       await loadLatestForecast(); // Refresh the forecast display
+      await loadModelLine();
     } catch (err) {
       setConformalError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setIsApplyingConformal(false);
     }
-  };
+  }, [
+    activeForecast,
+    conformalMode,
+    conformalDomain,
+    conformalCalWindow,
+    conformalEta,
+    conformalK,
+    tickerParam,
+    params.ticker,
+    loadLatestForecast,
+    loadBaseForecastCount,
+    loadModelLine,
+    checkGatesBeforeAction
+  ]);
+
+  // Command 2: Add handleUnifiedGenerate orchestrator
+  const handleUnifiedGenerate = useCallback(async () => {
+    try {
+      // 1) Ensure base forecasts exist for current method + cal window
+      if (
+        activeBaseMethod &&
+        baseForecastCount !== null &&
+        baseForecastCount < conformalCalWindow
+      ) {
+        await handleGenerateBaseForecasts();
+        await loadBaseForecastCount();
+        await loadModelLine();
+      }
+
+      // 2) Generate/update volatility forecast (GBM / GARCH / HAR / Range)
+      await generateVolatilityForecast();
+
+      // 3) Apply conformal calibration
+      await applyConformalPrediction();
+    } catch (err) {
+      console.error('[UnifiedGenerate] error', err);
+    }
+  }, [
+    activeBaseMethod,
+    baseForecastCount,
+    conformalCalWindow,
+    handleGenerateBaseForecasts,
+    loadBaseForecastCount,
+    loadModelLine,
+    generateVolatilityForecast,
+    applyConformalPrediction,
+  ]);
 
   const saveTargetSpec = async () => {
     setIsSavingTarget(true);
@@ -1524,38 +1667,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   };
 
-  // Validation Gates Functions
-  const checkGatesBeforeAction = async (actionName: string): Promise<boolean> => {
-    setIsCheckingGates(true);
-    try {
-      const response = await fetch(`/api/validation/gates/${params.ticker}`);
-      if (!response.ok) {
-        throw new Error(`Gates API failed: ${response.status}`);
-      }
-      const gates: GateStatus = await response.json();
-      setGatesStatus(gates);
-      
-      if (!gates.ok) {
-        const errorMsg = `Cannot proceed with ${actionName}:\n${gates.errors.join('\n')}`;
-        alert(errorMsg);
-        return false;
-      }
-      
-      if (gates.warnings.length > 0) {
-        const warningMsg = `Warnings for ${actionName}:\n${gates.warnings.join('\n')}\n\nProceed anyway?`;
-        return confirm(warningMsg);
-      }
-      
-      return true;
-    } catch (err) {
-      console.error('Gates check failed:', err);
-      const proceedAnyway = confirm(`Gates validation failed (${err}). Proceed anyway?`);
-      return proceedAnyway;
-    } finally {
-      setIsCheckingGates(false);
-    }
-  };
-
   // Breakout Detection Functions
   const detectBreakoutToday = async () => {
     // Check validation gates first
@@ -1960,21 +2071,33 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [params.ticker, loadBaseForecastCount]);
 
   return (
-    <div className="w-full px-[5%] py-6">
+    <div className={`w-full px-[5%] py-6 ${
+      isDarkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
+    }`}>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">{companyName || companyTicker}</h1>
-          <p className="text-xl text-gray-600">{companyTicker} · {companyExchange}</p>
+          <h1 className={`text-3xl font-bold ${
+            isDarkMode ? 'text-white' : 'text-gray-900'
+          }`}>{companyName || companyTicker}</h1>
+          <p className={`text-xl ${
+            isDarkMode ? 'text-gray-300' : 'text-gray-600'
+          }`}>{companyTicker} · {companyExchange}</p>
         </div>
         <div className="flex items-center gap-3">
           {watchlistSuccess && (
-            <span className="text-green-600 text-sm font-medium">
+            <span className={`text-sm font-medium ${
+              isDarkMode ? 'text-green-400' : 'text-green-600'
+            }`}>
               ✓ Added to Watchlist
             </span>
           )}
           <button
             onClick={() => setShowUploadModal(true)}
-            className="flex items-center justify-center w-9 h-9 bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-2 border-black hover:border-gray-700 font-medium rounded-full shadow-sm transition-all duration-200"
+            className={`flex items-center justify-center w-9 h-9 font-medium rounded-full shadow-sm transition-all duration-200 border-2 ${
+              isDarkMode 
+                ? 'bg-gray-800 hover:bg-gray-700 text-white hover:text-gray-300 border-gray-600 hover:border-gray-500'
+                : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700'
+            }`}
             title="Upload Data"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1983,7 +2106,11 @@ export default function TimingPage({ params }: TimingPageProps) {
           </button>
           <button
             onClick={() => setShowDataQualityModal(true)}
-            className="flex items-center justify-center w-9 h-9 bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-2 border-black hover:border-gray-700 rounded-full shadow-sm transition-all duration-200"
+            className={`flex items-center justify-center w-9 h-9 rounded-full shadow-sm transition-all duration-200 border-2 ${
+              isDarkMode 
+                ? 'bg-gray-800 hover:bg-gray-700 text-white hover:text-gray-300 border-gray-600 hover:border-gray-500'
+                : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700'
+            }`}
             title="Data Quality Information"
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -1995,8 +2122,12 @@ export default function TimingPage({ params }: TimingPageProps) {
             disabled={isAddingToWatchlist || isInWatchlist}
             className={`flex items-center justify-center w-9 h-9 font-medium rounded-full shadow-sm transition-all duration-200 border-2 ${
               isInWatchlist 
-                ? 'bg-white text-black border-black cursor-default' 
-                : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none'
+                ? isDarkMode
+                  ? 'bg-gray-800 text-white border-gray-600 cursor-default'
+                  : 'bg-white text-black border-black cursor-default'
+                : isDarkMode
+                  ? 'bg-gray-800 hover:bg-gray-700 text-white hover:text-gray-300 border-gray-600 hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none'
+                  : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none'
             }`}
             title={isInWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
           >
@@ -2005,27 +2136,35 @@ export default function TimingPage({ params }: TimingPageProps) {
         </div>
       </div>
       
-      {/* 3 Column Layout */}
+      {/* Unified Forecast Bands Card - Full Width */}
       <div className="mb-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Volatility Models Card */}
-          <div className="p-6 border rounded-lg bg-white shadow-sm">
-            <h3 className="text-xl font-semibold mb-4">Volatility Models</h3>
-            
-            {/* Horizon and Coverage Controls - Stacked */}
-            <div className="mb-6 space-y-6">
-              {/* Horizon Controls */}
+        <div className={`p-6 border rounded-lg shadow-sm ${
+          isDarkMode 
+            ? 'bg-gray-800 border-gray-600' 
+            : 'bg-white border-gray-200'
+        }`} data-testid="card-forecast-bands">
+          <h3 className={`text-xl font-semibold mb-4 ${
+            isDarkMode ? 'text-white' : 'text-gray-900'
+          }`}>Forecast Bands</h3>
+          
+          {/* Row 1: Horizon and Coverage Controls - Side by Side */}
+          <div className="mb-6 grid grid-cols-2 gap-6">
+            {/* Column 1: Horizon Controls */}
               <div>
-                <label className="block text-sm font-medium mb-3">Horizon</label>
+                <label className={`block text-sm font-medium mb-3 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Horizon</label>
                 <div className="flex items-center gap-2">
                   {[1, 2, 3, 5].map((days) => (
                     <button
                       key={days}
                       onClick={() => setH(days)}
-                      className={`px-3 py-1 text-sm rounded ${
+                      className={`px-3 py-1 text-sm rounded-full ${
                         h === days 
                           ? 'bg-blue-600 text-white' 
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : isDarkMode 
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
                       {days}D
@@ -2034,562 +2173,463 @@ export default function TimingPage({ params }: TimingPageProps) {
                 </div>
               </div>
 
-              {/* Coverage Controls */}
+              {/* Column 2: Coverage Controls */}
               <div>
-                <label className="block text-sm font-medium mb-3">Coverage</label>
+                <label className={`block text-sm font-medium mb-3 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Coverage</label>
                 <div className="flex items-center gap-2">
-                  {[0.90, 0.95, 0.975].map((level) => (
+                  {[0.90, 0.95, 0.99].map((cov) => (
                     <button
-                      key={level}
-                      onClick={() => setCoverage(level)}
-                      className={`px-3 py-1 text-sm rounded ${
-                        coverage === level 
+                      key={cov}
+                      onClick={() => setCoverage(cov)}
+                      className={`px-3 py-1 text-sm rounded-full ${
+                        coverage === cov 
                           ? 'bg-blue-600 text-white' 
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : isDarkMode 
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
-                      {(level * 100).toFixed(1)}%
+                      {(cov * 100).toFixed(0)}%
                     </button>
                   ))}
                 </div>
               </div>
             </div>
-            
-            {/* Model Selection */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium mb-3">Select Model:</label>
-              <div className="flex items-center gap-2">
-                {[
-                  { key: 'GBM', label: 'GBM' },
-                  { key: 'GARCH', label: `GARCH (1,1)` },
-                  { key: 'HAR-RV', label: 'HAR-RV' },
-                  { key: 'Range', label: 'Range' }
-                ].map((model) => (
-                  <button
-                    key={model.key}
-                    onClick={() => setVolModel(model.key as any)}
-                    className={`px-3 py-1 text-sm rounded ${
-                      volModel === model.key 
-                        ? 'bg-blue-600 text-white' 
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {model.label}
-                  </button>
-                ))}
-              </div>
-            </div>
 
-            {/* Model-specific parameters */}
-            {volModel === 'GBM' && (
-              <>
-                {/* GBM window + lambda controls (reused from GBM card) */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">GBM Window Length</label>
-                  <div className="flex flex-wrap gap-2">
-                    {[252, 504, 756].map((size) => (
-                      <button
-                        key={size}
-                        onClick={() => setGbmWindow(size)}
-                        className={`px-3 py-1 text-sm rounded ${
-                          gbmWindow === size ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            {/* Row 2: Volatility Model Section */}
+            <div className="mb-6">
+              <h4 className={`text-xl font-semibold mb-3 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>Volatility Model</h4>
+              
+              {/* Model Selection */}
+              <div className="mb-4">
+                <label className={`block text-sm font-medium mb-2 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Model:</label>
+                <div className="flex gap-2 flex-wrap">
+                  {['GBM', 'GARCH', 'HAR-RV', 'Range'].map((model) => (
+                    <button
+                      key={model}
+                      onClick={() => setVolModel(model as any)}
+                      className={`px-4 py-2 text-sm rounded-full ${
+                        volModel === model 
+                          ? 'bg-blue-600 text-white' 
+                          : isDarkMode 
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {model === 'GBM' ? 'GBM' : model === 'GARCH' ? 'GARCH (1,1)' : model}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Model-Specific Parameters */}
+              {(volModel === 'GARCH' || volModel === 'Range') && (
+                <div className="mb-4 grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={`block text-sm font-medium mb-2 ${
+                      isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                    }`}>
+                      {volModel === 'GARCH' ? 'Distribution:' : 'Estimator:'}
+                    </label>
+                    {volModel === 'GARCH' ? (
+                      <select 
+                        value={garchEstimator} 
+                        onChange={(e) => setGarchEstimator(e.target.value as any)}
+                        className={`w-full p-2 border rounded-md ${
+                          isDarkMode 
+                            ? 'bg-gray-700 border-gray-600 text-white' 
+                            : 'bg-white border-gray-300 text-gray-900'
                         }`}
                       >
-                        {size}
-                      </button>
-                    ))}
+                        <option value="Normal">Normal</option>
+                        <option value="Student-t">Student-t</option>
+                      </select>
+                    ) : (
+                      <select 
+                        value={rangeEstimator} 
+                        onChange={(e) => setRangeEstimator(e.target.value as any)}
+                        className={`w-full p-2 border rounded-md ${
+                          isDarkMode 
+                            ? 'bg-gray-700 border-gray-600 text-white' 
+                            : 'bg-white border-gray-300 text-gray-900'
+                        }`}
+                      >
+                        <option value="P">Parkinson</option>
+                        <option value="GK">Garman-Klass</option>
+                        <option value="RS">Rogers-Satchell</option>
+                        <option value="YZ">Yang-Zhang</option>
+                      </select>
+                    )}
                   </div>
+                  {volModel === 'GARCH' && garchEstimator === 'Student-t' && (
+                    <div>
+                      <label className={`block text-sm font-medium mb-2 ${
+                        isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                      }`}>Degrees of freedom:</label>
+                      <input 
+                        type="number" 
+                        value={garchDf} 
+                        onChange={(e) => setGarchDf(Number(e.target.value))}
+                        className={`w-full p-2 border rounded-md ${
+                          isDarkMode 
+                            ? 'bg-gray-700 border-gray-600 text-white' 
+                            : 'bg-white border-gray-300 text-gray-900'
+                        }`}
+                        min="3"
+                        step="1"
+                      />
+                    </div>
+                  )}
+                  {volModel === 'Range' && (
+                    <div>
+                      <label className={`block text-sm font-medium mb-2 ${
+                        isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                      }`}>EWMA λ:</label>
+                      <input 
+                        type="number" 
+                        value={rangeEwmaLambda} 
+                        onChange={(e) => setRangeEwmaLambda(Number(e.target.value))}
+                        className={`w-full p-2 border rounded-md ${
+                          isDarkMode 
+                            ? 'bg-gray-700 border-gray-600 text-white' 
+                            : 'bg-white border-gray-300 text-gray-900'
+                        }`}
+                        min="0.01"
+                        max="0.99"
+                        step="0.01"
+                      />
+                    </div>
+                  )}
                 </div>
+              )}
 
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">
-                    Drift Shrinkage λ: {gbmLambda.toFixed(3)}
-                  </label>
+              {/* Window Control */}
+              <div className="mb-4">
+                <label className={`block text-sm font-medium mb-2 ${
+                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                }`}>Window size:</label>
+                <div className="flex items-center gap-2">
                   <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.025"
-                    value={gbmLambda}
-                    onChange={(e) => setGbmLambda(parseFloat(e.target.value))}
-                    className="w-full"
+                    type="number"
+                    value={volModel === 'GBM' ? gbmWindow : volWindow}
+                    onChange={(e) => {
+                      const value = parseInt(e.target.value);
+                      if (volModel === 'GBM') {
+                        setGbmWindow(value);
+                      } else {
+                        setVolWindow(value);
+                      }
+                    }}
+                    className={`flex-1 px-3 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500 ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                    min="1"
+                    max="5000"
                   />
-                </div>
-              </>
-            )}
-
-            {volModel === 'GARCH' && (
-              <>
-                {/* Estimator Selection for GARCH */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">Estimator:</label>
-                  <select
-                    value={garchEstimator}
-                    onChange={(e) => setGarchEstimator(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  <button
+                    onClick={() => {
+                      if (volModel === 'GBM') {
+                        setGbmWindow(504);
+                      } else {
+                        setVolWindow(1000);
+                      }
+                    }}
+                    className={`px-3 py-1 text-sm rounded-full ${
+                      isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                    title="Reset to default"
                   >
-                    <option value="Normal">Parkinson</option>
-                    <option value="Student-t">Student-t</option>
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              {/* Error Display */}
+              {volatilityError && (
+                <p className={`text-sm mb-4 ${
+                  isDarkMode ? 'text-red-400' : 'text-red-600'
+                }`}>{volatilityError}</p>
+              )}
+            </div>
+
+            {/* Row 3: Conformal Section */}
+            <div className="mb-6">
+              <h4 className={`text-xl font-semibold mb-3 ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-800'
+              }`}>Conformal Calibration</h4>
+              
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Mode:</label>
+                  <select 
+                    value={conformalMode} 
+                    onChange={(e) => setConformalMode(e.target.value as any)}
+                    className={`w-full p-2 border rounded-full ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  >
+                    <option value="ICP">ICP</option>
+                    <option value="ICP-SCALED">ICP-scaled</option>
+                    <option value="CQR">CQR</option>
+                    <option value="EnbPI">EnbPI</option>
+                    <option value="ACI">ACI</option>
                   </select>
                 </div>
-
-                {/* Window Configuration for GARCH */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">Window (days) - Manual Override</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={volWindow}
-                      onChange={(e) => setVolWindow(parseInt(e.target.value))}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      min="1"
-                      max="5000"
-                    />
-                    <button
-                      onClick={() => setVolWindow(1000)}
-                      className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-                      title="Reset to default"
-                    >
-                      Manual
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {volModel === 'HAR-RV' && (
-              <>
-                {/* Window Configuration for HAR-RV */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">Window (days) - Manual Override</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={volWindow}
-                      onChange={(e) => setVolWindow(parseInt(e.target.value))}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      min="1"
-                      max="5000"
-                    />
-                    <button
-                      onClick={() => setVolWindow(1000)}
-                      className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-                      title="Reset to default"
-                    >
-                      Manual
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {volModel === 'Range' && (
-              <>
-                {/* Estimator Selection for Range */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">Estimator:</label>
-                  <select
-                    value={rangeEstimator}
-                    onChange={(e) => setRangeEstimator(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Domain:</label>
+                  <select 
+                    value={conformalDomain} 
+                    onChange={(e) => setConformalDomain(e.target.value as 'log' | 'price')}
+                    className={`w-full p-2 border rounded-full ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
                   >
-                    <option value="P">Parkinson</option>
-                    <option value="GK">Garman-Klass</option>
-                    <option value="RS">Rogers-Satchell</option>
-                    <option value="YZ">Yang-Zhang</option>
+                    <option value="log">Log scale</option>
+                    <option value="price">Price scale</option>
                   </select>
                 </div>
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Calibration window:</label>
+                  <select 
+                    value={conformalCalWindow} 
+                    onChange={(e) => setConformalCalWindow(Number(e.target.value))}
+                    className={`w-full p-2 border rounded-full ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  >
+                    <option value={60}>60 days</option>
+                    <option value={125}>125 days</option>
+                    <option value={250}>250 days</option>
+                    <option value={500}>500 days</option>
+                  </select>
+                </div>
+              </div>
 
-                {/* Window Configuration for Range */}
+              {/* Mode-specific parameters */}
+              {conformalMode === 'ACI' && (
                 <div className="mb-4">
-                  <label className="block text-sm font-medium mb-3">Window (days) - Manual Override</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={volWindow}
-                      onChange={(e) => setVolWindow(parseInt(e.target.value))}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      min="1"
-                      max="5000"
-                    />
+                  <label className={`block text-sm font-medium mb-2 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Learning rate η:</label>
+                  <input 
+                    type="number" 
+                    value={conformalEta} 
+                    onChange={(e) => setConformalEta(Number(e.target.value))}
+                    className={`w-full p-2 border rounded-md ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                    min="0.001"
+                    step="0.001"
+                  />
+                  <p className={`text-xs mt-1 ${
+                    isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                  }`}>Adaptive adjustment rate</p>
+                </div>
+              )}
+
+              {conformalMode === 'EnbPI' && (
+                <div className="mb-4">
+                  <label className={`block text-sm font-medium mb-2 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>Ensemble size K:</label>
+                  <input 
+                    type="number" 
+                    value={conformalK} 
+                    onChange={(e) => setConformalK(Number(e.target.value))}
+                    className={`w-full p-2 border rounded-md ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                    min="5"
+                    step="1"
+                  />
+                  <p className={`text-xs mt-1 ${
+                    isDarkMode ? 'text-gray-400' : 'text-gray-600'
+                  }`}>Minimum 5, default 20</p>
+                </div>
+              )}
+
+              {/* Coverage Statistics - Enhanced Section */}
+              {conformalState && conformalState.coverage && (
+                <div className="mb-4 pt-4 border-t border-gray-200">
+                  <h5 className="text-sm font-semibold text-gray-800 mb-3">Coverage Statistics</h5>
+                  
+                  {/* Coverage Metrics Grid - 4 Columns */}
+                  <div className="grid grid-cols-4 gap-4 mb-4">
+                    <div className="bg-blue-50 p-3 rounded-full text-center">
+                      <div className="text-lg font-mono font-bold text-blue-900">
+                        {((conformalState.coverage.last60 || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-xs text-gray-600">Last 60d</div>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-full text-center">
+                      <div className="text-lg font-mono font-bold text-blue-900">
+                        {((conformalState.coverage.lastCal || 0) * 100).toFixed(1)}%
+                      </div>
+                      <div className="text-xs text-gray-600">Cal Window</div>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-full text-center">
+                      <div className="text-lg font-mono font-bold text-blue-900">
+                        {conformalState.coverage.miss_count || 0}
+                      </div>
+                      <div className="text-xs text-gray-600">Misses</div>
+                    </div>
+                    {/* Calibrated Parameters as 4th column */}
+                    {conformalState.params && conformalState.params.q_cal !== null ? (
+                      <div className="bg-blue-50 p-3 rounded-full">
+                        <div className="text-xs font-medium text-gray-700 mb-2">Calibrated Parameters</div>
+                        <div className="text-sm font-mono text-blue-900">
+                          q_cal = {conformalState.params.q_cal?.toFixed(6) || 'N/A'}
+                        </div>
+                        {conformalState.params.alpha && (
+                          <div className="text-xs text-gray-600 mt-1">
+                            α = {conformalState.params.alpha.toFixed(6)}
+                          </div>
+                        )}
+                        {conformalState.params.delta_L !== undefined && conformalState.params.delta_U !== undefined && (
+                          <div className="text-xs text-gray-600 mt-1">
+                            δ_L = {conformalState.params.delta_L?.toFixed(6) || 'N/A'}
+                          </div>
+                        )}
+                        {conformalState.params.theta && (
+                          <div className="text-xs text-gray-600 mt-1">
+                            θ = {conformalState.params.theta.toFixed(6)}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="bg-gray-50 p-3 rounded-full text-center">
+                        <div className="text-sm text-gray-500">No calibration</div>
+                        <div className="text-xs text-gray-400">pending</div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Hide/Show Details Toggle */}
+                  <div className="text-right mb-3">
                     <button
-                      onClick={() => setVolWindow(1000)}
-                      className="px-3 py-1 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
-                      title="Reset to default"
+                      onClick={() => setShowCoverageDetails(!showCoverageDetails)}
+                      className="text-sm text-blue-600 hover:text-blue-800"
                     >
-                      Manual
+                      {showCoverageDetails ? 'Hide Details' : 'Show Details'}
                     </button>
                   </div>
-                </div>
-              </>
-            )}
 
-            {/* Generate Button */}
-            <div className="mb-4">
+                  {/* Miss Details Table */}
+                  {showCoverageDetails && conformalState.coverage.miss_details && conformalState.coverage.miss_details.length > 0 && (
+                    <div className="mb-4">
+                      <h6 className="text-sm font-medium text-gray-700 mb-2">
+                        Miss Details ({conformalState.coverage.miss_count} misses)
+                      </h6>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs border border-gray-200 rounded">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-2 py-1 text-left border-b">Date</th>
+                              <th className="px-2 py-1 text-right border-b">Realized</th>
+                              <th className="px-2 py-1 text-right border-b">Predicted</th>
+                              <th className="px-2 py-1 text-right border-b">L_base</th>
+                              <th className="px-2 py-1 text-right border-b">U_base</th>
+                              <th className="px-2 py-1 text-center border-b">Type</th>
+                              <th className="px-2 py-1 text-right border-b">Magnitude</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {conformalState.coverage.miss_details.map((miss: any, idx: number) => (
+                              <tr key={`${miss.date}-${idx}`} className="border-b border-gray-100">
+                                <td className="px-2 py-1 text-gray-700">{miss.date}</td>
+                                <td className="px-2 py-1 text-right font-mono">{miss.realized?.toFixed(4)}</td>
+                                <td className="px-2 py-1 text-right font-mono">{miss.y_pred?.toFixed(4)}</td>
+                                <td className="px-2 py-1 text-right font-mono text-blue-600">{miss.L_base?.toFixed(4)}</td>
+                                <td className="px-2 py-1 text-right font-mono text-blue-600">{miss.U_base?.toFixed(4)}</td>
+                                <td className="px-2 py-1 text-center">
+                                  <span className={`${miss.miss_type === 'above' ? 'text-red-500' : 'text-orange-500'}`}>
+                                    {miss.miss_type === 'above' ? '↑' : '↓'}
+                                  </span>
+                                </td>
+                                <td className="px-2 py-1 text-right font-mono">{miss.miss_magnitude?.toFixed(4)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* No misses message */}
+                  {showCoverageDetails && conformalState.coverage.miss_count === 0 && (
+                    <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded text-center text-sm text-green-700">
+                      ✓ No coverage misses detected - perfect calibration performance!
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Error Display */}
+              {conformalError && (
+                <p className={`text-sm mb-4 ${
+                  isDarkMode ? 'text-red-400' : 'text-red-600'
+                }`}>{conformalError}</p>
+              )}
+            </div>
+
+            {/* Row 4: Unified Generate Button */}
+            <div className="flex justify-center">
               <button
-                onClick={generateVolatilityForecast}
-                disabled={isGeneratingVolatility}
-                className="w-full px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleUnifiedGenerate}
+                disabled={
+                  isGeneratingVolatility || 
+                  isApplyingConformal || 
+                  isGeneratingBase ||
+                  !targetSpecResult
+                }
+                className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-full shadow-sm transition-colors duration-200 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:shadow-none"
               >
-                {isGeneratingVolatility ? 'Generating...' : 'Generate'}
+                {(isGeneratingVolatility || isApplyingConformal || isGeneratingBase) ? (
+                  <span className="flex items-center gap-2">
+                    <span className="animate-spin">⟳</span>
+                    Processing...
+                  </span>
+                ) : (
+                  'Generate Forecast Bands'
+                )}
               </button>
             </div>
 
-            {/* Error Display */}
-            {volatilityError && (
-              <p className="text-red-600 text-sm mb-4">{volatilityError}</p>
-            )}
-
-            {/* Methods & Formulas */}
-            <details className="mt-4">
-              <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
-                Range-P Validation Checklist 1 warning
-              </summary>
-            </details>
-            
-            <details className="mt-2">
-              <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
-                Methods & Formulas
-              </summary>
-              <div className="mt-2 text-xs bg-blue-50 p-3 rounded font-mono">
-                <p>mu_star_hat = mean( r_window )</p>
-                <p>sigma_hat = sqrt( (1/N) * Σ (r_i − mu_star_hat)² )     # MLE (denominator N)</p>
-                <p>mu_star_used = λ * mu_star_hat</p>
-                <p>m_t(h) = ln(S_t) + h * mu_star_used</p>
-                <p>s_t(h) = sigma_hat * sqrt(h)</p>
-                <p>z_α = Φ⁻¹(1 − α/2)</p>
-                <p>L_h = exp( m_t(h) − z_α * s_t(h) )</p>
-                <p>U_h = exp( m_t(h) + z_α * s_t(h) )</p>
-                <p>band_width_bp = 10000 * (U_1 / L_1 − 1)</p>
-              </div>
-            </details>
-          </div>
-
-          {/* GBM Baseline PI Engine Card - DEPRECATED: GBM is now available through Volatility Models card */}
-          {/* Temporarily hidden while GBM integration into Volatility Models is being tested
-          <div className="p-6 border rounded-lg bg-white shadow-sm" data-testid="card-gbm">
-            <h3 className="text-xl font-semibold mb-4">
-              <span className="text-orange-600">⚠️ Deprecated:</span> GBM Baseline PI Engine
-            </h3>
-            <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded">
-              <p className="text-orange-700 text-sm">
-                <strong>Notice:</strong> GBM functionality has been moved to the Volatility Models card above. 
-                Select "GBM (baseline)" from the model selection and use the integrated controls.
-              </p>
-            </div>
-          </div>
-          */}
-
-          {/* Conformal Prediction Intervals Card */}
-        <div className="p-6 border rounded-lg bg-white shadow-sm" data-testid="card-conformal">
-          <h3 className="text-xl font-semibold mb-4">Conformal Prediction Intervals</h3>
-          
-          {/* Mode, Domain, Calibration Window - 1 Column 3 Rows Layout */}
-          <div className="space-y-4 mb-6">
-            <div>
-              <label className="block text-sm font-medium mb-2">Mode:</label>
-              <select 
-                value={conformalMode} 
-                onChange={(e) => setConformalMode(e.target.value as any)}
-                className="w-full p-2 border rounded-md"
-              >
-                <option value="ICP">ICP</option>
-                <option value="ICP-SCALED">ICP-scaled</option>
-                <option value="CQR">CQR</option>
-                <option value="EnbPI">EnbPI</option>
-                <option value="ACI">ACI</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Domain:</label>
-              <select 
-                value={conformalDomain} 
-                onChange={(e) => setConformalDomain(e.target.value as 'log' | 'price')}
-                className="w-full p-2 border rounded-md"
-              >
-                <option value="log">log (default)</option>
-                <option value="price">price</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Calibration Window:</label>
-              <select 
-                value={conformalCalWindow} 
-                onChange={(e) => setConformalCalWindow(Number(e.target.value))}
-                className="w-full p-2 border rounded-md"
-              >
-                <option value={125} className={baseForecastCount !== null && baseForecastCount >= 125 ? 'text-green-700' : 'text-red-600'}>
-                  125 days {baseForecastCount !== null && baseForecastCount >= 125 ? '✓' : baseForecastCount !== null ? `(need ${125 - baseForecastCount} more)` : ''}
-                </option>
-                <option value={250} className={baseForecastCount !== null && baseForecastCount >= 250 ? 'text-green-700' : 'text-red-600'}>
-                  250 days (default) {baseForecastCount !== null && baseForecastCount >= 250 ? '✓' : baseForecastCount !== null ? `(need ${250 - baseForecastCount} more)` : ''}
-                </option>
-                <option value={500} className={baseForecastCount !== null && baseForecastCount >= 500 ? 'text-green-700' : 'text-red-600'}>
-                  500 days {baseForecastCount !== null && baseForecastCount >= 500 ? '✓' : baseForecastCount !== null ? `(need ${500 - baseForecastCount} more)` : ''}
-                </option>
-              </select>
-              {baseForecastCount !== null && (
-                <p className="text-xs text-gray-600 mt-1">
-                  Available forecasts for {activeBaseMethod ?? 'active method'}: {baseForecastCount}
-                  {baseForecastCount < conformalCalWindow && (
-                    <span className="text-amber-600 ml-2">
-                      — Consider selecting {baseForecastCount >= 125 ? '125' : 'generating more forecasts'}
-                    </span>
-                  )}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Mode-specific Parameters */}
-          {conformalMode === 'ACI' && (
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2">Step size η:</label>
-              <select 
-                value={conformalEta} 
-                onChange={(e) => setConformalEta(Number(e.target.value))}
-                className="w-full p-2 border rounded-md"
-              >
-                <option value={0.01}>0.01</option>
-                <option value={0.02}>0.02 (default)</option>
-                <option value={0.05}>0.05</option>
-              </select>
-            </div>
-          )}
-
-          {conformalMode === 'EnbPI' && (
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2">Ensemble size K:</label>
-              <input 
-                type="number" 
-                value={conformalK} 
-                onChange={(e) => setConformalK(Number(e.target.value))}
-                className="w-full p-2 border rounded-md"
-                min="5"
-                step="1"
-              />
-              <p className="text-xs text-gray-600 mt-1">Minimum 5, default 20</p>
-            </div>
-          )}
-
-          {/* Apply Button and Generate Button - Side by Side */}
-          <div className="mb-4 flex gap-3">
-            <button
-              onClick={applyConformalPrediction}
-              disabled={
-                isApplyingConformal || 
-                !targetSpecResult || 
-                !activeForecast ||
-                (baseForecastCount !== null && baseForecastCount < conformalCalWindow)
-              }
-              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-full shadow-sm transition-colors duration-200 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:shadow-none"
-            >
-              {isApplyingConformal ? 'Applying...' : 
-                activeForecast 
-                  ? `Apply to ${activeForecast.method} (${activeForecast.target?.coverage ? (activeForecast.target.coverage * 100).toFixed(1) + '%' : '95%'} coverage)`
-                  : 'Apply Conformal PI'
-              }
-            </button>
-            
-            <button
-              type="button"
-              onClick={handleGenerateBaseForecasts}
-              disabled={
-                isGeneratingBase || 
-                !activeBaseMethod || 
-                (baseForecastCount !== null && baseForecastCount >= conformalCalWindow)
-              }
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-full shadow-sm transition-colors duration-200 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:shadow-none"
-            >
-              {isGeneratingBase ? (
-                <span className="flex items-center gap-2">
-                  <span className="animate-spin">⟳</span>
-                  Generating...
-                </span>
-              ) : (
-                `Generate for ${conformalCalWindow}-day window`
-              )}
-            </button>
-          </div>
-          
-          {/* Status Messages */}
-          <div className="mb-4 space-y-2">
+            {/* Status Messages */}
             {!targetSpecResult && (
-              <p className="text-sm text-gray-500">Please save target specification first</p>
-            )}
-            {baseForecastCount !== null && baseForecastCount < conformalCalWindow && (
-              <p className="text-sm text-red-600">
-                Need {conformalCalWindow - baseForecastCount} more base forecasts for calibration
-              </p>
+              <p className={`text-sm text-center mt-4 ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>Please save target specification first</p>
             )}
           </div>
-
-          {/* Error Display */}
-          {conformalError && (
-            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-md text-red-700">
-              <p className="font-medium">Error:</p>
-              <p className="text-sm">{conformalError}</p>
-            </div>
-          )}
-
-          {/* Coverage Chips */}
-          {conformalState && (
-            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
-              <h4 className="font-medium mb-2">Coverage Statistics</h4>
-              <div className="grid grid-cols-3 gap-2 text-sm">
-                <div className="text-center">
-                  <div className="font-mono text-lg">
-                    {conformalState.coverage.last60 !== null 
-                      ? `${(conformalState.coverage.last60 * 100).toFixed(1)}%` 
-                      : 'N/A'}
-                  </div>
-                  <div className="text-xs text-gray-600">Last 60d</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-mono text-lg">
-                    {conformalState.coverage.lastCal !== null 
-                      ? `${(conformalState.coverage.lastCal * 100).toFixed(1)}%` 
-                      : 'N/A'}
-                  </div>
-                  <div className="text-xs text-gray-600">Cal Window</div>
-                </div>
-                <div className="text-center">
-                  <div className="font-mono text-lg">{conformalState.coverage.miss_count}</div>
-                  <div className="text-xs text-gray-600">Misses</div>
-                  {conformalState.coverage.miss_details && conformalState.coverage.miss_details.length > 0 && (
-                    <button
-                      onClick={() => setShowMissDetails(!showMissDetails)}
-                      className="mt-1 px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 rounded"
-                    >
-                      {showMissDetails ? 'Hide' : 'View'} Details
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Miss Details Table */}
-          {conformalState && showMissDetails && conformalState.coverage.miss_details && (
-            <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-md">
-              <h4 className="font-medium mb-3">Miss Details ({conformalState.coverage.miss_count} misses)</h4>
-              <div className="max-h-64 overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b text-gray-600">
-                      <th className="text-left py-1 px-2">Date</th>
-                      <th className="text-right py-1 px-2">Realized</th>
-                      <th className="text-right py-1 px-2">Predicted</th>
-                      <th className="text-right py-1 px-2">L_base</th>
-                      <th className="text-right py-1 px-2">U_base</th>
-                      <th className="text-center py-1 px-2">Type</th>
-                      <th className="text-right py-1 px-2">Magnitude</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {conformalState.coverage.miss_details.map((miss: any, idx: number) => (
-                      <tr key={idx} className="border-b border-gray-100 hover:bg-gray-100">
-                        <td className="py-1 px-2 font-mono">{miss.date}</td>
-                        <td className="py-1 px-2 font-mono text-right">{miss.realized.toFixed(4)}</td>
-                        <td className="py-1 px-2 font-mono text-right text-gray-600">{miss.y_pred.toFixed(4)}</td>
-                        <td className="py-1 px-2 font-mono text-right text-blue-600">{miss.L_base.toFixed(4)}</td>
-                        <td className="py-1 px-2 font-mono text-right text-blue-600">{miss.U_base.toFixed(4)}</td>
-                        <td className="py-1 px-2 text-center">
-                          <span className={`px-1 rounded text-xs ${
-                            miss.miss_type === 'below' 
-                              ? 'bg-red-100 text-red-700' 
-                              : 'bg-orange-100 text-orange-700'
-                          }`}>
-                            {miss.miss_type === 'below' ? '↓' : '↑'}
-                          </span>
-                        </td>
-                        <td className="py-1 px-2 font-mono text-right">{miss.miss_magnitude.toFixed(4)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Parameters Display */}
-          {conformalState && (
-            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md">
-              <h4 className="font-medium mb-2">Calibrated Parameters</h4>
-              <div className="text-sm font-mono">
-                {conformalMode === 'ICP' && conformalState.params.q_cal !== null && (
-                  <p>q_cal = {conformalState.params.q_cal.toFixed(6)}</p>
-                )}
-                {conformalMode === 'ICP-SCALED' && conformalState.params.q_cal_scaled != null && (
-                  <p>q_cal_scaled = {conformalState.params.q_cal_scaled.toFixed(6)}</p>
-                )}
-                {conformalMode === 'CQR' && (
-                  <div>
-                    {conformalState.params.delta_L != null && (
-                      <p>Δ_L = {conformalState.params.delta_L.toFixed(6)}</p>
-                    )}
-                    {conformalState.params.delta_U != null && (
-                      <p>Δ_U = {conformalState.params.delta_U.toFixed(6)}</p>
-                    )}
-                  </div>
-                )}
-                {conformalMode === 'EnbPI' && (
-                  <div>
-                    {conformalState.params.K && <p>K = {conformalState.params.K}</p>}
-                    {conformalState.params.q_cal != null && (
-                      <p>q_cal = {conformalState.params.q_cal.toFixed(6)}</p>
-                    )}
-                  </div>
-                )}
-                {conformalMode === 'ACI' && (
-                  <div>
-                    {conformalState.params.eta && <p>η = {conformalState.params.eta}</p>}
-                    {conformalState.params.theta != null && (
-                      <p>θ = {conformalState.params.theta.toFixed(6)}</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Warnings */}
-          {conformalState && conformalState.domain !== conformalDomain && (
-            <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-md text-yellow-700">
-              <p className="font-medium">⚠️ Domain Switch Warning</p>
-              <p className="text-sm">Domain switched {conformalState.domain} ↔ {conformalDomain}: recalibration required</p>
-            </div>
-          )}
-
-          {/* Formula Tooltip */}
-          <details className="mt-4">
-            <summary className="cursor-pointer text-blue-600 hover:text-blue-800 font-medium text-sm">
-              Methods & Formulas
-            </summary>
-            <div className="mt-2 text-xs bg-blue-50 p-3 rounded font-mono">
-              <div className="space-y-2">
-                <div>
-                  <strong>ICP:</strong> q_cal = Q&#123;1−α&#125;(|y_i − ŷ_i|); PI: [ ŷ ± q_cal ]
-                </div>
-                <div>
-                  <strong>ICP scaled:</strong> q_cal_s = Q&#123;1−α&#125;(|y_i − ŷ_i| / σ_pred_i); width = q_cal_s·σ_pred_t
-                </div>
-                <div>
-                  <strong>CQR:</strong> L = L^0 − Δ_L ; U = U^0 + Δ_U
-                </div>
-                <div>
-                  <strong>EnbPI:</strong> OOB residuals → q_cal ; PI: [ ŷ ± q_cal ]
-                </div>
-                <div>
-                  <strong>ACI:</strong> θ&#123;t+1&#125; = θ_t + η ( miss_t − α )
-                </div>
-              </div>
-            </div>
-          </details>
         </div>
-        </div>
-      </div>
-      
+
       {/* Price Chart Section */}
       <PriceChart 
         symbol={params.ticker} 
@@ -2611,6 +2651,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         conformalError={conformalError}
         activeBaseMethod={activeBaseMethod}
         targetSpecResult={targetSpecResult}
+        modelLine={modelLine}
         onConformalModeChange={setConformalMode}
         onConformalDomainChange={setConformalDomain}
         onConformalCalWindowChange={setConformalCalWindow}
@@ -3091,39 +3132,6 @@ export default function TimingPage({ params }: TimingPageProps) {
 
       {/* QA Testing Panel */}
       <QAPanel className="mb-8" />
-
-      {/* Validation Gates Status */}
-      {gatesStatus && (
-        <div className={`mb-8 p-4 border rounded-lg ${
-          gatesStatus.ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'
-        }`} data-testid="validation-gates-status">
-          <h3 className="font-medium mb-2">
-            Validation Gates: {gatesStatus.ok ? '✅ All Clear' : '❌ Issues Found'}
-          </h3>
-          
-          {gatesStatus.errors.length > 0 && (
-            <div className="mb-2">
-              <p className="text-sm font-medium text-red-800 mb-1">Errors:</p>
-              <ul className="text-sm text-red-700 list-disc list-inside">
-                {gatesStatus.errors.map((error, idx) => (
-                  <li key={idx}>{error}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          
-          {gatesStatus.warnings.length > 0 && (
-            <div>
-              <p className="text-sm font-medium text-yellow-800 mb-1">Warnings:</p>
-              <ul className="text-sm text-yellow-700 list-disc list-inside">
-                {gatesStatus.warnings.map((warning, idx) => (
-                  <li key={idx}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Data Contract Popover */}
       {showDataContract && (
@@ -3977,7 +3985,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                         <div className="mt-4 flex gap-3">
                           <button
                             onClick={() => setShowDelistingOverride(true)}
-                            className="text-sm bg-blue-600 text-white px-3 py-1 rounded hover:bg-blue-700"
+                            className="text-sm bg-blue-600 text-white px-3 py-1 rounded-full hover:bg-blue-700"
                           >
                             Apply Manual Override
                           </button>
@@ -4010,7 +4018,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                     <button
                       type="button"
                       onClick={() => setShowAddDataType(true)}
-                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm"
+                      className="px-3 py-2 bg-gray-100 text-gray-700 rounded-full hover:bg-gray-200 text-sm"
                       title="Add new data type"
                     >
                       (+)
@@ -4033,7 +4041,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                         type="button"
                         onClick={addNewDataType}
                         disabled={!newDataTypeName.trim()}
-                        className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 text-sm"
+                        className="px-3 py-2 bg-green-600 text-white rounded-full hover:bg-green-700 disabled:opacity-50 text-sm"
                       >
                         Add
                       </button>
@@ -4043,7 +4051,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                           setShowAddDataType(false);
                           setNewDataTypeName('');
                         }}
-                        className="px-3 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 text-sm"
+                        className="px-3 py-2 bg-gray-300 text-gray-700 rounded-full hover:bg-gray-400 text-sm"
                       >
                         Cancel
                       </button>
@@ -4115,14 +4123,14 @@ export default function TimingPage({ params }: TimingPageProps) {
                   <button
                     type="submit"
                     disabled={isUploading || isReprocessing}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+                    className="px-6 py-2 bg-blue-600 text-white rounded-full hover:bg-blue-700 disabled:opacity-50"
                   >
                     {isUploading ? 'Processing...' : 'Upload & Process'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setShowDataContract(true)}
-                    className="ml-3 px-4 py-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-md transition-colors"
+                    className="ml-3 px-4 py-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-full transition-colors"
                   >
                     View Data Contract
                   </button>
@@ -4262,7 +4270,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                     <button
                       onClick={exportCanonicalCSV}
                       disabled={isExporting}
-                      className="px-4 py-2 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors"
+                      className="px-4 py-2 bg-green-600 text-white text-sm rounded-full hover:bg-green-700 disabled:opacity-50 transition-colors"
                     >
                       {isExporting ? 'Exporting...' : 'Export CSV'}
                     </button>
@@ -4271,7 +4279,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                         setShowRepairsPanel(true);
                         setShowUploadModal(false); // Close modal when opening repairs panel
                       }}
-                      className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-md hover:bg-indigo-700 transition-colors"
+                      className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-full hover:bg-indigo-700 transition-colors"
                     >
                       View Audit Trail
                     </button>
