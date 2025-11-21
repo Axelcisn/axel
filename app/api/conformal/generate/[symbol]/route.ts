@@ -16,13 +16,15 @@ export async function POST(
     const baseMethod = body.base_method as string;
     const calWindow = Number(body.cal_window);
     const domain = (body.domain as 'log' | 'price') ?? 'log';
+    const horizon = body.horizon ? Number(body.horizon) : undefined;
+    const coverage = body.coverage ? Number(body.coverage) : undefined;
 
     // Validate inputs
     if (!symbol || !baseMethod || !calWindow || calWindow <= 0) {
       return NextResponse.json(
         { 
           error: 'Missing or invalid parameters. Required: base_method, cal_window > 0',
-          received: { symbol, baseMethod, calWindow, domain }
+          received: { symbol, baseMethod, calWindow, domain, horizon, coverage }
         },
         { status: 400 }
       );
@@ -38,7 +40,9 @@ export async function POST(
     console.log(`[Conformal] Generating base forecasts for ${symbol}:`, {
       baseMethod,
       calWindow,
-      domain
+      domain,
+      horizon,
+      coverage
     });
 
     // Generate base forecasts
@@ -46,7 +50,9 @@ export async function POST(
       symbol,
       baseMethod,
       calWindow,
-      domain
+      domain,
+      horizon,
+      coverage
     });
 
     console.log(`[Conformal] Generation complete for ${symbol}:`, result);

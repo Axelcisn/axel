@@ -2,11 +2,12 @@
   "symbol": "AAPL",
   "method": "GARCH11-t",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-20T11:51:15.199Z",
+  "created_at": "2025-11-21T22:33:23.523Z",
   "locked": true,
+  "y_hat": 245.27,
   "target": {
     "h": 1,
-    "coverage": 0.9,
+    "coverage": 0.95,
     "window_requirements": {
       "min_days": 1000
     }
@@ -21,7 +22,7 @@
     "S_t": 245.27,
     "sigma_forecast": 0.016996682326887988,
     "sigma2_forecast": 0.0002888872101211465,
-    "critical_value": 1.8994823856338687,
+    "critical_value": 2.263213055223333,
     "window_span": {
       "start": "2021-10-18",
       "end": "2025-10-10"
@@ -37,16 +38,16 @@
     }
   },
   "intervals": {
-    "L_h": 237.47794259220072,
-    "U_h": 253.31772813655726,
-    "band_width_bp": 667.0002852246681
+    "L_h": 236.01433181753725,
+    "U_h": 254.88864356978004,
+    "band_width_bp": 799.7104077067041
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "model": "GARCH11-t",
       "h": 1,
-      "coverage": 0.9,
+      "coverage": 0.95,
       "garch": {
         "window": 1000,
         "variance_targeting": true,
@@ -66,7 +67,7 @@
   },
   "critical": {
     "type": "t",
-    "value": 1.8994823856338687,
+    "value": 2.263213055223333,
     "df": 8
   },
   "window_period": {

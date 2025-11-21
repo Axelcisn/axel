@@ -45,6 +45,7 @@ export type ConformalApplyInput = {
   date_t?: string;            // as-of date (default latest)
   base_method?: string;       // e.g., "GARCH11-t", optional
   coverage?: number;          // coverage override from active forecast
+  horizon?: number;           // horizon override from UI state
   params: ConformalParams;
 };
 

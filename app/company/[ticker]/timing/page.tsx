@@ -153,6 +153,11 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Base forecast generation state
   const [isGeneratingBase, setIsGeneratingBase] = useState(false);
 
+  // Stale state tracking for master controls
+  const [baseForecastsStale, setBaseForecastsStale] = useState(false);
+  const [conformalStale, setConformalStale] = useState(false);
+  const [coverageStatsStale, setCoverageStatsStale] = useState(false);
+
   // Validation Gates state
   const [gatesStatus, setGatesStatus] = useState<GateStatus | null>(null);
   const [isCheckingGates, setIsCheckingGates] = useState(false);
@@ -427,6 +432,37 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [params.ticker]);
 
+  // Load latest locked forecast for conformal prediction
+  const loadLatestActiveForecast = useCallback(async () => {
+    try {
+      // Try to load the latest forecast from all methods
+      const response = await fetch(`/api/forecast/gbm/${params.ticker}`);
+      if (response.ok) {
+        const forecasts = await response.json();
+        // Find the most recent locked forecast
+        const latestLocked = forecasts.find((f: any) => f.locked === true);
+        if (latestLocked) {
+          console.log('[LoadActiveForecast] Found latest locked forecast:', latestLocked.method, latestLocked.date_t);
+          setActiveForecast(latestLocked);
+          return latestLocked;
+        }
+      }
+      
+      // If no locked forecast found, check if we have a GBM forecast
+      if (gbmForecast) {
+        console.log('[LoadActiveForecast] Using GBM forecast as active:', gbmForecast.method);
+        setActiveForecast(gbmForecast);
+        return gbmForecast;
+      }
+
+      console.log('[LoadActiveForecast] No active forecast found');
+      return null;
+    } catch (error) {
+      console.error('Failed to load active forecast:', error);
+      return null;
+    }
+  }, [params.ticker, gbmForecast]);
+
   const loadServerTargetSpec = useCallback(async () => {
     try {
       setIsLoadingServerSpec(true);
@@ -462,7 +498,23 @@ export default function TimingPage({ params }: TimingPageProps) {
     })();
   }, [tickerParam]);
 
-  // Derive active base method: prefer activeForecast.method, else gbmForecast.method, else GBM
+  // Function to resolve base method from current volatility model selection
+  function resolveBaseMethod(
+    volModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range',
+    garchEstimator: 'Normal' | 'Student-t',
+    rangeEstimator: 'P' | 'GK' | 'RS' | 'YZ'
+  ): string {
+    if (volModel === 'GBM') return 'GBM-CC';
+    if (volModel === 'GARCH') return garchEstimator === 'Student-t' ? 'GARCH11-t' : 'GARCH11-N';
+    if (volModel === 'HAR-RV') return 'HAR-RV';
+    if (volModel === 'Range') return `Range-${rangeEstimator}`;
+    throw new Error('Unknown volModel');
+  }
+
+  // Derive base method from current UI selection instead of active forecast
+  const selectedBaseMethod = resolveBaseMethod(volModel, garchEstimator, rangeEstimator);
+
+  // Legacy: still derive active base method for compatibility (can be removed later)
   const activeBaseMethod: string | null = 
     activeForecast?.method ?? 
     gbmForecast?.method ?? 
@@ -473,9 +525,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     try {
       setIsLoadingBaseForecasts(true);
       
-      const query = activeBaseMethod
-        ? `?base_method=${encodeURIComponent(activeBaseMethod)}`
-        : '';
+      // Use selected base method from current UI selection
+      const baseMethod = selectedBaseMethod;
+      const query = `?base_method=${encodeURIComponent(baseMethod)}`;
       const resp = await fetch(
         `/api/conformal/head/${encodeURIComponent(tickerParam)}${query}`,
         { cache: 'no-store' }
@@ -494,7 +546,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingBaseForecasts(false);
     }
-  }, [tickerParam, activeBaseMethod]);
+  }, [tickerParam, selectedBaseMethod]);
 
   // Load model line data
   const loadModelLine = useCallback(async () => {
@@ -551,10 +603,17 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Handle generation of base forecasts for conformal prediction
   const handleGenerateBaseForecasts = useCallback(async () => {
-    if (!activeBaseMethod) {
-      setConformalError('No active forecast method found. Please generate a forecast first.');
-      return;
-    }
+    // Use selected base method from current UI selection
+    const baseMethod = selectedBaseMethod;
+
+    console.log('[DEBUG] handleGenerateBaseForecasts called:', {
+      selectedBaseMethod,
+      baseMethod,
+      volModel,
+      garchEstimator,
+      rangeEstimator,
+      targetSpecResult: !!targetSpecResult
+    });
 
     try {
       setIsGeneratingBase(true);
@@ -562,18 +621,22 @@ export default function TimingPage({ params }: TimingPageProps) {
 
       console.log('[Conformal] Generating base forecasts:', {
         symbol: tickerParam,
-        baseMethod: activeBaseMethod,
+        baseMethod: baseMethod,
         calWindow: conformalCalWindow,
-        domain: conformalDomain
+        domain: conformalDomain,
+        h,
+        coverage
       });
 
       const response = await fetch(`/api/conformal/generate/${encodeURIComponent(tickerParam)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          base_method: activeBaseMethod,
+          base_method: baseMethod,
           cal_window: conformalCalWindow,
-          domain: conformalDomain
+          domain: conformalDomain,
+          horizon: h,                               // Add horizon from UI state
+          coverage: coverage                        // Add coverage from UI state
         })
       });
 
@@ -589,6 +652,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       
       // Show success message briefly
       const successMessage = `Generated ${data.created} new forecasts. ${data.alreadyExisting} already existed.`;
+      console.log('[Conformal]', successMessage);
       
       // Refresh the base forecast count to update the panel
       await loadBaseForecastCount();
@@ -603,9 +667,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsGeneratingBase(false);
     }
-  }, [tickerParam, activeBaseMethod, conformalCalWindow, conformalDomain, loadBaseForecastCount, loadModelLine]);
+  }, [tickerParam, selectedBaseMethod, conformalCalWindow, conformalDomain, h, coverage, loadBaseForecastCount, loadModelLine, volModel, garchEstimator, rangeEstimator]);
 
-  const generateGbmForecast = async () => {
+  const generateGbmForecast = useCallback(async () => {
     setIsGeneratingForecast(true);
     setForecastError(null);
 
@@ -639,7 +703,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsGeneratingForecast(false);
     }
-  };
+  }, [window, lambdaDrift, coverage, params.ticker, loadLatestForecast]);
 
   const generateVolatilityForecast = useCallback(async () => {
     console.log("[VOL][handler] click", new Date().toISOString());
@@ -903,11 +967,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     const canProceed = await checkGatesBeforeAction('conformal prediction');
     if (!canProceed) return;
 
-    // Ensure we have an active forecast to wrap
-    if (!activeForecast) {
-      setConformalError('No active forecast found. Generate a volatility forecast first.');
-      return;
-    }
+    // Use selected base method from current UI selection
+    const baseMethod = selectedBaseMethod;
+    const selectedCoverage = coverage;
 
     setIsApplyingConformal(true);
     setConformalError(null);
@@ -929,8 +991,9 @@ export default function TimingPage({ params }: TimingPageProps) {
         body: JSON.stringify({
           symbol: tickerParam,
           params: conformalParams,
-          base_method: activeForecast.method,           // Use active forecast method
-          coverage: activeForecast.target?.coverage     // Use active forecast coverage
+          base_method: baseMethod,                      // Use selected base method
+          horizon: h,                                   // Use current UI horizon
+          coverage: selectedCoverage                    // Use current UI coverage
         }),
       });
 
@@ -993,16 +1056,19 @@ export default function TimingPage({ params }: TimingPageProps) {
       }
 
       setConformalState(data.state);
-      setCurrentForecast(null); // Will be loaded by loadLatestForecast
+      // Don't clear currentForecast - let existing forecasts remain for chart display
       await loadLatestForecast(); // Refresh the forecast display
       await loadModelLine();
+      
+      // Auto-expand coverage details after successful conformal calibration
+      setShowCoverageDetails(true);
     } catch (err) {
       setConformalError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setIsApplyingConformal(false);
     }
   }, [
-    activeForecast,
+    selectedBaseMethod,
     conformalMode,
     conformalDomain,
     conformalCalWindow,
@@ -1013,33 +1079,38 @@ export default function TimingPage({ params }: TimingPageProps) {
     loadLatestForecast,
     loadBaseForecastCount,
     loadModelLine,
-    checkGatesBeforeAction
+    checkGatesBeforeAction,
+    h,
+    coverage,
+    volModel,
+    garchEstimator,
+    rangeEstimator
   ]);
 
   // Command 2: Add handleUnifiedGenerate orchestrator
   const handleUnifiedGenerate = useCallback(async () => {
     try {
-      // 1) Ensure base forecasts exist for current method + cal window
-      if (
-        activeBaseMethod &&
-        baseForecastCount !== null &&
-        baseForecastCount < conformalCalWindow
-      ) {
+      // 1) First generate/update volatility forecast (GBM / GARCH / HAR / Range)
+      // This ensures we have an active forecast for base forecast generation
+      await generateVolatilityForecast();
+      
+      // Wait for the forecast to be loaded and active method to be updated
+      await loadLatestForecast();
+
+      // 2) Then ensure base forecasts exist for current method + cal window
+      // Now activeBaseMethod should be properly set from the new forecast
+      if (baseForecastCount !== null && baseForecastCount < conformalCalWindow) {
         await handleGenerateBaseForecasts();
         await loadBaseForecastCount();
         await loadModelLine();
       }
 
-      // 2) Generate/update volatility forecast (GBM / GARCH / HAR / Range)
-      await generateVolatilityForecast();
-
-      // 3) Apply conformal calibration
+      // 3) Finally apply conformal calibration
       await applyConformalPrediction();
     } catch (err) {
       console.error('[UnifiedGenerate] error', err);
     }
   }, [
-    activeBaseMethod,
     baseForecastCount,
     conformalCalWindow,
     handleGenerateBaseForecasts,
@@ -1047,6 +1118,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     loadModelLine,
     generateVolatilityForecast,
     applyConformalPrediction,
+    loadLatestForecast,
   ]);
 
   const saveTargetSpec = async () => {
@@ -1124,14 +1196,149 @@ export default function TimingPage({ params }: TimingPageProps) {
   const selectedExchange = null; // TODO: Add company state for this
   const resolvedTZ = resolveExchangeTZ({ canonicalTZ, selectedExchange });
   
-  // Auto-save when horizon or coverage changes
+  // Master controls: Handle horizon/coverage changes with automatic regeneration
+  const handleHorizonCoverageChange = useCallback(async () => {
+    console.log('[MasterControls] Horizon or Coverage changed, triggering regeneration:', { h, coverage });
+    
+    try {
+      // Mark downstream artifacts as stale
+      setBaseForecastsStale(true);
+      setConformalStale(true);
+      setCoverageStatsStale(true);
+      setBaseForecastCount(null);
+      setConformalState(null);
+      setConformalError(null);
+      
+      // Disable controls while regenerating
+      setIsGeneratingBase(true);
+      setIsApplyingConformal(true);
+      setIsGeneratingVolatility(true);
+      
+      // 1. Generate volatility forecast with new horizon/coverage
+      console.log('[MasterControls] Generating volatility forecast with new parameters');
+      await generateVolatilityForecast();
+      
+      // 2. Generate base forecasts with new horizon/coverage  
+      console.log('[MasterControls] Generating base forecasts with new parameters');
+      await handleGenerateBaseForecasts();
+      
+      // 3. Apply conformal calibration with new parameters
+      console.log('[MasterControls] Applying conformal calibration with new parameters');
+      await applyConformalPrediction();
+      
+      // 4. Clear stale flags on success
+      setBaseForecastsStale(false);
+      setConformalStale(false);
+      setCoverageStatsStale(false);
+      
+      console.log('[MasterControls] Regeneration complete');
+    } catch (error) {
+      console.error('[MasterControls] Error during regeneration:', error);
+      setConformalError(error instanceof Error ? error.message : 'Failed to regenerate forecasts');
+    } finally {
+      setIsGeneratingBase(false);
+      setIsApplyingConformal(false);
+      setIsGeneratingVolatility(false);
+    }
+  }, [h, coverage, generateVolatilityForecast, handleGenerateBaseForecasts, applyConformalPrediction]);
+
+  // Calculate effective horizon in calendar days (weekend/holiday logic)
+  const calculateEffectiveHorizon = useCallback((originDate: Date, horizonDays: number): number => {
+    const targetDate = new Date(originDate);
+    let tradingDaysAdded = 0;
+    
+    while (tradingDaysAdded < horizonDays) {
+      targetDate.setDate(targetDate.getDate() + 1);
+      const dayOfWeek = targetDate.getDay();
+      
+      // Skip weekends (Saturday = 6, Sunday = 0)
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+        tradingDaysAdded++;
+      }
+    }
+    
+    // Calculate calendar days difference
+    const timeDiff = targetDate.getTime() - originDate.getTime();
+    const effectiveHorizon = Math.ceil(timeDiff / (1000 * 3600 * 24));
+    
+    console.log('[HorizonCalc]', {
+      originDate: originDate.toISOString().split('T')[0],
+      tradingHorizon: horizonDays,
+      targetDate: targetDate.toISOString().split('T')[0],
+      effectiveHorizon,
+      isWeekendSpanning: effectiveHorizon > horizonDays
+    });
+    
+    return effectiveHorizon;
+  }, []);
+
+  // Enhanced auto-save with master controls behavior when horizon or coverage changes
   useEffect(() => {
     const timeoutId = setTimeout(() => {
+      // 1. Auto-save target spec
       autoSaveTargetSpec();
+      
+      // 2. Mark downstream artifacts as stale and trigger regeneration
+      if (isValidH && isValidCoverage && resolvedTZ) {
+        handleHorizonCoverageChange();
+      }
     }, 500); // Debounce auto-save by 500ms
 
     return () => clearTimeout(timeoutId);
-  }, [h, coverage, resolvedTZ]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [h, coverage, resolvedTZ, handleHorizonCoverageChange, isValidH, isValidCoverage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-generation for volatility model changes
+  useEffect(() => {
+    // Only auto-generate if we have valid target spec and sufficient data
+    if (!isValidH || !isValidCoverage || !resolvedTZ) return;
+    
+    const timeoutId = setTimeout(async () => {
+      console.log('[AutoGenerate] Volatility model parameters changed, triggering regeneration:', {
+        volModel, garchEstimator, rangeEstimator, garchVarianceTargeting, garchDf, 
+        harUseIntradayRv, rangeEwmaLambda, gbmWindow, gbmLambda, volWindow
+      });
+      
+      try {
+        // Mark artifacts as stale
+        setBaseForecastsStale(true);
+        setConformalStale(true);
+        setCoverageStatsStale(true);
+        
+        // Generate with new volatility model
+        setIsGeneratingVolatility(true);
+        await generateVolatilityForecast();
+        
+        // Regenerate base forecasts with new model
+        setIsGeneratingBase(true);
+        await handleGenerateBaseForecasts();
+        
+        // Apply conformal calibration
+        setIsApplyingConformal(true);
+        await applyConformalPrediction();
+        
+        // Clear stale flags
+        setBaseForecastsStale(false);
+        setConformalStale(false);
+        setCoverageStatsStale(false);
+        
+        console.log('[AutoGenerate] Volatility model regeneration complete');
+      } catch (error) {
+        console.error('[AutoGenerate] Error during volatility model regeneration:', error);
+        setVolatilityError(error instanceof Error ? error.message : 'Failed to regenerate with new volatility model');
+      } finally {
+        setIsGeneratingVolatility(false);
+        setIsGeneratingBase(false);
+        setIsApplyingConformal(false);
+      }
+    }, 1000); // Longer debounce for model changes
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    volModel, garchEstimator, rangeEstimator, garchVarianceTargeting, garchDf,
+    harUseIntradayRv, rangeEwmaLambda, gbmWindow, gbmLambda, volWindow,
+    isValidH, isValidCoverage, resolvedTZ, generateVolatilityForecast, 
+    handleGenerateBaseForecasts, applyConformalPrediction
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
   
   // Save button guard (using resolved TZ instead of client spec)
   const canSave = isValidH && isValidCoverage && !!resolvedTZ;
@@ -2153,18 +2360,23 @@ export default function TimingPage({ params }: TimingPageProps) {
               <div>
                 <label className={`block text-sm font-medium mb-3 ${
                   isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                }`}>Horizon</label>
+                }`}>Horizon {(isGeneratingBase || isApplyingConformal) && (
+                  <span className="text-xs text-blue-600 font-normal">(Recomputing bands...)</span>
+                )}</label>
                 <div className="flex items-center gap-2">
                   {[1, 2, 3, 5].map((days) => (
                     <button
                       key={days}
                       onClick={() => setH(days)}
-                      className={`px-3 py-1 text-sm rounded-full ${
+                      disabled={isGeneratingBase || isApplyingConformal}
+                      className={`px-3 py-1 text-sm rounded-full transition-colors ${
                         h === days 
                           ? 'bg-blue-600 text-white' 
-                          : isDarkMode 
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : (isGeneratingBase || isApplyingConformal)
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : isDarkMode 
+                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
                       {days}D
@@ -2177,18 +2389,23 @@ export default function TimingPage({ params }: TimingPageProps) {
               <div>
                 <label className={`block text-sm font-medium mb-3 ${
                   isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                }`}>Coverage</label>
+                }`}>Coverage {(isGeneratingBase || isApplyingConformal) && (
+                  <span className="text-xs text-blue-600 font-normal">(Recomputing bands...)</span>
+                )}</label>
                 <div className="flex items-center gap-2">
                   {[0.90, 0.95, 0.99].map((cov) => (
                     <button
                       key={cov}
                       onClick={() => setCoverage(cov)}
-                      className={`px-3 py-1 text-sm rounded-full ${
+                      disabled={isGeneratingBase || isApplyingConformal}
+                      className={`px-3 py-1 text-sm rounded-full transition-colors ${
                         coverage === cov 
                           ? 'bg-blue-600 text-white' 
-                          : isDarkMode 
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          : (isGeneratingBase || isApplyingConformal)
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            : isDarkMode 
+                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
                     >
                       {(cov * 100).toFixed(0)}%
@@ -2368,7 +2585,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                 isDarkMode ? 'text-gray-200' : 'text-gray-800'
               }`}>Conformal Calibration</h4>
               
-              <div className="grid grid-cols-3 gap-4 mb-4">
+              <div className="grid grid-cols-4 gap-4 mb-4">
                 <div>
                   <label className={`block text-sm font-medium mb-2 ${
                     isDarkMode ? 'text-gray-200' : 'text-gray-700'
@@ -2425,7 +2642,47 @@ export default function TimingPage({ params }: TimingPageProps) {
                     <option value={500}>500 days</option>
                   </select>
                 </div>
+                
+                {/* Generate button as fourth column */}
+                <div>
+                  <label className={`block text-sm font-medium mb-2 ${
+                    isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                  }`}>&nbsp;</label>
+                  <button
+                    onClick={handleGenerateBaseForecasts}
+                    disabled={isGeneratingBase}
+                    className={`w-full px-3 py-2 text-sm rounded-full border transition-colors ${
+                      isGeneratingBase
+                        ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
+                        : isDarkMode 
+                          ? 'bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600' 
+                          : 'bg-white hover:bg-gray-50 text-gray-700 border-gray-300'
+                    }`}
+                  >
+                    {isGeneratingBase 
+                      ? `Generating ${conformalCalWindow}-day forecasts...`
+                      : `Generate ${conformalCalWindow}-day base forecasts`
+                    }
+                  </button>
+                </div>
               </div>
+              
+              {/* Base forecast status below the grid */}
+              {baseForecastCount !== null && (
+                <div className="mb-4 flex items-center gap-2">
+                  <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {baseForecastCount >= conformalCalWindow 
+                      ? `✓ ${baseForecastCount} base forecasts available`
+                      : `${baseForecastCount} of ${conformalCalWindow} needed`
+                    }
+                  </p>
+                  {baseForecastsStale && (
+                    <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full">
+                      Stale
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Mode-specific parameters */}
               {conformalMode === 'ACI' && (
@@ -2591,35 +2848,20 @@ export default function TimingPage({ params }: TimingPageProps) {
               )}
 
               {/* Error Display */}
+              {/* Error Display */}
               {conformalError && (
-                <p className={`text-sm mb-4 ${
-                  isDarkMode ? 'text-red-400' : 'text-red-600'
-                }`}>{conformalError}</p>
+                <div className={`mb-4 p-3 rounded-md border ${
+                  isDarkMode 
+                    ? 'bg-red-900/20 border-red-700 text-red-300' 
+                    : 'bg-red-100 border border-red-300 text-red-700'
+                }`}>
+                  <p className="font-medium">Error:</p>
+                  <p className="text-sm">{conformalError}</p>
+                </div>
               )}
             </div>
 
-            {/* Row 4: Unified Generate Button */}
-            <div className="flex justify-center">
-              <button
-                onClick={handleUnifiedGenerate}
-                disabled={
-                  isGeneratingVolatility || 
-                  isApplyingConformal || 
-                  isGeneratingBase ||
-                  !targetSpecResult
-                }
-                className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-full shadow-sm transition-colors duration-200 disabled:bg-gray-300 disabled:cursor-not-allowed disabled:shadow-none"
-              >
-                {(isGeneratingVolatility || isApplyingConformal || isGeneratingBase) ? (
-                  <span className="flex items-center gap-2">
-                    <span className="animate-spin">⟳</span>
-                    Processing...
-                  </span>
-                ) : (
-                  'Generate'
-                )}
-              </button>
-            </div>
+
 
             {/* Status Messages */}
             {!targetSpecResult && (
@@ -2636,30 +2878,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         className="mb-8" 
         activeForecast={activeForecast}
         gbmForecast={gbmForecast}
-        gbmWindowLength={window}
-        // Conformal props
-        conformalMode={conformalMode}
-        conformalDomain={conformalDomain}
-        conformalCalWindow={conformalCalWindow}
-        conformalEta={conformalEta}
-        conformalK={conformalK}
-        conformalState={conformalState}
-        baseForecastCount={baseForecastCount}
-        isLoadingBaseForecasts={isLoadingBaseForecasts}
-        isGeneratingBase={isGeneratingBase}
-        isApplyingConformal={isApplyingConformal}
-        conformalError={conformalError}
-        activeBaseMethod={activeBaseMethod}
-        targetSpecResult={targetSpecResult}
-        modelLine={modelLine}
-        onConformalModeChange={setConformalMode}
-        onConformalDomainChange={setConformalDomain}
-        onConformalCalWindowChange={setConformalCalWindow}
-        onConformalEtaChange={setConformalEta}
-        onConformalKChange={setConformalK}
-        onLoadBaseForecastCount={loadBaseForecastCount}
-        onGenerateBaseForecasts={handleGenerateBaseForecasts}
-        onApplyConformalPrediction={applyConformalPrediction}
       />
       
       {/* Data Preview Panel (A-2) */}

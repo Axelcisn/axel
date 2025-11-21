@@ -2,41 +2,41 @@
   "symbol": "AAPL",
   "method": "Conformal:ICP",
   "date_t": "2025-11-21",
-  "created_at": "2025-11-21T00:10:57.140Z",
+  "created_at": "2025-11-21T22:34:12.537Z",
   "locked": true,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 250
+      "min_days": 500
     }
   },
   "estimates": {
     "mu_star_hat": 0,
     "sigma_hat": 0.01380603598392889,
     "mu_star_used": 0,
-    "window_start": "2025-03-16",
+    "window_start": "2024-07-09",
     "window_end": "2025-11-21",
-    "n": 250,
+    "n": 500,
     "sigma_forecast": 0.01380603598392889,
     "sigma2_forecast": 0.00019060662958953934,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2025-03-16",
+      "start": "2024-07-09",
       "end": "2025-11-21"
     }
   },
   "intervals": {
-    "L_h": 235.89419511973102,
-    "U_h": 255.01845380072382,
-    "band_width_bp": 810.7134078176892
+    "L_h": 236.95798300671126,
+    "U_h": 253.87358609604743,
+    "band_width_bp": 713.8650858982487
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 250,
+      "cal_window": 500,
       "coverage": 0.95,
       "h": 1,
       "base_method": "Range-YZ"
@@ -45,8 +45,8 @@
     "conformal": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 250,
-      "q_cal": 0.03897626582613027,
+      "cal_window": 500,
+      "q_cal": 0.03447680603340656,
       "eta": null,
       "K": null
     }
@@ -60,17 +60,35 @@
     "conformal": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 250,
+      "cal_window": 500,
       "params": {
         "eta": null,
         "K": null,
-        "q_cal": 0.03897626582613027
+        "q_cal": 0.03447680603340656
       },
       "coverage": {
         "last60": 1,
-        "lastCal": 0.984,
-        "miss_count": 4,
+        "lastCal": 0.988,
+        "miss_count": 6,
         "miss_details": [
+          {
+            "date": "2024-05-02",
+            "realized": 5.211560502621754,
+            "y_pred": 5.153464989868557,
+            "L_base": 5.09762404504592,
+            "U_base": 5.209305934691195,
+            "miss_type": "above",
+            "miss_magnitude": 0.002254567930559226
+          },
+          {
+            "date": "2024-06-10",
+            "realized": 5.333443168523411,
+            "y_pred": 5.263311757349221,
+            "L_base": 5.20744769267779,
+            "U_base": 5.319175822020653,
+            "miss_type": "above",
+            "miss_magnitude": 0.014267346502758294
+          },
           {
             "date": "2025-04-02",
             "realized": 5.314141501894922,

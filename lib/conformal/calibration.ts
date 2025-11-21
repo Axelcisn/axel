@@ -19,7 +19,8 @@ export async function calibrate(
   symbol: string, 
   params: ConformalParams,
   base_method?: string,
-  coverageOverride?: number
+  coverageOverride?: number,
+  horizonOverride?: number
 ): Promise<ConformalState> {
   const { mode, domain, cal_window, eta, K } = params;
   
@@ -111,7 +112,8 @@ export async function applyConformalToday(
   symbol: string, 
   params: ConformalParams,
   base_method?: string,
-  coverageOverride?: number
+  coverageOverride?: number,
+  horizonOverride?: number
 ): Promise<{
   state: ConformalState;
   L: number;
@@ -121,7 +123,7 @@ export async function applyConformalToday(
   critical: { type: "normal" | "t"; value: number; df?: number };
 }> {
   // Get calibrated state
-  const state = await calibrate(symbol, params, base_method, coverageOverride);
+  const state = await calibrate(symbol, params, base_method, coverageOverride, horizonOverride);
   
   // Load latest base forecast
   const latestForecast = await loadLatestBaseForecast(symbol, base_method);

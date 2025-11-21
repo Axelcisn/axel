@@ -2,17 +2,35 @@
   "symbol": "AAPL",
   "mode": "ICP",
   "domain": "log",
-  "cal_window": 250,
+  "cal_window": 500,
   "params": {
     "eta": null,
     "K": null,
-    "q_cal": 0.03897626582613027
+    "q_cal": 0.03447680603340656
   },
   "coverage": {
     "last60": 1,
-    "lastCal": 0.984,
-    "miss_count": 4,
+    "lastCal": 0.988,
+    "miss_count": 6,
     "miss_details": [
+      {
+        "date": "2024-05-02",
+        "realized": 5.211560502621754,
+        "y_pred": 5.153464989868557,
+        "L_base": 5.09762404504592,
+        "U_base": 5.209305934691195,
+        "miss_type": "above",
+        "miss_magnitude": 0.002254567930559226
+      },
+      {
+        "date": "2024-06-10",
+        "realized": 5.333443168523411,
+        "y_pred": 5.263311757349221,
+        "L_base": 5.20744769267779,
+        "U_base": 5.319175822020653,
+        "miss_type": "above",
+        "miss_magnitude": 0.014267346502758294
+      },
       {
         "date": "2025-04-02",
         "realized": 5.314141501894922,
@@ -51,5 +69,5 @@
       }
     ]
   },
-  "updated_at": "2025-11-21T00:10:57.143Z"
+  "updated_at": "2025-11-21T22:34:12.537Z"
 }

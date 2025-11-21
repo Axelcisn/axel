@@ -21,6 +21,8 @@ interface GenerateOptions {
   baseMethod: BaseMethod;
   calWindow: number;
   domain: 'log' | 'price';
+  horizon?: number;              // Optional horizon override
+  coverage?: number;             // Optional coverage override
 }
 
 interface GenerateResult {
@@ -34,7 +36,7 @@ interface GenerateResult {
  * This creates historical forecasts that can be used for conformal prediction calibration
  */
 export async function generateBaseForecastsForWindow(opts: GenerateOptions): Promise<GenerateResult> {
-  const { symbol, baseMethod, calWindow, domain } = opts;
+  const { symbol, baseMethod, calWindow, domain, horizon, coverage } = opts;
 
   // 1) Load canonical OHLC data
   const canonical = await loadCanonicalData(symbol);
@@ -71,7 +73,9 @@ export async function generateBaseForecastsForWindow(opts: GenerateOptions): Pro
         baseMethod,
         domain,
         targetSpec,
-        canonical
+        canonical,
+        horizonOverride: horizon,       // Pass horizon override
+        coverageOverride: coverage      // Pass coverage override
       });
 
       if (forecast) {
@@ -169,8 +173,10 @@ async function generateSingleBaseForecast(opts: {
   domain: 'log' | 'price';
   targetSpec: any;
   canonical: any[];
+  horizonOverride?: number;     // Optional horizon override
+  coverageOverride?: number;    // Optional coverage override
 }): Promise<ForecastRecord | null> {
-  const { symbol, date_t, baseMethod, domain, targetSpec, canonical } = opts;
+  const { symbol, date_t, baseMethod, domain, targetSpec, canonical, horizonOverride, coverageOverride } = opts;
 
   // Find the date in canonical data
   const dateIdx = canonical.findIndex(row => row.date === date_t);
@@ -181,17 +187,24 @@ async function generateSingleBaseForecast(opts: {
   // Get historical data up to date_t for model fitting
   const historicalData = canonical.slice(0, dateIdx + 1);
   
+  // Create effective target spec with overrides
+  const effectiveTargetSpec = {
+    ...targetSpec,
+    h: horizonOverride ?? targetSpec.h,
+    coverage: coverageOverride ?? targetSpec.coverage
+  };
+
   // Generate forecast using the appropriate method
   let forecast: ForecastRecord;
 
   if (baseMethod === 'GBM') {
-    forecast = await generateGbmForecast(symbol, date_t, historicalData, targetSpec, domain);
+    forecast = await generateGbmForecast(symbol, date_t, historicalData, effectiveTargetSpec, domain);
   } else if (baseMethod.startsWith('GARCH')) {
-    forecast = await generateGarchForecast(symbol, date_t, historicalData, targetSpec, domain, baseMethod);
+    forecast = await generateGarchForecast(symbol, date_t, historicalData, effectiveTargetSpec, domain, baseMethod);
   } else if (baseMethod.startsWith('Range')) {
-    forecast = await generateRangeForecast(symbol, date_t, historicalData, targetSpec, domain, baseMethod);
+    forecast = await generateRangeForecast(symbol, date_t, historicalData, effectiveTargetSpec, domain, baseMethod);
   } else if (baseMethod === 'HAR') {
-    forecast = await generateHarForecast(symbol, date_t, historicalData, targetSpec, domain);
+    forecast = await generateHarForecast(symbol, date_t, historicalData, effectiveTargetSpec, domain);
   } else {
     throw new Error(`Unsupported base method: ${baseMethod}`);
   }
