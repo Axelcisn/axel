@@ -114,6 +114,16 @@ export function computeGbmPI(S_t: number, est: GbmEstimates): GbmPI {
 }
 
 /**
+ * Compute expected price from GBM estimates
+ * For GBM with log-price dynamics, E[S_{t+h} | S_t] = S_t * exp(mu_eff * h)
+ */
+export function computeGbmExpectedPrice(S_t: number, est: GbmEstimates, h: number = 1): number {
+  const { mu_star_used } = est;
+  // For GBM, the conditional expectation is S_t * exp(drift * horizon)
+  return S_t * Math.exp(mu_star_used * h);
+}
+
+/**
  * Inverse normal CDF approximation (Beasley-Springer-Moro algorithm)
  */
 function normalInverse(p: number): number {

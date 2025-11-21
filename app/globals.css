@@ -2,6 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Root color variables */
+:root {
+  --background: #ffffff;
+  --foreground: #111827;
+  --background-secondary: #f9fafb;
+  --border: #e5e7eb;
+}
+
+/* Dark mode color variables */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #111827;
+    --foreground: #f9fafb;
+    --background-secondary: #1f2937;
+    --border: #374151;
+  }
+}
+
+/* Light mode color variables (explicit) */
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #ffffff;
+    --foreground: #111827;
+    --background-secondary: #f9fafb;
+    --border: #e5e7eb;
+  }
+}
+
+/* Base body styles that react to color scheme */
+body {
+  color: var(--foreground);
+  background: var(--background);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
 /* Remove focus outlines from Recharts components */
 .recharts-wrapper,
 .recharts-wrapper *,

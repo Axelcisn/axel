@@ -39,6 +39,8 @@ export type ForecastRecord = {
     band_width_bp: number;
   };
   S_t?: number;              // Current price at date_t (for chart display)
+  // One-step-ahead point forecast in PRICE space, as of date_t for horizon h=1
+  y_hat?: number;            // Unambiguous predicted price at t+h, optional for backward-compat
   critical?: { type: "normal" | "t"; z_alpha?: number; value?: number; df?: number };
   m_log?: number;            // m_t(h) on log scale
   s_scale?: number;          // s_t(h)

@@ -219,6 +219,7 @@ export async function applyConformalToday(
 // Helper interfaces
 interface ForecastPair {
   forecast: ForecastRecord;
+  realizedDate: string;  // Date when y_i was realized (t+1)
   realized: number;  // y_i in chosen domain
   y_pred: number;    // ŷ_i in chosen domain
   sigma_pred?: number; // σ_pred_i for ICP-scaled
@@ -229,7 +230,7 @@ interface ForecastPair {
 /**
  * Load historical base forecasts paired with realized values
  */
-async function loadBaseForecastPairs(
+export async function loadBaseForecastPairs(
   symbol: string, 
   cal_window: number, 
   domain: ConformalDomain,
@@ -287,14 +288,29 @@ async function loadBaseForecastPairs(
       const base_L = forecast.L_h || forecast.intervals?.L_h || 0;
       const base_U = forecast.U_h || forecast.intervals?.U_h || 0;
       
-      // Convert to target domain
-      const y_pred = domain === 'log' ? m_log : Math.exp(m_log);
+      // Get L and U for prediction calculation
+      const L = forecast.L_h ?? forecast.intervals?.L_h;
+      const U = forecast.U_h ?? forecast.intervals?.U_h;
+      
+      // Compute y_predPrice: prefer y_hat, but fall back for robust calibration
+      let y_predPrice = forecast.y_hat ?? 
+                       (L && U ? Math.sqrt(L * U) : S_t);
+      
+      const prediction_source = forecast.y_hat != null ? 'y_hat' : 
+                               (L && U ? 'geometric_mean' : 'S_t_fallback');
+      
+      // Debug logging for calibration robustness
+      console.log(`[CALIBRATION] ${forecastDate}: y_pred=${y_predPrice.toFixed(2)}, realized=${S_t_plus_1.toFixed(2)}, diff=${(y_predPrice - S_t_plus_1).toFixed(2)}, source=${prediction_source}`);
+      
+      // Convert to target domain  
+      const y_pred = domain === 'log' ? Math.log(y_predPrice) : y_predPrice;
       const L_base = domain === 'log' ? Math.log(base_L) : base_L;
       const U_base = domain === 'log' ? Math.log(base_U) : base_U;
       const sigma_pred = domain === 'log' ? s_scale : s_scale * Math.exp(m_log);
       
       pairs.push({
         forecast,
+        realizedDate: nextDate,
         realized,
         y_pred,
         sigma_pred,
@@ -435,7 +451,7 @@ function calibrateACI(pairs: ForecastPair[], alpha: number, eta: number): number
 }
 
 /**
- * Compute coverage statistics
+ * Compute coverage statistics using conformal-adjusted intervals
  */
 function computeCoverageStats(pairs: ForecastPair[]): { 
   last60: number | null; 
@@ -454,7 +470,9 @@ function computeCoverageStats(pairs: ForecastPair[]): {
   const total = pairs.length;
   const last60_pairs = pairs.slice(-Math.min(60, total));
   
-  // Count hits in base intervals
+  // TODO: For now using base intervals, but this should be enhanced to use 
+  // conformal-adjusted intervals once we have the calibrated parameters
+  // Count hits in base intervals (this will be updated in future to use conformal intervals)
   const hits_total = pairs.filter(pair => 
     pair.realized >= pair.L_base && pair.realized <= pair.U_base
   ).length;

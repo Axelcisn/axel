@@ -2,9 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 export default function Navigation() {
   const pathname = usePathname();
+  const isDarkMode = useDarkMode();
 
   const navItems = [
     { href: '/', label: 'Home' },
@@ -14,10 +16,10 @@ export default function Navigation() {
   ];
 
   return (
-    <nav className="bg-white shadow-sm border-b">
+    <nav className={`shadow-sm border-b ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
       <div className="max-w-6xl mx-auto px-4">
         <div className="flex justify-between items-center h-16">
-          <Link href="/" className="text-xl font-bold text-gray-900">
+          <Link href="/" className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
             Axel
           </Link>
           
@@ -26,10 +28,10 @@ export default function Navigation() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`text-sm font-medium transition-colors hover:text-blue-600 ${
+                className={`text-sm font-medium transition-colors hover:text-blue-500 ${
                   pathname === item.href
-                    ? 'text-blue-600 border-b-2 border-blue-600 pb-1'
-                    : 'text-gray-600'
+                    ? 'text-blue-500 border-b-2 border-blue-500 pb-1'
+                    : isDarkMode ? 'text-gray-300' : 'text-gray-600'
                 }`}
               >
                 {item.label}

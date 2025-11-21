@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import WatchlistTable from '@/components/WatchlistTable';
 import AlertsCard from '@/components/AlertsCard';
 import { WatchlistRow, AlertFire } from '@/lib/watchlist/types';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 export default function WatchlistPage() {
   const [watchlistRows, setWatchlistRows] = useState<WatchlistRow[]>([]);
@@ -11,6 +12,7 @@ export default function WatchlistPage() {
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [firedAlerts, setFiredAlerts] = useState<AlertFire[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
+  const isDarkMode = useDarkMode();
 
   useEffect(() => {
     loadWatchlist();
@@ -55,21 +57,21 @@ export default function WatchlistPage() {
   };
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Watchlist</h1>
-          <p className="mt-2 text-gray-600">
+          <h1 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Watchlist</h1>
+          <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
             Monitor your tracked securities and stay updated with real-time alerts
           </p>
         </div>
 
         {/* Alerts Section */}
         <div className="mb-8">
-          <div className="bg-white shadow rounded-lg">
-            <div className="px-6 py-4 border-b border-gray-200">
+          <div className={`shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <div className={`px-6 py-4 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-medium text-gray-900">Active Alerts</h2>
+                <h2 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Active Alerts</h2>
                 <button
                   onClick={loadAlerts}
                   disabled={alertsLoading}
@@ -83,15 +85,15 @@ export default function WatchlistPage() {
               {firedAlerts.length > 0 ? (
                 <div className="space-y-4">
                   {firedAlerts.map((alert, index) => (
-                    <div key={index} className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                    <div key={index} className={`border rounded-lg p-4 ${isDarkMode ? 'bg-yellow-900 border-yellow-700' : 'bg-yellow-50 border-yellow-200'}`}>
                       <div className="flex items-center justify-between">
                         <div>
-                          <h3 className="font-medium text-yellow-900">{alert.symbol}</h3>
-                          <p className="text-sm text-yellow-700">
+                          <h3 className={`font-medium ${isDarkMode ? 'text-yellow-200' : 'text-yellow-900'}`}>{alert.symbol}</h3>
+                          <p className={`text-sm ${isDarkMode ? 'text-yellow-300' : 'text-yellow-700'}`}>
                             Alert fired: {alert.reason === 'threshold' ? 'Threshold exceeded' : 'Review date reached'}
                           </p>
                         </div>
-                        <div className="text-sm text-yellow-600">
+                        <div className={`text-sm ${isDarkMode ? 'text-yellow-400' : 'text-yellow-600'}`}>
                           {new Date(alert.fired_at).toLocaleString()}
                         </div>
                       </div>
@@ -99,7 +101,7 @@ export default function WatchlistPage() {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500">
+                <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                   {alertsLoading ? 'Loading alerts...' : 'No active alerts'}
                 </div>
               )}
@@ -108,10 +110,10 @@ export default function WatchlistPage() {
         </div>
 
         {/* Watchlist Table Section */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-6 py-4 border-b border-gray-200">
+        <div className={`shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+          <div className={`px-6 py-4 border-b ${isDarkMode ? 'border-gray-700' : 'border-gray-200'}`}>
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-medium text-gray-900">Tracked Securities</h2>
+              <h2 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Tracked Securities</h2>
               <button
                 onClick={loadWatchlist}
                 disabled={isLoadingWatchlist}
@@ -124,13 +126,13 @@ export default function WatchlistPage() {
           <div className="p-6">
             {watchlistError ? (
               <div className="text-center py-8">
-                <div className="text-red-600 mb-4">
+                <div className={`mb-4 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
                   <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
                   </svg>
                 </div>
-                <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Watchlist</h3>
-                <p className="text-gray-600 mb-4">{watchlistError}</p>
+                <h3 className={`text-lg font-medium mb-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Error Loading Watchlist</h3>
+                <p className={`mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{watchlistError}</p>
                 <button
                   onClick={loadWatchlist}
                   className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
@@ -139,7 +141,7 @@ export default function WatchlistPage() {
                 </button>
               </div>
             ) : isLoadingWatchlist ? (
-              <div className="text-center py-8 text-gray-500">
+              <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                 Loading watchlist...
               </div>
             ) : (
@@ -150,9 +152,9 @@ export default function WatchlistPage() {
 
         {/* Quick Actions */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white shadow rounded-lg p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Add New Security</h3>
-            <p className="text-gray-600 mb-4">
+          <div className={`shadow rounded-lg p-6 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <h3 className={`text-lg font-medium mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Add New Security</h3>
+            <p className={`mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
               To add a new security to your watchlist, go to the Analysis page and run a complete analysis first.
             </p>
             <a
@@ -163,9 +165,9 @@ export default function WatchlistPage() {
             </a>
           </div>
 
-          <div className="bg-white shadow rounded-lg p-6">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Alert Configuration</h3>
-            <p className="text-gray-600 mb-4">
+          <div className={`shadow rounded-lg p-6 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <h3 className={`text-lg font-medium mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Alert Configuration</h3>
+            <p className={`mb-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
               Alerts are automatically configured when you complete analysis for a security. Customize thresholds in the analysis interface.
             </p>
             <button

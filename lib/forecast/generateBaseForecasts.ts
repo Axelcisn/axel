@@ -239,6 +239,9 @@ async function generateGbmForecast(
   
   const L_h = Math.exp(m_log - z_alpha * s_scale);
   const U_h = Math.exp(m_log + z_alpha * s_scale);
+  
+  // Compute explicit predicted price (y_hat) using GBM expected value formula
+  const y_hat = currentPrice * Math.exp(drift * h);
 
   return {
     symbol,
@@ -246,6 +249,7 @@ async function generateGbmForecast(
     date_t,
     created_at: new Date().toISOString(),
     locked: true,
+    y_hat, // Add explicit predicted price
     target: {
       h: targetSpec.h,
       coverage: targetSpec.coverage,
@@ -333,6 +337,9 @@ async function generateGarchForecast(
   
   const L_h = Math.exp(m_log - z_alpha * s_scale);
   const U_h = Math.exp(m_log + z_alpha * s_scale);
+  
+  // Compute explicit predicted price (y_hat) using expected value formula
+  const y_hat = currentPrice * Math.exp(mu * h);
 
   return {
     symbol,
@@ -340,6 +347,7 @@ async function generateGarchForecast(
     date_t,
     created_at: new Date().toISOString(),
     locked: true,
+    y_hat, // Add explicit predicted price
     target: {
       h: targetSpec.h,
       coverage: targetSpec.coverage,
@@ -432,6 +440,9 @@ async function generateRangeForecast(
   
   const L_h = Math.exp(m_log - z_alpha * s_scale);
   const U_h = Math.exp(m_log + z_alpha * s_scale);
+  
+  // For range-based models, predicted price is same as current (no drift assumed)
+  const y_hat = currentPrice; // Range models typically assume zero drift
 
   return {
     symbol,
@@ -439,6 +450,7 @@ async function generateRangeForecast(
     date_t,
     created_at: new Date().toISOString(),
     locked: true,
+    y_hat, // Add explicit predicted price
     target: {
       h: targetSpec.h,
       coverage: targetSpec.coverage,
@@ -516,6 +528,9 @@ async function generateHarForecast(
   
   const L_h = Math.exp(m_log - z_alpha * s_scale);
   const U_h = Math.exp(m_log + z_alpha * s_scale);
+  
+  // For HAR models, predicted price is same as current (no drift assumed)
+  const y_hat = currentPrice; // HAR models typically assume zero drift
 
   return {
     symbol,
@@ -523,6 +538,7 @@ async function generateHarForecast(
     date_t,
     created_at: new Date().toISOString(),
     locked: true,
+    y_hat, // Add explicit predicted price
     target: {
       h: targetSpec.h,
       coverage: targetSpec.coverage,

@@ -309,6 +309,10 @@ export async function computeGbmForecast({
   // Band width in basis points (for h=1)
   const band_width_bp = h === 1 ? 10000 * (U_h / L_h - 1) : 10000 * (Math.exp(z_alpha * s_scale / Math.sqrt(h)) - Math.exp(-z_alpha * s_scale / Math.sqrt(h)));
   
+  // Compute explicit predicted price (y_hat) using GBM expected value formula
+  // For GBM with log-price dynamics, E[S_{t+h} | S_t] = S_t * exp(mu_eff * h)
+  const y_hat = S_t * Math.exp(mu_star_used * h);
+
   // Build estimates
   const estimates: GbmEstimates = {
     mu_star_hat,
@@ -324,6 +328,7 @@ export async function computeGbmForecast({
     symbol,
     date_t: effectiveDate,
     method: "GBM-CC",
+    y_hat, // Add explicit predicted price
     params: {
       window,
       lambda_drift,

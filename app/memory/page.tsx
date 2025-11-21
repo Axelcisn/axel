@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { CompanyInfo } from '@/lib/types/company';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 interface CompanyData {
   company: CompanyInfo;
@@ -22,6 +23,7 @@ export default function MemoryPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
   const [sortBy, setSortBy] = useState<'ticker' | 'name' | 'lastModified'>('ticker');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+  const isDarkMode = useDarkMode();
 
   useEffect(() => {
     loadCompanies();
@@ -163,23 +165,23 @@ export default function MemoryPage() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Memory</h1>
-          <p className="mt-2 text-gray-600">
+          <h1 className={`text-3xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Memory</h1>
+          <p className={`mt-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
             Browse and manage your saved companies and their historical data
           </p>
         </div>
 
         {/* Search and Controls */}
-        <div className="bg-white shadow rounded-lg mb-6">
+        <div className={`shadow rounded-lg mb-6 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
           <div className="p-6">
             <div className="flex flex-col sm:flex-row gap-4">
               {/* Search Bar */}
               <div className="flex-1">
-                <label htmlFor="search" className="block text-sm font-medium text-gray-700 mb-2">
+                <label htmlFor="search" className={`block text-sm font-medium mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
                   Search Companies
                 </label>
                 <div className="relative">
@@ -189,10 +191,14 @@ export default function MemoryPage() {
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder="Search by ticker or company name..."
-                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    className={`block w-full pl-10 pr-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400' 
+                        : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500'
+                    }`}
                   />
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <svg className={`h-5 w-5 ${isDarkMode ? 'text-gray-400' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                   </div>

@@ -1,21 +1,26 @@
+'use client';
+
 import Link from 'next/link';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 export default function HomePage() {
+  const isDarkMode = useDarkMode();
+
   return (
-    <main className="min-h-screen bg-gray-50">
+    <main className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         <div className="text-center">
-          <h1 className="text-4xl font-bold text-gray-900 sm:text-5xl md:text-6xl">
-            Welcome to <span className="text-blue-600">Axel</span>
+          <h1 className={`text-4xl font-bold sm:text-5xl md:text-6xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+            Welcome to <span className="text-blue-500">Axel</span>
           </h1>
-          <p className="mt-3 max-w-md mx-auto text-base text-gray-500 sm:text-lg md:mt-5 md:text-xl md:max-w-3xl">
+          <p className={`mt-3 max-w-md mx-auto text-base sm:text-lg md:mt-5 md:text-xl md:max-w-3xl ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
             Advanced financial analysis and momentum timing platform for data-driven investment decisions.
           </p>
         </div>
 
         <div className="mt-16">
           <div className="grid grid-cols-1 gap-8 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
-            <div className="bg-white overflow-hidden shadow rounded-lg">
+            <div className={`overflow-hidden shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
               <div className="p-6">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -26,14 +31,14 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div className="ml-4">
-                    <h3 className="text-lg font-medium text-gray-900">Analysis</h3>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Analysis</h3>
+                    <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                       Comprehensive momentum timing analysis with advanced forecasting and risk management.
                     </p>
                     <div className="mt-4">
                       <Link
                         href="/analysis"
-                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200"
+                        className={`inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md ${isDarkMode ? 'text-blue-200 bg-blue-900 hover:bg-blue-800' : 'text-blue-700 bg-blue-100 hover:bg-blue-200'}`}
                       >
                         Get Started
                       </Link>
@@ -43,7 +48,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="bg-white overflow-hidden shadow rounded-lg">
+            <div className={`overflow-hidden shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
               <div className="p-6">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -55,14 +60,14 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div className="ml-4">
-                    <h3 className="text-lg font-medium text-gray-900">Watchlist</h3>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Watchlist</h3>
+                    <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                       Monitor your portfolio and track market opportunities with real-time alerts.
                     </p>
                     <div className="mt-4">
                       <Link
                         href="/watchlist"
-                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-green-700 bg-green-100 hover:bg-green-200"
+                        className={`inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md ${isDarkMode ? 'text-green-200 bg-green-900 hover:bg-green-800' : 'text-green-700 bg-green-100 hover:bg-green-200'}`}
                       >
                         View Watchlist
                       </Link>
@@ -72,7 +77,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="bg-white overflow-hidden shadow rounded-lg">
+            <div className={`overflow-hidden shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
               <div className="p-6">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -83,14 +88,14 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div className="ml-4">
-                    <h3 className="text-lg font-medium text-gray-900">Memory</h3>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Memory</h3>
+                    <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                       Browse and manage your saved companies and their historical data archives.
                     </p>
                     <div className="mt-4">
                       <Link
                         href="/memory"
-                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-purple-700 bg-purple-100 hover:bg-purple-200"
+                        className={`inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md ${isDarkMode ? 'text-purple-200 bg-purple-900 hover:bg-purple-800' : 'text-purple-700 bg-purple-100 hover:bg-purple-200'}`}
                       >
                         Browse Memory
                       </Link>
@@ -100,7 +105,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="bg-white overflow-hidden shadow rounded-lg">
+            <div className={`overflow-hidden shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
               <div className="p-6">
                 <div className="flex items-center">
                   <div className="flex-shrink-0">
@@ -111,14 +116,14 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div className="ml-4">
-                    <h3 className="text-lg font-medium text-gray-900">Quick Analysis</h3>
-                    <p className="mt-2 text-sm text-gray-500">
+                    <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Quick Analysis</h3>
+                    <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
                       Get started quickly with AMD analysis to explore the platform capabilities.
                     </p>
                     <div className="mt-4">
                       <Link
                         href="/analysis?ticker=AMD"
-                        className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200"
+                        className={`inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md ${isDarkMode ? 'text-indigo-200 bg-indigo-900 hover:bg-indigo-800' : 'text-indigo-700 bg-indigo-100 hover:bg-indigo-200'}`}
                       >
                         Analyze AMD
                       </Link>
@@ -130,25 +135,25 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="mt-16 bg-white shadow rounded-lg">
+        <div className={`mt-16 shadow rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
           <div className="px-6 py-8">
-            <h2 className="text-2xl font-bold text-gray-900 text-center">Platform Features</h2>
+            <h2 className={`text-2xl font-bold text-center ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Platform Features</h2>
             <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               <div className="text-center">
-                <h3 className="text-lg font-medium text-gray-900">Momentum Timing</h3>
-                <p className="mt-2 text-sm text-gray-500">Advanced momentum detection and timing strategies</p>
+                <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Momentum Timing</h3>
+                <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>Advanced momentum detection and timing strategies</p>
               </div>
               <div className="text-center">
-                <h3 className="text-lg font-medium text-gray-900">Risk Management</h3>
-                <p className="mt-2 text-sm text-gray-500">Sophisticated volatility modeling and conformal prediction</p>
+                <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Risk Management</h3>
+                <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>Sophisticated volatility modeling and conformal prediction</p>
               </div>
               <div className="text-center">
-                <h3 className="text-lg font-medium text-gray-900">Backtesting</h3>
-                <p className="mt-2 text-sm text-gray-500">Comprehensive strategy validation and performance analysis</p>
+                <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Backtesting</h3>
+                <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>Comprehensive strategy validation and performance analysis</p>
               </div>
               <div className="text-center">
-                <h3 className="text-lg font-medium text-gray-900">Real-time Alerts</h3>
-                <p className="mt-2 text-sm text-gray-500">Automated monitoring and notification system</p>
+                <h3 className={`text-lg font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Real-time Alerts</h3>
+                <p className={`mt-2 text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>Automated monitoring and notification system</p>
               </div>
             </div>
           </div>

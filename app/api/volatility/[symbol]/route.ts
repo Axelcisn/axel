@@ -11,6 +11,7 @@ import { saveForecast, setActiveForecast } from '../../../../lib/forecast/store'
 import { specFileFor } from '../../../../lib/paths';
 import { getNormalCritical, getStudentTCritical } from '../../../../lib/forecast/critical';
 import { computeGbmForecast } from '../../../../lib/gbm/engine_old';
+import { computeGbmExpectedPrice } from '../../../../lib/gbm/engine';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -256,6 +257,16 @@ export async function POST(
 
     const piResult = composePi(piComposeInput);
 
+    // Compute explicit predicted price (y_hat) using GBM formula
+    // For volatility models, we use the estimated drift and h=1 for one-step-ahead prediction
+    const gbmEst = {
+      mu_star_hat: 0, // Not needed for prediction, only mu_star_used matters
+      sigma_hat: sigmaForecast.sigma_1d,
+      mu_star_used,
+      z_alpha: critical.value // Not needed for prediction
+    };
+    const y_hat = computeGbmExpectedPrice(S_t, gbmEst, h);
+
     // Create forecast record
     const forecastRecord: ForecastRecord = {
       symbol,
@@ -263,6 +274,7 @@ export async function POST(
       date_t,
       created_at: new Date().toISOString(),
       locked: true,
+      y_hat, // Add explicit predicted price
       target: {
         h: h,
         coverage: coverage,

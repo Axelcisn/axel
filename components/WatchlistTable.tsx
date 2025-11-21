@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { WatchlistRow } from '@/lib/watchlist/types';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 interface WatchlistTableProps {
   rows: WatchlistRow[];
@@ -28,6 +29,7 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
     coverage_min: 0,
     pbo_max: 1
   });
+  const isDarkMode = useDarkMode();
 
   // Sort and filter data
   const filteredAndSortedRows = useMemo(() => {
@@ -138,25 +140,37 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
   };
 
   const getDirectionColor = (direction: string) => {
-    switch (direction) {
-      case 'up': return 'text-green-600 bg-green-100';
-      case 'down': return 'text-red-600 bg-red-100';
-      default: return 'text-gray-600 bg-gray-100';
+    if (isDarkMode) {
+      switch (direction) {
+        case 'up': return 'text-green-300 bg-green-900';
+        case 'down': return 'text-red-300 bg-red-900';
+        default: return 'text-gray-300 bg-gray-800';
+      }
+    } else {
+      switch (direction) {
+        case 'up': return 'text-green-600 bg-green-100';
+        case 'down': return 'text-red-600 bg-red-100';
+        default: return 'text-gray-600 bg-gray-100';
+      }
     }
   };
 
   const getCoverageColor = (coverage: number | null | undefined) => {
-    if (coverage === null || coverage === undefined) return 'text-gray-600';
-    if (coverage >= 0.90) return 'text-green-600';
-    if (coverage >= 0.85) return 'text-yellow-600';
-    return 'text-red-600';
+    if (coverage === null || coverage === undefined) {
+      return isDarkMode ? 'text-gray-400' : 'text-gray-600';
+    }
+    if (coverage >= 0.90) return isDarkMode ? 'text-green-300' : 'text-green-600';
+    if (coverage >= 0.85) return isDarkMode ? 'text-yellow-300' : 'text-yellow-600';
+    return isDarkMode ? 'text-red-300' : 'text-red-600';
   };
 
   const getOverfitColor = (pbo: number | null | undefined) => {
-    if (pbo === null || pbo === undefined) return 'text-gray-600';
-    if (pbo > 0.7) return 'text-red-600';
-    if (pbo > 0.5) return 'text-yellow-600';
-    return 'text-green-600';
+    if (pbo === null || pbo === undefined) {
+      return isDarkMode ? 'text-gray-400' : 'text-gray-600';
+    }
+    if (pbo > 0.7) return isDarkMode ? 'text-red-300' : 'text-red-600';
+    if (pbo > 0.5) return isDarkMode ? 'text-yellow-300' : 'text-yellow-600';
+    return isDarkMode ? 'text-green-300' : 'text-green-600';
   };
 
   const renderProvenance = (row: WatchlistRow) => {
@@ -165,7 +179,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
     // PI Engine chip
     if (row.provenance.pi_engine) {
       chips.push(
-        <span key="pi" className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+        <span key="pi" className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+          isDarkMode ? 'bg-blue-900 text-blue-200' : 'bg-blue-100 text-blue-800'
+        }`}>
           {row.provenance.pi_engine}
         </span>
       );
@@ -174,7 +190,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
     // Range sigma chip
     if (row.provenance.range_sigma) {
       chips.push(
-        <span key="range" className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+        <span key="range" className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+          isDarkMode ? 'bg-purple-900 text-purple-200' : 'bg-purple-100 text-purple-800'
+        }`}>
           {row.provenance.range_sigma}
         </span>
       );
@@ -183,7 +201,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
     // Conformal chip
     if (row.provenance.conformal_mode) {
       chips.push(
-        <span key="conformal" className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
+        <span key="conformal" className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+          isDarkMode ? 'bg-indigo-900 text-indigo-200' : 'bg-indigo-100 text-indigo-800'
+        }`}>
           {row.provenance.conformal_mode}
         </span>
       );
@@ -192,7 +212,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
     // Survival model chip
     if (row.provenance.surv_model) {
       chips.push(
-        <span key="surv" className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+        <span key="surv" className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+          isDarkMode ? 'bg-green-900 text-green-200' : 'bg-green-100 text-green-800'
+        }`}>
           {row.provenance.surv_model}
         </span>
       );
@@ -200,7 +222,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
 
     // Evaluation chip
     chips.push(
-      <span key="eval" className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">
+      <span key="eval" className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+        isDarkMode ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-800'
+      }`}>
         {row.provenance.evaluation}
       </span>
     );
@@ -217,7 +241,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
     return (
       <div className="flex flex-wrap gap-1">
         {keys.map(k => (
-          <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-700">
+          <span key={k} className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs ${
+            isDarkMode ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-700'
+          }`}>
             P({k}): {formatPercent(P_ge_k[k])}
           </span>
         ))}
@@ -227,7 +253,11 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
 
   const SortHeader = ({ field, children }: { field: SortField; children: React.ReactNode }) => (
     <th 
-      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+      className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider cursor-pointer ${
+        isDarkMode 
+          ? 'text-gray-400 hover:bg-gray-700' 
+          : 'text-gray-500 hover:bg-gray-100'
+      }`}
       onClick={() => handleSort(field)}
     >
       <div className="flex items-center">
@@ -244,16 +274,20 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
   return (
     <div className="space-y-4">
       {/* Filters */}
-      <div className="bg-gray-50 p-4 rounded-lg">
-        <h3 className="text-sm font-medium text-gray-700 mb-3">Filters</h3>
+      <div className={`p-4 rounded-lg ${isDarkMode ? 'bg-gray-700' : 'bg-gray-50'}`}>
+        <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Filters</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
           
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Direction</label>
+            <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Direction</label>
             <select
               value={filters.direction}
               onChange={(e) => setFilters({...filters, direction: e.target.value})}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+              className={`w-full text-sm border rounded px-2 py-1 ${
+                isDarkMode 
+                  ? 'bg-gray-800 border-gray-600 text-white' 
+                  : 'bg-white border-gray-300 text-gray-900'
+              }`}
             >
               <option value="all">All</option>
               <option value="up">Up</option>
@@ -263,11 +297,15 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
           </div>
 
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Source</label>
+            <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Source</label>
             <select
               value={filters.source}
               onChange={(e) => setFilters({...filters, source: e.target.value})}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+              className={`w-full text-sm border rounded px-2 py-1 ${
+                isDarkMode 
+                  ? 'bg-gray-800 border-gray-600 text-white' 
+                  : 'bg-white border-gray-300 text-gray-900'
+              }`}
             >
               <option value="all">All</option>
               <option value="KM">KM</option>
@@ -278,7 +316,7 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
           </div>
 
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Vol Regime % (min)</label>
+            <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Vol Regime % (min)</label>
             <input
               type="number"
               min="0"
@@ -286,12 +324,16 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
               step="10"
               value={filters.vol_regime_min}
               onChange={(e) => setFilters({...filters, vol_regime_min: parseFloat(e.target.value) || 0})}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+              className={`w-full text-sm border rounded px-2 py-1 ${
+                isDarkMode 
+                  ? 'bg-gray-800 border-gray-600 text-white' 
+                  : 'bg-white border-gray-300 text-gray-900'
+              }`}
             />
           </div>
 
           <div>
-            <label className="block text-xs text-gray-600 mb-1">Coverage % (min)</label>
+            <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Coverage % (min)</label>
             <input
               type="number"
               min="0"
@@ -299,12 +341,16 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
               step="5"
               value={filters.coverage_min * 100}
               onChange={(e) => setFilters({...filters, coverage_min: (parseFloat(e.target.value) || 0) / 100})}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+              className={`w-full text-sm border rounded px-2 py-1 ${
+                isDarkMode 
+                  ? 'bg-gray-800 border-gray-600 text-white' 
+                  : 'bg-white border-gray-300 text-gray-900'
+              }`}
             />
           </div>
 
           <div>
-            <label className="block text-xs text-gray-600 mb-1">PBO (max)</label>
+            <label className={`block text-xs mb-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>PBO (max)</label>
             <input
               type="number"
               min="0"
@@ -312,7 +358,11 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
               step="0.1"
               value={filters.pbo_max}
               onChange={(e) => setFilters({...filters, pbo_max: parseFloat(e.target.value) || 1})}
-              className="w-full text-sm border border-gray-300 rounded px-2 py-1"
+              className={`w-full text-sm border rounded px-2 py-1 ${
+                isDarkMode 
+                  ? 'bg-gray-800 border-gray-600 text-white' 
+                  : 'bg-white border-gray-300 text-gray-900'
+              }`}
             />
           </div>
 
@@ -320,41 +370,61 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
       </div>
 
       {/* Results summary */}
-      <div className="text-sm text-gray-600">
+      <div className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
         Showing {filteredAndSortedRows.length} of {rows.length} symbols
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
-        <table className="min-w-full divide-y divide-gray-300">
-          <thead className="bg-gray-50">
+      <div className={`overflow-x-auto shadow ring-1 ring-opacity-5 md:rounded-lg ${
+        isDarkMode ? 'ring-gray-700' : 'ring-black'
+      }`}>
+        <table className={`min-w-full divide-y ${isDarkMode ? 'divide-gray-600' : 'divide-gray-300'}`}>
+          <thead className={`${isDarkMode ? 'bg-gray-800' : 'bg-gray-50'}`}>
             <tr>
               <SortHeader field="symbol">Symbol</SortHeader>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 Deviation
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 Forecast
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 Bands
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 Quality
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 Provenance
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className={`divide-y ${
+            isDarkMode 
+              ? 'bg-gray-900 divide-gray-700' 
+              : 'bg-white divide-gray-200'
+          }`}>
             {filteredAndSortedRows.map((row) => (
-              <tr key={row.symbol} className="hover:bg-gray-50">
+              <tr key={row.symbol} className={`${
+                isDarkMode ? 'hover:bg-gray-800' : 'hover:bg-gray-50'
+              }`}>
                 
                 {/* Symbol */}
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${
+                  isDarkMode ? 'text-gray-100' : 'text-gray-900'
+                }`}>
                   {row.symbol}
-                  <div className="text-xs text-gray-500">{row.as_of}</div>
+                  <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{row.as_of}</div>
                 </td>
 
                 {/* Deviation */}
@@ -364,13 +434,13 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
                       {row.deviation.direction}
                     </span>
                     {row.deviation.z_B && (
-                      <div className="text-xs text-gray-600">z_B: {formatNumber(row.deviation.z_B)}</div>
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>z_B: {formatNumber(row.deviation.z_B)}</div>
                     )}
                     {row.deviation.pct_outside_B && (
-                      <div className="text-xs text-gray-600">%out: {formatPercent(row.deviation.pct_outside_B)}</div>
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>%out: {formatPercent(row.deviation.pct_outside_B)}</div>
                     )}
                     {row.deviation.vol_regime_pct && (
-                      <div className="text-xs text-gray-600">vol: {formatPercent(row.deviation.vol_regime_pct)}</div>
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>vol: {formatPercent(row.deviation.vol_regime_pct)}</div>
                     )}
                   </div>
                 </td>
@@ -379,20 +449,22 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
                 <td className="px-6 py-4 text-sm">
                   <div className="space-y-1">
                     <div className="flex items-center">
-                      <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded mr-2">
+                      <span className={`text-xs px-2 py-0.5 rounded mr-2 ${
+                        isDarkMode ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-700'
+                      }`}>
                         {row.forecast.source}
                       </span>
-                      <span className="text-sm font-medium">
+                      <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>
                         T̂: {formatNumber(row.forecast.T_hat_median)}
                       </span>
                     </div>
                     {row.forecast.I60 && (
-                      <div className="text-xs text-gray-600">
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                         I60: [{formatNumber(row.forecast.I60[0])}, {formatNumber(row.forecast.I60[1])}]
                       </div>
                     )}
                     {row.forecast.I80 && (
-                      <div className="text-xs text-gray-600">
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                         I80: [{formatNumber(row.forecast.I80[0])}, {formatNumber(row.forecast.I80[1])}]
                       </div>
                     )}
@@ -402,7 +474,9 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
                       </div>
                     )}
                     {row.forecast.next_review_date && (
-                      <div className="text-xs text-blue-600 font-medium">
+                      <div className={`text-xs font-medium ${
+                        isDarkMode ? 'text-blue-300' : 'text-blue-600'
+                      }`}>
                         Review: {row.forecast.next_review_date}
                       </div>
                     )}
@@ -413,28 +487,32 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
                 <td className="px-6 py-4 text-sm">
                   <div className="space-y-1">
                     <div className="flex space-x-2">
-                      <span className="text-xs text-gray-600">L₁:</span>
-                      <span className="font-mono">{formatNumber(row.bands.L_1)}</span>
+                      <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>L₁:</span>
+                      <span className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{formatNumber(row.bands.L_1)}</span>
                     </div>
                     <div className="flex space-x-2">
-                      <span className="text-xs text-gray-600">U₁:</span>
-                      <span className="font-mono">{formatNumber(row.bands.U_1)}</span>
+                      <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>U₁:</span>
+                      <span className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{formatNumber(row.bands.U_1)}</span>
                     </div>
                     {row.bands.sigma_forecast && (
                       <div className="flex space-x-2">
-                        <span className="text-xs text-gray-600">σ:</span>
-                        <span className="font-mono text-xs">{formatNumber(row.bands.sigma_forecast, 4)}</span>
+                        <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>σ:</span>
+                        <span className={`font-mono text-xs ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>{formatNumber(row.bands.sigma_forecast, 4)}</span>
                       </div>
                     )}
                     <div className="text-xs">
-                      <span className="bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">
+                      <span className={`px-1.5 py-0.5 rounded ${
+                        isDarkMode ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-700'
+                      }`}>
                         {row.bands.critical.type}
                         {row.bands.critical.df && ` (df=${row.bands.critical.df})`}
                       </span>
                     </div>
                     {row.bands.conformal && (
                       <div className="text-xs">
-                        <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                        <span className={`px-1.5 py-0.5 rounded ${
+                          isDarkMode ? 'bg-indigo-900 text-indigo-200' : 'bg-indigo-100 text-indigo-700'
+                        }`}>
                           {row.bands.conformal.mode}
                         </span>
                       </div>
@@ -448,16 +526,16 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
                     <div className={`text-xs ${getCoverageColor(row.quality.pi_coverage_250d)}`}>
                       Cov: {formatPercent(row.quality.pi_coverage_250d)}
                     </div>
-                    <div className="text-xs text-gray-600">
+                    <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                       IS: {formatNumber(row.quality.interval_score)}
                     </div>
                     {row.quality.c_index && (
-                      <div className="text-xs text-gray-600">
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                         C-idx: {formatNumber(row.quality.c_index)}
                       </div>
                     )}
                     {row.quality.ibs_20d && (
-                      <div className="text-xs text-gray-600">
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                         IBS: {formatNumber(row.quality.ibs_20d)}
                       </div>
                     )}
@@ -467,17 +545,19 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
                       </div>
                     )}
                     {row.quality.dsr && (
-                      <div className="text-xs text-gray-600">
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                         DSR: {formatNumber(row.quality.dsr)}
                       </div>
                     )}
                     {row.quality.fdr_q && (
-                      <div className="text-xs text-gray-600">
+                      <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                         FDR: {formatPercent(row.quality.fdr_q)}
                       </div>
                     )}
                     {row.quality.regime && (
-                      <div className="text-xs text-orange-600">
+                      <div className={`text-xs ${
+                        isDarkMode ? 'text-orange-300' : 'text-orange-600'
+                      }`}>
                         Regime: {row.quality.regime.id}
                       </div>
                     )}
@@ -496,7 +576,7 @@ export default function WatchlistTable({ rows }: WatchlistTableProps) {
       </div>
 
       {filteredAndSortedRows.length === 0 && (
-        <div className="text-center py-8 text-gray-500">
+        <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
           No watchlist rows match the current filters
         </div>
       )}
