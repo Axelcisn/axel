@@ -30,21 +30,44 @@ export async function calibrate(
     throw new Error('Target specification not found');
   }
   
-  // Use override coverage if provided, otherwise use target spec
+  // Use override values if provided, otherwise use target spec
   const effectiveCoverage = coverageOverride || targetSpec.coverage;
+  const effectiveHorizon = horizonOverride || targetSpec.h;
   const alpha = 1 - effectiveCoverage;
   
   // Load canonical data for realized values
   const canonicalData = await loadCanonicalData(symbol);
   if (!canonicalData || canonicalData.length === 0) {
-    throw new Error('No canonical data found');
+    throw new Error(
+      `No canonical data found for symbol ${symbol}. ` +
+      `Conformal prediction requires historical price data to compute residuals. ` +
+      `Please ensure canonical data exists in /data/canonical/${symbol}.json.`
+    );
   }
   
   // Load historical base forecasts
-  const baseForecastPairs = await loadBaseForecastPairs(symbol, cal_window, domain, base_method);
+  const baseForecastPairs = await loadBaseForecastPairs(symbol, cal_window, domain, base_method, effectiveHorizon, effectiveCoverage);
   
   if (baseForecastPairs.length < cal_window) {
-    throw new Error(`Insufficient base forecasts: need ${cal_window}, have ${baseForecastPairs.length}`);
+    const shortage = cal_window - baseForecastPairs.length;
+    const suggestions = [];
+    
+    if (baseForecastPairs.length > 0) {
+      suggestions.push(`reduce calibration window to ${baseForecastPairs.length}`);
+    }
+    suggestions.push(`generate ${shortage} more base forecasts for the current configuration`);
+    
+    const baseMethodInfo = base_method ? ` (method: ${base_method})` : '';
+    const domainInfo = domain ? ` in ${domain} domain` : '';
+    const configInfo = (effectiveHorizon || effectiveCoverage) 
+      ? ` with h=${effectiveHorizon}, coverage=${effectiveCoverage}` 
+      : '';
+    
+    throw new Error(
+      `Insufficient base forecasts${baseMethodInfo}${domainInfo}${configInfo}: ` +
+      `need ${cal_window}, have ${baseForecastPairs.length}. ` +
+      `Consider: ${suggestions.join(' or ')}.`
+    );
   }
   
   // Initialize state
@@ -83,14 +106,22 @@ export async function calibrate(
       
     case 'EnbPI':
       if (!K || K < 5) {
-        throw new Error('EnbPI requires K >= 5');
+        throw new Error(
+          `EnbPI requires K >= 5, but got K=${K}. ` +
+          `K controls the ensemble size for bootstrap prediction intervals. ` +
+          `Use a larger K value or switch to ICP/CQR methods.`
+        );
       }
       state.params.q_cal = calibrateEnbPI(baseForecastPairs, alpha, K);
       break;
       
     case 'ACI':
       if (!eta || eta <= 0) {
-        throw new Error('ACI requires positive eta');
+        throw new Error(
+          `ACI requires positive eta, but got eta=${eta}. ` +
+          `Eta controls the adaptation rate for Adaptive Conformal Inference. ` +
+          `Use a positive value (typically 0.01-0.1) or switch to non-adaptive methods.`
+        );
       }
       state.params.theta = calibrateACI(baseForecastPairs, alpha, eta);
       break;
@@ -128,7 +159,11 @@ export async function applyConformalToday(
   // Load latest base forecast
   const latestForecast = await loadLatestBaseForecast(symbol, base_method);
   if (!latestForecast) {
-    throw new Error('No base forecast found for today');
+    const methodInfo = base_method ? ` for method ${base_method}` : '';
+    throw new Error(
+      `No base forecast found for today${methodInfo} (symbol: ${symbol}). ` +
+      `To apply conformal prediction, generate a base forecast first using the volatility modeling tools.`
+    );
   }
   
   // Extract base prediction values
@@ -230,13 +265,78 @@ interface ForecastPair {
 }
 
 /**
+ * Unified base forecast selector function 
+ * Centralizes all filtering logic to ensure consistency between head counts and calibration
+ */
+export function isMatchingBaseForecast(
+  forecast: ForecastRecord,
+  opts: {
+    symbol?: string;
+    baseMethod?: string;
+    domain?: 'log' | 'price';
+    horizon?: number;
+    coverage?: number;
+  }
+): boolean {
+  const { symbol, baseMethod, domain, horizon, coverage } = opts;
+
+  // Core filters that must always apply
+  if (!forecast.locked) return false;
+  if (forecast.method.startsWith('Conformal:')) return false;
+  
+  // Symbol filter
+  if (symbol && forecast.symbol !== symbol) return false;
+  
+  // Base method filter (exact match)
+  if (baseMethod) {
+    const m = forecast.method;
+    const b = baseMethod;
+
+    // Treat legacy "GBM" and new "GBM-CC" as equivalent
+    const isGbmAlias =
+      (b === 'GBM-CC' && m === 'GBM') ||
+      (b === 'GBM' && m === 'GBM-CC');
+
+    if (m !== b && !isGbmAlias) {
+      return false;
+    }
+  }
+  
+  // Domain filter - check if forecast was generated for specific domain
+  if (domain && forecast.domain) {
+    if (forecast.domain !== domain) return false;
+  }
+  
+  // Horizon filter - check if forecast was generated for specific horizon
+  if (horizon !== undefined) {
+    // For GBM forecasts, use horizonTrading
+    if (forecast.horizonTrading !== undefined) {
+      if (forecast.horizonTrading !== horizon) return false;
+    }
+    // For other forecasts, use target.h
+    else if (forecast.target?.h !== undefined) {
+      if (forecast.target.h !== horizon) return false;
+    }
+  }
+  
+  // Coverage filter - check if forecast was generated for specific coverage  
+  if (coverage !== undefined && forecast.target?.coverage !== undefined) {
+    if (Math.abs(forecast.target.coverage - coverage) > 0.001) return false;
+  }
+  
+  return true;
+}
+
+/**
  * Load historical base forecasts paired with realized values
  */
 export async function loadBaseForecastPairs(
   symbol: string, 
   cal_window: number, 
   domain: ConformalDomain,
-  base_method?: string
+  base_method?: string,
+  horizon?: number,
+  coverage?: number
 ): Promise<ForecastPair[]> {
   const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
   
@@ -265,21 +365,37 @@ export async function loadBaseForecastPairs(
       const content = fs.readFileSync(path.join(forecastsDir, file), 'utf-8');
       const forecast: ForecastRecord = JSON.parse(content);
       
-      // Skip if not locked or if base_method specified and doesn't match
-      if (!forecast.locked) continue;
-      if (base_method && forecast.method !== base_method) continue;
-      if (forecast.method.startsWith('Conformal:')) continue; // Skip conformal forecasts
+      // Use unified selector for all filtering
+      const isMatching = isMatchingBaseForecast(forecast, { 
+        symbol, 
+        baseMethod: base_method, 
+        domain,
+        horizon,
+        coverage
+      });
+      
+      if (isMatching) {
+        console.log('[DEBUG] matching base forecast', forecast.date_t, forecast.method, forecast.target);
+      }
+      
+      if (!isMatching) continue;
       
       // Get forecast date and next day for realization
       const forecastDate = forecast.date_t;
       const nextDate = getNextTradingDay(forecastDate, canonicalData);
       
-      if (!nextDate) continue;
+      if (!nextDate) {
+        console.log('[DEBUG] no next trading day for forecast', forecast.date_t, 'method=', forecast.method);
+        continue;
+      }
       
       const S_t = priceMap.get(forecastDate);
       const S_t_plus_1 = priceMap.get(nextDate);
       
-      if (!S_t || !S_t_plus_1) continue;
+      if (!S_t || !S_t_plus_1) {
+        console.log('[DEBUG] no canonical outcome for forecast', forecast.date_t, 'nextDate=', nextDate, 'S_t=', S_t, 'S_t_plus_1=', S_t_plus_1);
+        continue;
+      }
       
       // Compute realized value in chosen domain
       const realized = domain === 'log' ? Math.log(S_t_plus_1) : S_t_plus_1;

@@ -41,11 +41,15 @@ export async function detectBreakoutForDate(symbol: string, t_date: string): Pro
   // Extract forecast values
   const L_1 = f.intervals.L_h;
   const U_1 = f.intervals.U_h;
-  const m_log = f.diagnostics?.m_log || Math.log(S_t); // m_t(1)
-  const s_scale = f.diagnostics?.s_scale || f.estimates?.sigma_forecast || 0.02; // s_t
+  const m_log = f.diagnostics?.m_log || Math.log(S_t); // m_t(h)
+  const s_scale = f.diagnostics?.s_scale || f.estimates?.sigma_forecast || 0.02; // s_t(h)
   const critical_value = f.estimates?.critical_value || 1.96; // c
   const mu_star_used = f.estimates?.mu_star_used || 0; // drift used
   const sigma_forecast_1d = f.estimates?.sigma_forecast || null;
+  
+  // Get horizon information from forecast
+  const h_eff = f.h_eff_days || 1; // Calendar days horizon
+  const horizonTrading = f.horizonTrading || 1; // Trading days horizon
   
   // 3) outside_1d = (S_{t+1} < L_1) || (S_{t+1} > U_1); if not, return null
   const outside_1d = (S_t_plus_1 < L_1) || (S_t_plus_1 > U_1);
@@ -62,8 +66,9 @@ export async function detectBreakoutForDate(symbol: string, t_date: string): Pro
   // 5) Compute magnitudes at breakout B = (t+1):
   const direction: EventDirection = S_t_plus_1 > U_1 ? 1 : -1; // +1 up, -1 down
   
-  // z_B = [ ln(S_{t+1}) − ( ln(S_t) + mu_star_used ) ] / s_t
-  const z_B = (Math.log(S_t_plus_1) - (Math.log(S_t) + mu_star_used)) / s_scale;
+  // z_B = [ ln(S_{t+1}) − ( ln(S_t) + mu_star_used * h_eff ) ] / (sigma_forecast * sqrt(h_eff))
+  const sigma_hat = f.estimates?.sigma_hat || s_scale; // Use original daily volatility
+  const z_B = (Math.log(S_t_plus_1) - (Math.log(S_t) + mu_star_used * h_eff)) / (sigma_hat * Math.sqrt(h_eff));
   
   // z_excess_B = |z_B| − c
   const z_excess_B = Math.abs(z_B) - critical_value;

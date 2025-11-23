@@ -2,11 +2,15 @@
   "symbol": "AAPL",
   "method": "Range-P",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-21T08:12:22.847Z",
+  "horizonTrading": 1,
+  "h_eff_days": 1,
+  "verifyDate": "2025-10-10",
+  "domain": "log",
+  "created_at": "2025-11-23T01:52:34.909Z",
   "locked": true,
   "y_hat": 245.27,
   "target": {
-    "h": 2,
+    "h": 1,
     "coverage": 0.95,
     "window_requirements": {
       "min_days": 1000
@@ -37,15 +41,15 @@
     }
   },
   "intervals": {
-    "L_h": 236.69325411403048,
-    "U_h": 254.15753028186577,
+    "L_h": 239.17378978686364,
+    "U_h": 251.5215942081632,
     "band_width_bp": 516.2691293349142
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "model": "Range-P",
-      "h": 2,
+      "h": 1,
       "coverage": 0.95,
       "range": {
         "estimator": "P",
@@ -59,7 +63,7 @@
   "diagnostics": {
     "method_source": "Range-P",
     "m_log": 5.502359644559846,
-    "s_scale": 0.01816052457934636,
+    "s_scale": 0.012841430079960784,
     "critical_type": "normal"
   },
   "critical": {

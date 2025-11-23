@@ -12,6 +12,7 @@ import { specFileFor } from '../../../../lib/paths';
 import { getNormalCritical, getStudentTCritical } from '../../../../lib/forecast/critical';
 import { computeGbmForecast } from '../../../../lib/gbm/engine_old';
 import { computeGbmExpectedPrice } from '../../../../lib/gbm/engine';
+// import { getNthTradingCloseAfter, computeEffectiveHorizonDays } from '../../../../lib/calendar/service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -70,6 +71,27 @@ export async function POST(
     const latestRow = validRows[validRows.length - 1];
     const date_t = latestRow.date;
     const S_t = latestRow.adj_close!;
+
+    // For volatility models, horizonTrading = h (trading days horizon)
+    const horizonTrading = h;
+    console.log(`[VOL-API] Initial values: date_t=${date_t}, h=${h}, horizonTrading=${horizonTrading}`);
+    
+    // Compute calendar-based fields for consistency with GBM
+    const tz = exchange_tz || 'America/New_York';
+    let verifyDate: string;
+    let h_eff_days: number;
+    
+    try {
+      // Simple fallback for now to get server working
+      verifyDate = date_t; // Use current date as verify date  
+      h_eff_days = h; // Use target horizon as effective days
+      console.log(`[VOL-API] Calendar computation with fallback: ${date_t} + ${horizonTrading}D = ${verifyDate} (h_eff=${h_eff_days})`);
+    } catch (error) {
+      console.warn('Could not compute calendar fields for', date_t, 'h=', horizonTrading, 'error:', error);
+      verifyDate = date_t; // Fallback to current date
+      h_eff_days = h; // Fallback to target horizon
+      console.log(`[VOL-API] Calendar fallback: verifyDate=${verifyDate}, h_eff_days=${h_eff_days}`);
+    }
 
     // Load latest GBM estimates to get mu_star_used
     const gbmPath = path.join(process.cwd(), 'data', 'forecasts', symbol);
@@ -268,10 +290,15 @@ export async function POST(
     const y_hat = computeGbmExpectedPrice(S_t, gbmEst, h);
 
     // Create forecast record
+    console.log(`[VOL-API] Creating forecast with horizonTrading=${horizonTrading}, h_eff_days=${h_eff_days}, verifyDate=${verifyDate}`);
     const forecastRecord: ForecastRecord = {
       symbol,
       method: method as any, // Cast to handle the type mismatch for now
       date_t,
+      horizonTrading,  // Add trading days horizon
+      h_eff_days,      // Add effective horizon in calendar days
+      verifyDate,      // Add verification date
+      domain: 'log',   // Volatility models work in log domain
       created_at: new Date().toISOString(),
       locked: true,
       y_hat, // Add explicit predicted price

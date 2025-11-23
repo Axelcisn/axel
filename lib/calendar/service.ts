@@ -122,6 +122,57 @@ export function listTradingDays(
 /**
  * Validate if upload contains data after market close on early-close days
  */
+/**
+ * Get the Nth trading day after a given date
+ */
+export function getNthTradingCloseAfter(
+  startDate: string, 
+  tradingSteps: number,
+  tz: string = 'America/New_York'
+): { verifyDate: string; tradingStepsActual: number } {
+  const tradingDays = listTradingDays(
+    tz,
+    startDate,
+    getDateAfterDays(startDate, tradingSteps * 7) // Conservative end date
+  );
+  
+  // Find the start date in the trading days
+  const startIndex = tradingDays.findIndex(day => day.date === startDate);
+  if (startIndex === -1) {
+    throw new Error(`Start date ${startDate} is not a trading day`);
+  }
+  
+  // Get the Nth trading day after (not including start date)
+  if (startIndex + tradingSteps >= tradingDays.length) {
+    throw new Error(`Not enough trading days: need ${tradingSteps} after ${startDate}`);
+  }
+  
+  const verifyDate = tradingDays[startIndex + tradingSteps].date;
+  return {
+    verifyDate,
+    tradingStepsActual: tradingSteps
+  };
+}
+
+/**
+ * Compute effective horizon in calendar days between two dates
+ */
+export function computeEffectiveHorizonDays(startDate: string, endDate: string): number {
+  const start = new Date(startDate + 'T00:00:00Z');
+  const end = new Date(endDate + 'T00:00:00Z');
+  const diffTime = end.getTime() - start.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Get date N days after a given date
+ */
+function getDateAfterDays(dateStr: string, days: number): string {
+  const date = new Date(dateStr + 'T00:00:00Z');
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().split('T')[0];
+}
+
 export function validateEarlyCloseConstraints(
   uploadTime: string, // ISO timestamp of upload
   tradingDays: TradingDay[],

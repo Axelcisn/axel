@@ -86,29 +86,57 @@ export function computeGbmEstimates(input: GbmInputs): GbmEstimates {
 }
 
 /**
- * Compute prediction intervals from GBM estimates
+ * Compute GBM prediction intervals with proper horizon scaling
+ */
+export function computeGbmInterval(params: {
+  S_t: number;              // adj close at origin date
+  muStarUsed: number;       // μ*_used (per trading day)
+  sigmaHat: number;         // σ_hat (per trading day)
+  h_eff: number;            // effective horizon in "time units" for GBM
+  coverage: number;         // e.g. 0.95
+}): { L_h: number; U_h: number; m_t: number; s_t: number; z_alpha: number } {
+  const { S_t, muStarUsed, sigmaHat, h_eff, coverage } = params;
+  
+  // Log-price mean and std for horizon h_eff
+  const m_t = Math.log(S_t) + muStarUsed * h_eff;
+  const s_t = sigmaHat * Math.sqrt(h_eff);
+  
+  const alpha = 1 - coverage;
+  const z_alpha = normalInverse(1 - alpha / 2);
+  
+  const L_h = Math.exp(m_t - z_alpha * s_t);
+  const U_h = Math.exp(m_t + z_alpha * s_t);
+  
+  return {
+    L_h,
+    U_h,
+    m_t,
+    s_t,
+    z_alpha
+  };
+}
+
+/**
+ * Compute prediction intervals from GBM estimates (legacy wrapper)
  */
 export function computeGbmPI(S_t: number, est: GbmEstimates): GbmPI {
   const { mu_star_used, sigma_hat, z_alpha } = est;
   
-  // m_t = ln(S_t) + mu_star_used
-  const m_t = Math.log(S_t) + mu_star_used;
-  
-  // s_t = sigma_hat
-  const s_t = sigma_hat;
-  
-  // Prediction intervals
-  // L1 = exp(m_t - z_alpha * s_t)
-  // U1 = exp(m_t + z_alpha * s_t)
-  const L1 = Math.exp(m_t - z_alpha * s_t);
-  const U1 = Math.exp(m_t + z_alpha * s_t);
+  // Use h_eff = 1 for backward compatibility
+  const result = computeGbmInterval({
+    S_t,
+    muStarUsed: mu_star_used,
+    sigmaHat: sigma_hat,
+    h_eff: 1,
+    coverage: 0.95 // Default coverage for legacy calls
+  });
   
   // Band width in basis points
-  const band_width_bp = Math.round(10000 * (U1 / L1 - 1));
+  const band_width_bp = Math.round(10000 * (result.U_h / result.L_h - 1));
   
   return {
-    L1,
-    U1,
+    L1: result.L_h,
+    U1: result.U_h,
     band_width_bp
   };
 }

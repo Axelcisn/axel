@@ -12,6 +12,11 @@ export type GbmForecast = {
   date_t: string;               // YYYY-MM-DD format
   date_forecast: string;        // ISO timestamp
   S_t: number;                  // Price at date_t
+  method: "GBM";                // Explicit method type
+  horizonTrading: number;       // Trading days (1, 2, 3, 5)
+  h_eff_days: number;           // Effective calendar days
+  verifyDate: string;           // YYYY-MM-DD, the close date for S_obs
+  domain: "log" | "price";      // For conformal prediction
   estimates: {
     mu_star_hat: number;        // MLE drift
     sigma_hat: number;          // MLE volatility  
@@ -19,14 +24,17 @@ export type GbmForecast = {
     z_alpha: number;            // Critical value
   };
   pi: {
-    L1: number;                 // Lower bound
-    U1: number;                 // Upper bound
+    L_h: number;                // Lower bound for horizonTrading
+    U_h: number;                // Upper bound for horizonTrading
+    m_t: number;                // Log-price mean
+    s_t: number;                // Log-price std
     band_width_bp: number;      // Band width in bp
   };
   params: {
     windowN: 252 | 504 | 756;
     lambdaDrift: number;        // 0..1
     coverage: number;           // e.g., 0.95
+    horizonTrading?: number;    // Trading days (1, 2, 3, 5)
   };
   window_period: {
     start: string;              // YYYY-MM-DD
@@ -36,6 +44,7 @@ export type GbmForecast = {
   meta: {
     tz: string;                 // Exchange timezone
   };
+  locked: boolean;              // Immutability flag
 };
 
 export async function saveRaw(file: Buffer, symbol: string): Promise<string> {

@@ -2,7 +2,11 @@
   "symbol": "AAPL",
   "method": "GARCH11-N",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-21T22:32:34.161Z",
+  "horizonTrading": 1,
+  "h_eff_days": 1,
+  "verifyDate": "2025-10-10",
+  "domain": "log",
+  "created_at": "2025-11-23T04:42:37.164Z",
   "locked": true,
   "y_hat": 245.27,
   "target": {

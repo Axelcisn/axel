@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { computeGbmEstimates, computeGbmPI, validateSeriesForGBM, GbmInputs } from '@/lib/gbm/engine';
+import { computeGbmEstimates, computeGbmInterval, validateSeriesForGBM, GbmInputs } from '@/lib/gbm/engine';
 import { getForecasts, saveForecast, GbmForecast } from '@/lib/storage/fsStore';
 import { loadCanonical } from '@/lib/storage/canonical';
+import { getNthTradingCloseAfter, computeEffectiveHorizonDays } from '@/lib/calendar/service';
+
+type GbmRequestBody = {
+  windowN?: 252 | 504 | 756;
+  lambdaDrift?: number;
+  coverage?: number;
+  horizonTrading?: 1 | 2 | 3 | 5;
+};
 
 export async function GET(
   request: NextRequest,
@@ -35,12 +43,13 @@ export async function POST(
 ) {
   try {
     const symbol = (params.symbol || "").toUpperCase();
-    const body = await request.json();
+    const body: GbmRequestBody = await request.json();
     
     const { 
       windowN = 504, 
       lambdaDrift = 0.25, 
-      coverage = 0.95 
+      coverage = 0.95,
+      horizonTrading = 1
     } = body;
     
     // Validate parameters
@@ -61,6 +70,13 @@ export async function POST(
     if (coverage <= 0 || coverage >= 1) {
       return NextResponse.json(
         { error: 'Invalid coverage. Must be between 0 and 1' },
+        { status: 422 }
+      );
+    }
+
+    if (![1, 2, 3, 5].includes(horizonTrading)) {
+      return NextResponse.json(
+        { error: 'Invalid horizonTrading. Must be 1, 2, 3, or 5' },
         { status: 422 }
       );
     }
@@ -92,6 +108,11 @@ export async function POST(
     const date_t = dates[dates.length - 1];
     const S_t = adjClose[adjClose.length - 1];
     
+    // Compute horizon information
+    const tz = canonical.meta?.exchange_tz || 'America/New_York';
+    const { verifyDate } = getNthTradingCloseAfter(date_t, horizonTrading, tz);
+    const h_eff_days = computeEffectiveHorizonDays(date_t, verifyDate);
+    
     const gbmInputs: GbmInputs = {
       dates,
       adjClose,
@@ -102,7 +123,13 @@ export async function POST(
     
     // Compute GBM estimates and prediction intervals
     const estimates = computeGbmEstimates(gbmInputs);
-    const pi = computeGbmPI(S_t, estimates);
+    const piResult = computeGbmInterval({
+      S_t,
+      muStarUsed: estimates.mu_star_used,
+      sigmaHat: estimates.sigma_hat,
+      h_eff: h_eff_days,
+      coverage
+    });
     
     // Create window period info
     const window_period = {
@@ -117,17 +144,30 @@ export async function POST(
       date_t,
       date_forecast: new Date().toISOString(),
       S_t,
+      method: "GBM",
+      horizonTrading,
+      h_eff_days,
+      verifyDate,
+      domain: "log",
       estimates,
-      pi,
+      pi: {
+        L_h: piResult.L_h,
+        U_h: piResult.U_h,
+        m_t: piResult.m_t,
+        s_t: piResult.s_t,
+        band_width_bp: Math.round(10000 * (piResult.U_h / piResult.L_h - 1))
+      },
       params: {
         windowN,
         lambdaDrift,
-        coverage
+        coverage,
+        horizonTrading
       },
       window_period,
       meta: {
-        tz: 'America/New_York' // Default timezone - would be derived from target spec in production
-      }
+        tz
+      },
+      locked: true
     };
     
     // Save forecast
@@ -143,7 +183,9 @@ export async function POST(
     // Handle specific error cases
     if (errorMessage.includes('Non-positive price') || 
         errorMessage.includes('Insufficient data') ||
-        errorMessage.includes('same length')) {
+        errorMessage.includes('same length') ||
+        errorMessage.includes('trading day') ||
+        errorMessage.includes('Not enough trading days')) {
       return NextResponse.json(
         { error: errorMessage },
         { status: 422 }

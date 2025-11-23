@@ -1,0 +1,115 @@
+{
+  "symbol": "AAPL",
+  "method": "Conformal:ICP",
+  "date_t": "2025-11-23",
+  "created_at": "2025-11-23T04:43:36.022Z",
+  "locked": true,
+  "target": {
+    "h": 1,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 250
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0,
+    "sigma_hat": 0.016996682326887988,
+    "mu_star_used": 0,
+    "window_start": "2025-03-18",
+    "window_end": "2025-11-23",
+    "n": 250,
+    "sigma_forecast": 0.016996682326887988,
+    "sigma2_forecast": 0.0002888872101211465,
+    "critical_value": 2.263213055223333,
+    "window_span": {
+      "start": "2025-03-18",
+      "end": "2025-11-23"
+    }
+  },
+  "intervals": {
+    "L_h": 235.89828534458562,
+    "U_h": 255.01403205252586,
+    "band_width_bp": 810.3385185702882
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "mode": "ICP",
+      "domain": "log",
+      "cal_window": 250,
+      "coverage": 0.95,
+      "h": 1,
+      "base_method": "GARCH11-t"
+    },
+    "regime_tag": null,
+    "conformal": {
+      "mode": "ICP",
+      "domain": "log",
+      "cal_window": 250,
+      "q_cal": 0.03895892674157863,
+      "eta": null,
+      "K": null
+    }
+  },
+  "diagnostics": {
+    "method_source": "ICP",
+    "m_log": 5.502359644559846,
+    "s_scale": 0.016996682326887988,
+    "critical_type": "t",
+    "base_method": "GARCH11-t",
+    "conformal": {
+      "mode": "ICP",
+      "domain": "log",
+      "cal_window": 250,
+      "params": {
+        "eta": null,
+        "K": null,
+        "q_cal": 0.03895892674157863
+      },
+      "coverage": {
+        "last60": 1,
+        "lastCal": 0.984,
+        "miss_count": 4,
+        "miss_details": [
+          {
+            "date": "2025-04-02",
+            "realized": 5.314141501894922,
+            "y_pred": 5.411828276557693,
+            "L_base": 5.355566043536904,
+            "U_base": 5.468090509578482,
+            "miss_type": "below",
+            "miss_magnitude": 0.04142454164198206
+          },
+          {
+            "date": "2025-04-03",
+            "realized": 5.238461199394671,
+            "y_pred": 5.314806168482246,
+            "L_base": 5.25851607700546,
+            "U_base": 5.371096259959032,
+            "miss_type": "below",
+            "miss_magnitude": 0.02005487761078939
+          },
+          {
+            "date": "2025-04-08",
+            "realized": 5.2925507716536995,
+            "y_pred": 5.1505831440395715,
+            "L_base": 5.094268937133525,
+            "U_base": 5.206897350945618,
+            "miss_type": "above",
+            "miss_magnitude": 0.08565342070808146
+          },
+          {
+            "date": "2025-05-09",
+            "realized": 5.350862377211803,
+            "y_pred": 5.291601330127586,
+            "L_base": 5.235243858667639,
+            "U_base": 5.347958801587533,
+            "miss_type": "above",
+            "miss_magnitude": 0.0029035756242707933
+          }
+        ]
+      }
+    },
+    "df": 8
+  }
+}

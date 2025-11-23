@@ -3,16 +3,216 @@
 import { useState, useEffect, useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ReferenceLine, ComposedChart, ReferenceArea } from 'recharts';
 
+import { GbmForecast } from '@/lib/storage/fsStore';
+
+interface ModelDetailsProps {
+  activeForecast?: GbmForecast | any; // any for backward compatibility with conformal-modified forecasts
+  gbmForecast?: GbmForecast | any;
+  conformalState?: {
+    mode?: string;
+    coverage?: {
+      last60?: number;
+      lastCal?: number;
+    };
+  };
+  horizon?: number;
+  coverage?: number;
+}
+
+function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, coverage }: ModelDetailsProps) {
+  // Determine the primary forecast to use (prefer activeForecast, fallback to gbmForecast)
+  const forecast = activeForecast || gbmForecast;
+  
+  if (!forecast) {
+    return null;
+  }
+
+  // Extract method information and determine forecast type
+  const baseMethod = forecast.method || 'GBM';
+  const conformalMode = conformalState?.mode || forecast.provenance?.conformal?.mode;
+  
+  // For GARCH11-t, append distribution info
+  let methodDisplay = conformalMode ? `${baseMethod}-CC-${conformalMode}` : baseMethod;
+  if (baseMethod === 'GARCH11-t' && forecast.estimates?.volatility_diagnostics?.df) {
+    const df = forecast.estimates.volatility_diagnostics.df;
+    methodDisplay = conformalMode ? `${baseMethod}-CC-${conformalMode} (ν = ${df})` : `${baseMethod} (ν = ${df})`;
+  }
+  
+  // Determine forecast type flags
+  const isGbm = baseMethod === "GBM";
+  const isGarch = baseMethod?.startsWith("GARCH11");  // handles "GARCH11-N" and "GARCH11-t"
+
+  // Extract horizon information from actual forecast data
+  const horizonTrading = forecast.params?.horizonTrading || forecast.horizonTrading || horizon || 1;
+  const h_eff_days = forecast.h_eff_days ?? (horizonTrading === 1 ? 1 : horizonTrading); // Fallback for old forecasts
+  const horizonDisplay = h_eff_days !== null 
+    ? `${horizonTrading}D (h_eff = ${h_eff_days} days)` 
+    : `${horizonTrading}D (h_eff = N/A)`;
+
+  // Extract dates with proper formatting
+  const forecastDate = forecast.date_t || 'N/A';
+  const verifyDate = forecast.verifyDate || 'N/A';
+
+  // Extract GBM parameters (only for GBM forecasts)
+  const estimates = forecast.estimates || {};
+  const params = forecast.params || {};
+  
+  let parametersDisplay = '';
+  let parametersLabel = '';
+  
+  if (isGbm) {
+    // GBM-specific parameters
+    const muStarHat = estimates.mu_star_hat ?? 0;
+    const muStarUsed = estimates.mu_star_used ?? estimates.muStarUsed ?? 0;
+    const sigmaHat = estimates.sigma_hat ?? estimates.sigmaHat ?? 0;
+    const lambdaDrift = params.lambdaDrift ?? params.lambda ?? estimates.lambda ?? 0;
+    
+    parametersDisplay = `μ*_hat = ${muStarHat.toFixed(6)}, μ*_used = ${muStarUsed.toFixed(6)}, σ = ${sigmaHat.toFixed(6)}, λ = ${lambdaDrift.toFixed(2)}`;
+    parametersLabel = 'GBM Parameters';
+  } else if (isGarch) {
+    // GARCH-specific parameters
+    const volDiagnostics = estimates.volatility_diagnostics || {};
+    const omega = volDiagnostics.omega ?? NaN;
+    const alpha = volDiagnostics.alpha ?? NaN;
+    const beta = volDiagnostics.beta ?? NaN;
+    const phi = (isFinite(alpha) && isFinite(beta)) ? (alpha + beta) : NaN;
+    const sigma2_uncond = volDiagnostics.unconditional_var ?? 
+      ((isFinite(omega) && isFinite(phi) && phi < 1) ? omega / (1 - phi) : NaN);
+    
+    const sigma1d = estimates.sigma_forecast ?? NaN;
+    const sigma2_1d = estimates.sigma2_forecast ?? NaN;
+    
+    // Format parameters with appropriate precision and fallbacks
+    const omegaStr = isFinite(omega) ? omega.toExponential(3) : 'N/A';
+    const alphaStr = isFinite(alpha) ? alpha.toFixed(3) : 'N/A';
+    const betaStr = isFinite(beta) ? beta.toFixed(3) : 'N/A';
+    const phiStr = isFinite(phi) ? phi.toFixed(3) : 'N/A';
+    const sigma2UncondStr = isFinite(sigma2_uncond) ? sigma2_uncond.toExponential(3) : 'N/A';
+    const sigma1dStr = isFinite(sigma1d) ? sigma1d.toFixed(6) : 'N/A';
+    const sigma2_1dStr = isFinite(sigma2_1d) ? sigma2_1d.toExponential(3) : 'N/A';
+    
+    parametersDisplay = `ω = ${omegaStr}, α = ${alphaStr}, β = ${betaStr}, α+β = ${phiStr}, σ²_uncond = ${sigma2UncondStr}`;
+    parametersLabel = 'GARCH Parameters';
+  }
+
+  // Extract prediction interval (preferably conformal-adjusted)
+  // Try multiple possible field locations
+  const intervals = forecast.intervals || forecast.pi || forecast;
+  const L_conf = forecast.L_h || intervals.L_h || intervals.L1 || intervals.lower;
+  const U_conf = forecast.U_h || intervals.U_h || intervals.U1 || intervals.upper;
+  const piDisplay = (L_conf !== undefined && U_conf !== undefined) 
+    ? `[$${L_conf.toFixed(2)}, $${U_conf.toFixed(2)}]` 
+    : 'N/A';
+
+  // Calculate center and width
+  const center = (L_conf !== undefined && U_conf !== undefined) ? (L_conf + U_conf) / 2 : null;
+  const width = (L_conf !== undefined && U_conf !== undefined) ? U_conf - L_conf : null;
+  const bps = (L_conf !== undefined && U_conf !== undefined && L_conf > 0) 
+    ? Math.round(10000 * (U_conf / L_conf - 1)) 
+    : null;
+  const centerWidthDisplay = (center !== null && width !== null && bps !== null) 
+    ? `Center = $${center.toFixed(2)}, Width = $${width.toFixed(2)} (≈ ${bps} bp)` 
+    : 'N/A';
+
+  // Extract coverage statistics
+  const coverageStats = conformalState?.coverage;
+  const last60Coverage = coverageStats?.last60;
+  const calWindowCoverage = coverageStats?.lastCal;
+  const coverageDisplay = (last60Coverage !== null && last60Coverage !== undefined && 
+                          calWindowCoverage !== null && calWindowCoverage !== undefined)
+    ? `${(last60Coverage * 100).toFixed(1)}% (60d), ${(calWindowCoverage * 100).toFixed(1)}% (Cal Window)`
+    : 'N/A';
+
+  return (
+    <div className="mb-4">
+      <h4 className="text-sm font-semibold text-gray-900 mb-3">Model Details</h4>
+      
+      {/* Professional grid layout */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-x-6 gap-y-3">
+        {/* Row 1: Method & Horizon */}
+        <div className="flex flex-col">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Method</span>
+          <span className="text-sm text-gray-900 font-medium">{methodDisplay}</span>
+        </div>
+        
+        <div className="flex flex-col">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Horizon</span>
+          <span className="text-sm text-gray-900">{horizonDisplay}</span>
+        </div>
+        
+        <div className="flex flex-col">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Forecast Date</span>
+          <span className="text-sm text-gray-900">{forecastDate}</span>
+        </div>
+        
+        <div className="flex flex-col">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Verify Date</span>
+          <span className="text-sm text-gray-900">{verifyDate}</span>
+        </div>
+        
+        {/* Row 2: Technical Details */}
+        <div className="flex flex-col md:col-span-2">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{parametersLabel}</span>
+          <span className="text-sm text-gray-900 font-mono">{parametersDisplay}</span>
+        </div>
+        
+        <div className="flex flex-col md:col-span-2">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Prediction Interval</span>
+          <span className="text-sm text-gray-900 font-medium">{piDisplay}</span>
+        </div>
+        
+        {/* GARCH-specific volatility row */}
+        {isGarch && (
+          <div className="flex flex-col md:col-span-2">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Volatility (1D)</span>
+            <span className="text-sm text-gray-900 font-mono">
+              {(() => {
+                const sigma1d = estimates.sigma_forecast ?? NaN;
+                const sigma2_1d = estimates.sigma2_forecast ?? NaN;
+                const sigma1dStr = isFinite(sigma1d) ? sigma1d.toFixed(6) : 'N/A';
+                const sigma2_1dStr = isFinite(sigma2_1d) ? sigma2_1d.toExponential(3) : 'N/A';
+                return `σ_1d = ${sigma1dStr}, σ²_1d = ${sigma2_1dStr}`;
+              })()}
+            </span>
+          </div>
+        )}
+        
+        {/* Row 3: Statistics */}
+        <div className="flex flex-col md:col-span-2">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Center & Width</span>
+          <span className="text-sm text-gray-900">{centerWidthDisplay}</span>
+        </div>
+        
+        <div className="flex flex-col md:col-span-2">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Coverage Statistics</span>
+          <span className="text-sm text-gray-900">{coverageDisplay}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface PriceChartProps {
   symbol: string;
   className?: string;
   activeForecast?: any;
   gbmForecast?: any;
+  conformalState?: any;
+  horizon?: number;
+  coverage?: number;
 }
 
 type TimeRange = '5d' | '1m' | '3m' | '6m' | '1y' | '2y' | '5y' | 'max';
 
-export default function PriceChart({ symbol, className = '', activeForecast, gbmForecast }: PriceChartProps) {
+export default function PriceChart({ 
+  symbol, 
+  className = '', 
+  activeForecast, 
+  gbmForecast, 
+  conformalState, 
+  horizon = 1, 
+  coverage = 0.95 
+}: PriceChartProps) {
   const [data, setData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -311,12 +511,6 @@ export default function PriceChart({ symbol, className = '', activeForecast, gbm
           <div>
             <h2 className="text-xl font-bold text-gray-900">{symbol} Price Chart</h2>
           </div>
-          {/* Method Badge */}
-          {(activeForecast || gbmForecast) && (
-            <div className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
-              Method: {activeForecast?.method || gbmForecast?.method || 'GBM'}
-            </div>
-          )}
         </div>
       </div>
 
@@ -589,60 +783,14 @@ export default function PriceChart({ symbol, className = '', activeForecast, gbm
       {/* Footer Info */}
       {(activeForecast || gbmForecast) && (
         <div className="mt-4 pt-4 border-t border-gray-200">
-          <div className="grid grid-cols-2 gap-4 text-xs">
-            <div>
-              <span className="font-medium text-gray-800">Method:</span>
-              <span className="ml-2 text-gray-600">
-                {activeForecast?.method || gbmForecast?.method || 'GBM'}
-              </span>
-            </div>
-            {(() => {
-              const forecast = activeForecast || gbmForecast;
-              const lowerBound = forecast?.L_h || forecast?.intervals?.L_h || forecast?.pi?.L1;
-              const upperBound = forecast?.U_h || forecast?.intervals?.U_h || forecast?.pi?.U1;
-              return lowerBound && upperBound ? (
-                <div>
-                  <span className="font-medium text-gray-800">Prediction Interval:</span>
-                  <span className="ml-2 text-gray-600">
-                    [${lowerBound.toFixed(2)}, ${upperBound.toFixed(2)}]
-                  </span>
-                </div>
-              ) : null;
-            })()}
-          </div>
-          
-          <div className="mt-2 flex items-center gap-4 text-xs text-gray-500 flex-wrap">
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-0.5 bg-blue-600"></div>
-              <span>Historical Price</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-4 h-0.5 border-t-2 border-dashed border-red-500"></div>
-              <span>Prediction Bands</span>
-            </div>
-            {/* Show GBM bounds legend only when we have both active and GBM forecasts */}
-            {activeForecast && gbmForecast && activeForecast !== gbmForecast && (
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-0.5 border-t-2 border-dashed border-green-600"></div>
-                <span>GBM Bounds</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <div className={`w-4 h-0.5 border-t-2 border-dashed ${isGbmForecast ? 'border-green-600' : 'border-orange-500'}`}></div>
-              <span>Projection Lines</span>
-            </div>
-            {/* Show GBM projection lines legend when GBM bounds exist */}
-            {gbmForecast && (gbmForecast.L_h || gbmForecast.intervals?.L_h || gbmForecast.pi?.L1) && (
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-0.5 border-t-2 border-dashed border-green-600" style={{borderStyle: "dashed", borderTopWidth: "2px"}}></div>
-                <span>GBM Projections</span>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <div className={`w-4 h-0.5 border-t-2 border-dashed ${isGbmForecast ? 'border-green-600' : 'border-orange-500'}`}></div>
-              <span>Mean Projection</span>
-            </div>
-          </div>
+          {/* Model Details Section */}
+          <ModelDetails 
+            activeForecast={activeForecast}
+            gbmForecast={gbmForecast}
+            conformalState={conformalState}
+            horizon={horizon}
+            coverage={coverage}
+          />
         </div>
       )}
     </div>

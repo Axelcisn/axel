@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { BacktestSummary, ROOutcome } from '@/lib/backtest/types';
+import VarDiagnosticsPanel from './VarDiagnosticsPanel';
 
 interface BacktestSymbol {
   symbol: string;
@@ -172,6 +173,7 @@ export default function BacktestDashboard() {
               {[
                 { id: 'overview', name: 'Overview' },
                 { id: 'details', name: 'Analysis Details' },
+                { id: 'var', name: 'VaR Diagnostics' },
                 { id: 'new', name: 'Run New Backtest' }
               ].map((tab) => (
                 <button
@@ -401,6 +403,69 @@ export default function BacktestDashboard() {
                 ) : (
                   <div className="text-center py-8 text-gray-500">
                     Select a symbol to view detailed analysis
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* VaR Diagnostics Tab */}
+            {activeTab === 'var' && (
+              <div className="space-y-6">
+                {backtestData && selectedSymbol ? (
+                  <div>
+                    <div className="mb-6">
+                      <h3 className="text-lg font-medium text-gray-900 mb-2">VaR Model Validation</h3>
+                      <p className="text-sm text-gray-600">
+                        Comprehensive Value-at-Risk diagnostics across forecasting models using Basel-style backtesting framework
+                      </p>
+                    </div>
+                    
+                    {/* VaR Diagnostics for different horizons and coverages */}
+                    <div className="space-y-6">
+                      
+                      {/* 1-Day, 95% Coverage */}
+                      <VarDiagnosticsPanel
+                        symbol={selectedSymbol}
+                        horizonTrading={1}
+                        coverage={0.95}
+                        className="mb-6"
+                      />
+                      
+                      {/* 1-Day, 99% Coverage */}
+                      <VarDiagnosticsPanel
+                        symbol={selectedSymbol}
+                        horizonTrading={1}
+                        coverage={0.99}
+                        className="mb-6"
+                      />
+                      
+                      {/* 5-Day, 95% Coverage */}
+                      <VarDiagnosticsPanel
+                        symbol={selectedSymbol}
+                        horizonTrading={5}
+                        coverage={0.95}
+                        className="mb-6"
+                      />
+                      
+                    </div>
+
+                    {/* VaR Interpretation Guide */}
+                    <div className="bg-blue-50 rounded-lg p-6 mt-8">
+                      <h4 className="text-md font-semibold text-blue-900 mb-3">VaR Diagnostics Guide</h4>
+                      <div className="space-y-2 text-sm text-blue-800">
+                        <div><span className="font-medium">Kupiec POF Test:</span> Tests whether the observed breach rate equals the nominal α level. p &lt; 0.05 indicates significant deviation.</div>
+                        <div><span className="font-medium">LR Independence Test:</span> Tests whether violations cluster in time (bad) or occur independently (good). p &lt; 0.05 indicates problematic clustering.</div>
+                        <div><span className="font-medium">LR Conditional Coverage:</span> Combined test for both correct breach rate and independence. p &lt; 0.05 indicates model inadequacy.</div>
+                        <div><span className="font-medium">Traffic Light System:</span> Basel-style classification based on binomial tail probabilities.</div>
+                        <div className="mt-3 pt-3 border-t border-blue-200">
+                          <span className="font-medium">Expected Results:</span> GARCH11-t should show better tail behavior than GARCH11-N and GBM in extreme market conditions due to heavy-tailed Student-t distribution.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-center py-8 text-gray-500">
+                    Select a symbol to view VaR diagnostics
                   </div>
                 )}
               </div>

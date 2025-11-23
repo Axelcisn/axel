@@ -15,7 +15,7 @@ export async function loadPredictionSeries(
   method: string
 ): Promise<Array<{ date: string; model_price: number }>> {
   // Get all forecast pairs for this method
-  const allPairs = await loadBaseForecastPairs(symbol, window, 'price', method);
+  const allPairs = await loadBaseForecastPairs(symbol, window, 'price', method, undefined, undefined);
 
   const series: Array<{ date: string; model_price: number }> = [];
 

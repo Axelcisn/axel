@@ -17,6 +17,7 @@ import { formatTicker, getAllExchanges, getExchangesByRegion, getExchangeInfo } 
 import { parseExchange, normalizeTicker } from '@/lib/utils/parseExchange';
 import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
+import { resolveBaseMethod } from '@/lib/forecast/methods';
 
 // Client-side type for gates status
 type GateStatus = {
@@ -498,19 +499,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     })();
   }, [tickerParam]);
 
-  // Function to resolve base method from current volatility model selection
-  function resolveBaseMethod(
-    volModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range',
-    garchEstimator: 'Normal' | 'Student-t',
-    rangeEstimator: 'P' | 'GK' | 'RS' | 'YZ'
-  ): string {
-    if (volModel === 'GBM') return 'GBM-CC';
-    if (volModel === 'GARCH') return garchEstimator === 'Student-t' ? 'GARCH11-t' : 'GARCH11-N';
-    if (volModel === 'HAR-RV') return 'HAR-RV';
-    if (volModel === 'Range') return `Range-${rangeEstimator}`;
-    throw new Error('Unknown volModel');
-  }
-
   // Derive base method from current UI selection instead of active forecast
   const selectedBaseMethod = resolveBaseMethod(volModel, garchEstimator, rangeEstimator);
 
@@ -525,9 +513,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     try {
       setIsLoadingBaseForecasts(true);
       
-      // Use selected base method from current UI selection
+      // Use selected base method from current UI selection with complete parameter set
       const baseMethod = selectedBaseMethod;
-      const query = `?base_method=${encodeURIComponent(baseMethod)}`;
+      const query = `?base_method=${encodeURIComponent(baseMethod)}&h=${h}&coverage=${coverage}&domain=${conformalDomain}`;
       const resp = await fetch(
         `/api/conformal/head/${encodeURIComponent(tickerParam)}${query}`,
         { cache: 'no-store' }
@@ -546,7 +534,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingBaseForecasts(false);
     }
-  }, [tickerParam, selectedBaseMethod]);
+  }, [tickerParam, selectedBaseMethod, h, coverage, conformalDomain]);
 
   // Load model line data
   const loadModelLine = useCallback(async () => {
@@ -1014,7 +1002,10 @@ export default function TimingPage({ params }: TimingPageProps) {
               },
               body: JSON.stringify({
                 symbol: params.ticker,
-                params: conformalParams
+                params: conformalParams,
+                base_method: baseMethod,                      // Include base method in retry
+                horizon: h,                                   // Include horizon in retry
+                coverage: selectedCoverage                    // Include coverage in retry
               }),
             });
             
@@ -2878,6 +2869,9 @@ export default function TimingPage({ params }: TimingPageProps) {
         className="mb-8" 
         activeForecast={activeForecast}
         gbmForecast={gbmForecast}
+        conformalState={conformalState}
+        horizon={h}
+        coverage={coverage}
       />
       
       {/* Data Preview Panel (A-2) */}

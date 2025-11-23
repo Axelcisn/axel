@@ -54,9 +54,18 @@ function prepareCoxData(events: EventRecord[]) {
     status: event.censored ? 0 : 1, // 1 = event (reversion), 0 = censored
     z_abs: Math.abs(event.z_B),
     symbol: event.symbol,
+    // Model stratification for VaR consistency
+    base_method: event.method_provenance?.base_method || 'unknown',
+    is_garch_n: (event.method_provenance?.base_method === 'GARCH11-N') ? 1 : 0,
+    is_garch_t: (event.method_provenance?.base_method === 'GARCH11-t') ? 1 : 0,
+    is_gbm: (event.method_provenance?.base_method === 'GBM' || event.method_provenance?.base_method === 'GBM-CC') ? 1 : 0,
     // Additional covariates that might be useful
     vol_regime: event.vol_regime_percentile || 0.5,
-    day_of_week: new Date(event.B_date).getDay()
+    day_of_week: new Date(event.B_date).getDay(),
+    // Critical value information for heavy-tail effects
+    critical_type: event.method_provenance?.critical?.type || 'normal',
+    is_heavy_tail: (event.method_provenance?.critical?.type === 't') ? 1 : 0,
+    critical_value: event.method_provenance?.critical?.value || 1.96
   }));
 }
 

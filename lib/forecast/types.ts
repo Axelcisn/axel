@@ -1,4 +1,4 @@
-export type ForecastMethod = "GBM-CC" | "GARCH11-N" | "GARCH11-t" | "HAR-RV" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ";
+export type ForecastMethod = "GBM" | "GBM-CC" | "GARCH11-N" | "GARCH11-t" | "HAR-RV" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ";
 
 export type ForecastParams = {
   window: number;            // 252 | 504 | 756 (default 504)
@@ -26,6 +26,10 @@ export type ForecastRecord = {
   symbol: string;
   date_t: string;            // YYYY-MM-DD for S_t (as-of)
   method: ForecastMethod;    // "GBM-CC" | volatility models
+  horizonTrading?: number;   // Trading days (1, 2, 3, 5) for GBM
+  h_eff_days?: number;       // Calendar days for GBM horizon
+  verifyDate?: string;       // YYYY-MM-DD verification date for GBM
+  domain?: "log" | "price";  // Domain for conformal prediction
   params?: ForecastParams;   // For GBM models
   estimates?: GbmEstimates;  // For GBM and volatility models
   target?: {                 // Target specification
