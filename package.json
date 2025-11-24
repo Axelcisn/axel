@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "backtest:pi": "tsx generate-pi-backtests.ts"
   },
   "dependencies": {
     "next": "14.2.33",
@@ -24,6 +25,7 @@
     "eslint-config-next": "14.0.0",
     "postcss": "^8",
     "tailwindcss": "^3",
+    "tsx": "^4.20.6",
     "typescript": "^5"
   }
 }

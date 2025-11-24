@@ -1,0 +1,1582 @@
+{
+  "1D_85": {
+    "symbol": "AMD",
+    "horizonTrading": 1,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.12307692307692308,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.10384615384615392,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "1D_90": {
+    "symbol": "AMD",
+    "horizonTrading": 1,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.19760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.311010785241696,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.07307692307692304,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.332323079628458,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.626994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.05384615384615388,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "1D_95": {
+    "symbol": "AMD",
+    "horizonTrading": 1,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 4.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 4.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.023076923076923106,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 4.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.0038461538461539435,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "1D_99": {
+    "symbol": "AMD",
+    "horizonTrading": 1,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.749472323703235,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.01692307692307693,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.09760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.232323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.45007169852828,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.03615384615384609,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_85": {
+    "symbol": "AMD",
+    "horizonTrading": 3,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.12307692307692308,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.10384615384615392,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_90": {
+    "symbol": "AMD",
+    "horizonTrading": 3,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.19760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.311010785241696,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.07307692307692304,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.332323079628458,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.626994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.05384615384615388,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_95": {
+    "symbol": "AMD",
+    "horizonTrading": 3,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 4.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 4.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.023076923076923106,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 4.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.0038461538461539435,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_99": {
+    "symbol": "AMD",
+    "horizonTrading": 3,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.749472323703235,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.01692307692307693,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.09760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.232323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.45007169852828,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.03615384615384609,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_85": {
+    "symbol": "AMD",
+    "horizonTrading": 5,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.12307692307692308,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.10384615384615392,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_90": {
+    "symbol": "AMD",
+    "horizonTrading": 5,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.19760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.311010785241696,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.07307692307692304,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.332323079628458,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.626994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.05384615384615388,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_95": {
+    "symbol": "AMD",
+    "horizonTrading": 5,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 4.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 4.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.023076923076923106,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 4.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.0038461538461539435,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_99": {
+    "symbol": "AMD",
+    "horizonTrading": 5,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.749472323703235,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.01692307692307693,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.09760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.232323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.45007169852828,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.03615384615384609,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_85": {
+    "symbol": "AMD",
+    "horizonTrading": 7,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.12307692307692308,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.10384615384615392,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_90": {
+    "symbol": "AMD",
+    "horizonTrading": 7,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.19760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.311010785241696,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.07307692307692304,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.332323079628458,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.626994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.05384615384615388,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_95": {
+    "symbol": "AMD",
+    "horizonTrading": 7,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 4.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 4.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.023076923076923106,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 4.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.0038461538461539435,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_99": {
+    "symbol": "AMD",
+    "horizonTrading": 7,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.749472323703235,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.01692307692307693,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.09760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.232323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.45007169852828,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.03615384615384609,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_85": {
+    "symbol": "AMD",
+    "horizonTrading": 10,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.12307692307692308,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.10384615384615392,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_90": {
+    "symbol": "AMD",
+    "horizonTrading": 10,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.19760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.311010785241696,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.07307692307692304,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.332323079628458,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.626994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.05384615384615388,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_95": {
+    "symbol": "AMD",
+    "horizonTrading": 10,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 4.69760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 4.811010785241697,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.023076923076923106,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 4.832323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.126994775451358,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.0038461538461539435,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_99": {
+    "symbol": "AMD",
+    "horizonTrading": 10,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.749472323703235,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.054703846153847,
+          "coverage": 0.9730769230769231,
+          "coverageError": 0.01692307692307693,
+          "avgWidthBp": 352.55377083186187,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.09760341085248,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.180726923076923,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 351.6876487775557,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.232323079628459,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4394923076923078,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 339.2830771936151,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.45007169852828,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.6998769230769242,
+          "coverage": 0.9538461538461539,
+          "coverageError": 0.03615384615384609,
+          "avgWidthBp": 338.86563139128947,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  }
+}

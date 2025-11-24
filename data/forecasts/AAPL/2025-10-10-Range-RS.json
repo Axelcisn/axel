@@ -2,7 +2,11 @@
   "symbol": "AAPL",
   "method": "Range-RS",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-21T08:06:52.280Z",
+  "horizonTrading": 1,
+  "h_eff_days": 3,
+  "verifyDate": "2025-10-13",
+  "domain": "log",
+  "created_at": "2025-11-23T14:22:00.308Z",
   "locked": true,
   "y_hat": 245.27,
   "target": {

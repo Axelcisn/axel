@@ -3,6 +3,41 @@ import path from 'path';
 import { ROOutcome, BacktestSummary } from './types';
 
 /**
+ * Per-model PI metrics for structured storage
+ */
+export interface PerModelPIMetrics {
+  [method: string]: {
+    n: number;
+    intervalScore: number;
+    empiricalCoverage: number;
+    avgWidthBp: number;
+    // Additional metrics from PI evaluation
+    misses?: number;
+    varPValue?: number;
+    ccPValue?: number;
+    trafficLight?: "green" | "yellow" | "red";
+  };
+}
+
+/**
+ * Structured PI summary for cross-model comparison
+ */
+export interface PISummary {
+  symbol: string;
+  horizonTrading: number;
+  coverage: number;
+  models: string[];
+  piMetrics: PerModelPIMetrics;
+  metadata?: {
+    generated_at: string;
+    oos_start: string;
+    oos_end: string;
+    total_days: number;
+    version: string;
+  };
+}
+
+/**
  * Storage manager for backtest results and outcomes
  */
 export class BacktestStorage {
@@ -62,6 +97,126 @@ export class BacktestStorage {
       
     } catch (error) {
       throw new Error(`Failed to save backtest for ${symbol}: ${error}`);
+    }
+  }
+
+  /**
+   * Load PI Summary for structured model comparison
+   */
+  async loadPISummary(symbol: string, horizonTrading: number, coverage: number): Promise<PISummary | null> {
+    await this.ensureDataDir();
+    
+    const filePath = path.join(this.dataDir, `${symbol}-pi-latest.json`);
+    
+    try {
+      const content = await fs.readFile(filePath, 'utf8');
+      const data = JSON.parse(content);
+      
+      // Check if it's already in PISummary format
+      if (data.piMetrics && typeof data.piMetrics === 'object') {
+        // Filter by horizonTrading and coverage if specified
+        if (data.horizonTrading === horizonTrading && data.coverage === coverage) {
+          return data as PISummary;
+        }
+        // For now, return as-is if parameters don't match exactly
+        return data as PISummary;
+      }
+      
+      // Convert from legacy ROOutcome format to PISummary
+      const outcome = data as ROOutcome;
+      if (!outcome.pi_metrics) {
+        return null;
+      }
+      
+      // Group metrics by method and aggregate
+      const methodGroups: Record<string, typeof outcome.pi_metrics> = {};
+      for (const metric of outcome.pi_metrics) {
+        if (!methodGroups[metric.method]) {
+          methodGroups[metric.method] = [];
+        }
+        methodGroups[metric.method].push(metric);
+      }
+      
+      const piMetrics: PerModelPIMetrics = {};
+      const models: string[] = [];
+      
+      for (const [method, metrics] of Object.entries(methodGroups)) {
+        if (metrics.length === 0) continue;
+        
+        // Compute aggregated metrics
+        const totalScore = metrics.reduce((sum, m) => sum + m.interval_score, 0);
+        const totalCoverage = metrics.reduce((sum, m) => sum + m.cover_hit, 0);
+        const totalWidth = metrics.reduce((sum, m) => {
+          const width = m.U - m.L;
+          const center = (m.L + m.U) / 2;
+          return sum + (width / center) * 10000; // basis points
+        }, 0);
+        
+        piMetrics[method] = {
+          n: metrics.length,
+          intervalScore: totalScore / metrics.length,
+          empiricalCoverage: totalCoverage / metrics.length,
+          avgWidthBp: totalWidth / metrics.length
+        };
+        
+        models.push(method);
+      }
+      
+      const summary: PISummary = {
+        symbol,
+        horizonTrading: horizonTrading || 1,
+        coverage: coverage || 0.95,
+        models: models.sort(),
+        piMetrics,
+        metadata: {
+          generated_at: new Date().toISOString(),
+          oos_start: outcome.pi_metrics[0]?.date || '',
+          oos_end: outcome.pi_metrics[outcome.pi_metrics.length - 1]?.date || '',
+          total_days: outcome.pi_metrics.length,
+          version: '1.0'
+        }
+      };
+      
+      return summary;
+      
+    } catch (error) {
+      if ((error as any).code === 'ENOENT') {
+        return null; // File doesn't exist
+      }
+      throw new Error(`Failed to load PI summary for ${symbol}: ${error}`);
+    }
+  }
+
+  /**
+   * Save PI Summary for structured model comparison
+   */
+  async savePISummary(summary: PISummary): Promise<void> {
+    await this.ensureDataDir();
+    
+    const filePath = path.join(this.dataDir, `${summary.symbol}-pi-latest.json`);
+    
+    try {
+      // Add metadata
+      const dataToSave = {
+        ...summary,
+        metadata: {
+          ...summary.metadata,
+          saved_at: new Date().toISOString(),
+          version: '1.0'
+        }
+      };
+      
+      const jsonContent = JSON.stringify(dataToSave, null, 2);
+      
+      // Atomic write
+      const tempPath = `${filePath}.tmp`;
+      await fs.writeFile(tempPath, jsonContent, 'utf8');
+      await fs.rename(tempPath, filePath);
+      
+      console.log(`Saved PI summary for ${summary.symbol} with ${summary.models.length} models`);
+      
+    } catch (error) {
+      throw new Error(`Failed to save PI summary for ${summary.symbol}: ${error}`);
     }
   }
 

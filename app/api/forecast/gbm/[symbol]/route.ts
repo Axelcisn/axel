@@ -110,8 +110,7 @@ export async function POST(
     
     // Compute horizon information
     const tz = canonical.meta?.exchange_tz || 'America/New_York';
-    const { verifyDate } = getNthTradingCloseAfter(date_t, horizonTrading, tz);
-    const h_eff_days = computeEffectiveHorizonDays(date_t, verifyDate);
+    const { verifyDate, calendarDays } = getNthTradingCloseAfter(date_t, horizonTrading, tz);
     
     const gbmInputs: GbmInputs = {
       dates,
@@ -121,13 +120,13 @@ export async function POST(
       coverage
     };
     
-    // Compute GBM estimates and prediction intervals
+    // Compute GBM estimates and prediction intervals using TRADING DAYS ONLY
     const estimates = computeGbmEstimates(gbmInputs);
     const piResult = computeGbmInterval({
       S_t,
       muStarUsed: estimates.mu_star_used,
       sigmaHat: estimates.sigma_hat,
-      h_eff: h_eff_days,
+      h_trading: horizonTrading,  // Use trading days, NOT calendar days
       coverage
     });
     
@@ -146,7 +145,7 @@ export async function POST(
       S_t,
       method: "GBM",
       horizonTrading,
-      h_eff_days,
+      h_eff_days: calendarDays,  // Store calendar days for display
       verifyDate,
       domain: "log",
       estimates,

@@ -17,7 +17,7 @@ export interface VarBacktestPoint {
   symbol: string;
   date_t: string;              // origin date (forecast date)
   verifyDate: string;          // date VaR applies to
-  model: "GBM" | "GARCH11-N" | "GARCH11-t";
+  model: "GBM" | "GARCH11-N" | "GARCH11-t" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ";
   horizonTrading: number;      // 1,2,3,5 trading days
   coverage: number;            // e.g. 0.95
   alpha: number;               // 1 - coverage (e.g. 0.05)
@@ -75,7 +75,7 @@ export interface VarDiagnostics {
  */
 export async function buildVarBacktestSeries(opts: {
   symbol: string;
-  model: "GBM" | "GARCH11-N" | "GARCH11-t";
+  model: "GBM" | "GARCH11-N" | "GARCH11-t" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ";
   horizonTrading: number;
   coverage: number;
   startDate?: string;
@@ -173,7 +173,7 @@ export async function buildVarBacktestSeries(opts: {
 /**
  * Check if forecast matches the requested model
  */
-function isMatchingModel(forecast: ForecastRecord, model: "GBM" | "GARCH11-N" | "GARCH11-t"): boolean {
+function isMatchingModel(forecast: ForecastRecord, model: "GBM" | "GARCH11-N" | "GARCH11-t" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ"): boolean {
   const method = forecast.method;
 
   switch (model) {
@@ -183,6 +183,14 @@ function isMatchingModel(forecast: ForecastRecord, model: "GBM" | "GARCH11-N" | 
       return method === "GARCH11-N";
     case "GARCH11-t":
       return method === "GARCH11-t";
+    case "Range-P":
+      return method === "Range-P";
+    case "Range-GK":
+      return method === "Range-GK";
+    case "Range-RS":
+      return method === "Range-RS";
+    case "Range-YZ":
+      return method === "Range-YZ";
     default:
       return false;
   }
@@ -457,7 +465,7 @@ function binomialCoeff(n: number, k: number): number {
  */
 export async function computeVarDiagnostics(opts: {
   symbol: string;
-  models: ("GBM" | "GARCH11-N" | "GARCH11-t")[];
+  models: ("GBM" | "GARCH11-N" | "GARCH11-t" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ")[];
   horizonTrading: number;
   coverage: number;
   startDate?: string;

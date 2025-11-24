@@ -53,7 +53,7 @@ test('Horizon scaling - manual calculation match', () => {
   
   // Function calculation
   const result = computeGbmInterval({
-    S_t, muStarUsed: muStar, sigmaHat: sigma, h_eff: h, coverage
+    S_t, muStarUsed: muStar, sigmaHat: sigma, h_trading: h, coverage
   });
   
   assertClose(result.m_t, m_t, 1e-10, 'm_t calculation');
@@ -71,11 +71,11 @@ test('Horizon scaling - width scaling with sqrt(h)', () => {
   const coverage = 0.95;
   
   const h1Result = computeGbmInterval({
-    S_t, muStarUsed: muStar, sigmaHat: sigma, h_eff: 1, coverage
+    S_t, muStarUsed: muStar, sigmaHat: sigma, h_trading: 1, coverage
   });
   
   const h3Result = computeGbmInterval({
-    S_t, muStarUsed: muStar, sigmaHat: sigma, h_eff: 3, coverage
+    S_t, muStarUsed: muStar, sigmaHat: sigma, h_trading: 3, coverage
   });
   
   // Log-space width should scale by sqrt(h)
@@ -86,29 +86,38 @@ test('Horizon scaling - width scaling with sqrt(h)', () => {
   assertClose(scalingRatio, Math.sqrt(3), 0.001, 'Log-width scaling by sqrt(h)');
 });
 
-// Test 3: Friday behavior simulation
-test('Friday behavior - 3-day calendar horizon', () => {
-  // Simulate Friday -> Monday (3 calendar days)
-  const h_eff = 3;
-  
+// Test 3: Trading days vs calendar days behavior
+test('Trading days - Friday behavior uses h_trading=1', () => {
+  // NEW BEHAVIOR: Friday -> Monday is 1 TRADING day, regardless of calendar days
   const S_t = 100;
   const muStar = 0.0005;
   const sigma = 0.02;
   
-  const h1Result = computeGbmInterval({
-    S_t, muStarUsed: muStar, sigmaHat: sigma, h_eff: 1, coverage: 0.95
+  // Friday->Monday: 1 trading day (our new standard)
+  const fridayResult = computeGbmInterval({
+    S_t, muStarUsed: muStar, sigmaHat: sigma, h_trading: 1, coverage: 0.95
   });
   
+  // Tuesday->Wednesday: also 1 trading day
+  const tuesdayResult = computeGbmInterval({
+    S_t, muStarUsed: muStar, sigmaHat: sigma, h_trading: 1, coverage: 0.95
+  });
+  
+  // Both should be identical since both are 1 trading day
+  assertClose(fridayResult.L_h, tuesdayResult.L_h, 1e-10, 'Friday=Tuesday for 1 trading day');
+  assertClose(fridayResult.U_h, tuesdayResult.U_h, 1e-10, 'Friday=Tuesday for 1 trading day');
+  
+  // Test actual 3 trading days for comparison
   const h3Result = computeGbmInterval({
-    S_t, muStarUsed: muStar, sigmaHat: sigma, h_eff: 3, coverage: 0.95
+    S_t, muStarUsed: muStar, sigmaHat: sigma, h_trading: 3, coverage: 0.95
   });
   
-  // h=3 should be sqrt(3) times wider in log space
-  const logWidth1 = Math.log(h1Result.U_h / h1Result.L_h);
+  // 3 trading days should be sqrt(3) times wider than 1 trading day
+  const logWidth1 = Math.log(fridayResult.U_h / fridayResult.L_h);
   const logWidth3 = Math.log(h3Result.U_h / h3Result.L_h);
   
-  assertClose(logWidth3 / logWidth1, Math.sqrt(3), 0.01, 'Friday-Monday scaling');
-  assertClose(h3Result.s_t, h1Result.s_t * Math.sqrt(3), 1e-8, 's_t scaling');
+  assertClose(logWidth3 / logWidth1, Math.sqrt(3), 0.01, '3 trading days vs 1 trading day scaling');
+  assertClose(h3Result.s_t, fridayResult.s_t * Math.sqrt(3), 1e-8, 's_t scaling');
 });
 
 // Test 4: Z-score consistency
@@ -116,24 +125,24 @@ test('Z-score consistency - boundary cases', () => {
   const S_t = 100;
   const muStarUsed = 0.0005;
   const sigmaHat = 0.02;
-  const h_eff = 1;
+  const h_trading = 1;
   const coverage = 0.95;
   
   const piResult = computeGbmInterval({
-    S_t, muStarUsed, sigmaHat, h_eff, coverage
+    S_t, muStarUsed, sigmaHat, h_trading, coverage
   });
   
   // Test z-score when S_obs = U_h (upper boundary)
   const S_obs_upper = piResult.U_h;
-  const z_upper = (Math.log(S_obs_upper) - (Math.log(S_t) + muStarUsed * h_eff)) / 
-                 (sigmaHat * Math.sqrt(h_eff));
+  const z_upper = (Math.log(S_obs_upper) - (Math.log(S_t) + muStarUsed * h_trading)) / 
+                 (sigmaHat * Math.sqrt(h_trading));
   
   assertClose(z_upper, piResult.z_alpha, 1e-4, 'Upper boundary z-score');
   
   // Test z-score when S_obs = L_h (lower boundary)
   const S_obs_lower = piResult.L_h;
-  const z_lower = (Math.log(S_obs_lower) - (Math.log(S_t) + muStarUsed * h_eff)) / 
-                 (sigmaHat * Math.sqrt(h_eff));
+  const z_lower = (Math.log(S_obs_lower) - (Math.log(S_t) + muStarUsed * h_trading)) / 
+                 (sigmaHat * Math.sqrt(h_trading));
   
   assertClose(z_lower, -piResult.z_alpha, 1e-4, 'Lower boundary z-score');
 });
@@ -146,11 +155,11 @@ test('Z-score consistency - multi-horizon', () => {
   const coverage = 0.95;
   
   const h1Result = computeGbmInterval({
-    S_t, muStarUsed, sigmaHat, h_eff: 1, coverage
+    S_t, muStarUsed, sigmaHat, h_trading: 1, coverage
   });
   
   const h3Result = computeGbmInterval({
-    S_t, muStarUsed, sigmaHat, h_eff: 3, coverage
+    S_t, muStarUsed, sigmaHat, h_trading: 3, coverage
   });
   
   // For the same price movement, z-scores should differ by horizon
@@ -176,7 +185,7 @@ test('Basic properties - sanity checks', () => {
     S_t: 100,
     muStarUsed: 0.001,
     sigmaHat: 0.02,
-    h_eff: 1,
+    h_trading: 1,
     coverage: 0.95
   });
   
@@ -198,7 +207,7 @@ test('Zero drift handling', () => {
     S_t,
     muStarUsed: 0, // No drift
     sigmaHat: 0.02,
-    h_eff: 1,
+    h_trading: 1,
     coverage: 0.95
   });
   
@@ -219,7 +228,7 @@ test('Different coverage levels', () => {
     S_t: 100,
     muStarUsed: 0.0005,
     sigmaHat: 0.02,
-    h_eff: 1
+    h_trading: 1
   };
   
   const coverage90 = computeGbmInterval({ ...params, coverage: 0.90 });

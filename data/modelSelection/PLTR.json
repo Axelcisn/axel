@@ -1,0 +1,1582 @@
+{
+  "1D_85": {
+    "symbol": "PLTR",
+    "horizonTrading": 1,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.533049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.08846153846153848,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.5914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.977620629414902,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "1D_90": {
+    "symbol": "PLTR",
+    "horizonTrading": 1,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.033049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.038461538461538436,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.0914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.4776206294149015,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.800906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "1D_95": {
+    "symbol": "PLTR",
+    "horizonTrading": 1,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.668408893364086,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 4.763818845173909,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.011538461538461497,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.054543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "1D_99": {
+    "symbol": "PLTR",
+    "horizonTrading": 1,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 5.0684088933640865,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.1638188451739095,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.05153846153846153,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.454543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.700906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_85": {
+    "symbol": "PLTR",
+    "horizonTrading": 3,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.533049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.08846153846153848,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.5914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.977620629414902,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_90": {
+    "symbol": "PLTR",
+    "horizonTrading": 3,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.033049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.038461538461538436,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.0914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.4776206294149015,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.800906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_95": {
+    "symbol": "PLTR",
+    "horizonTrading": 3,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.668408893364086,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 4.763818845173909,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.011538461538461497,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.054543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "3D_99": {
+    "symbol": "PLTR",
+    "horizonTrading": 3,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 5.0684088933640865,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.1638188451739095,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.05153846153846153,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.454543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.700906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_85": {
+    "symbol": "PLTR",
+    "horizonTrading": 5,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.533049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.08846153846153848,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.5914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.977620629414902,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_90": {
+    "symbol": "PLTR",
+    "horizonTrading": 5,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.033049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.038461538461538436,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.0914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.4776206294149015,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.800906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_95": {
+    "symbol": "PLTR",
+    "horizonTrading": 5,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.668408893364086,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 4.763818845173909,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.011538461538461497,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.054543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "5D_99": {
+    "symbol": "PLTR",
+    "horizonTrading": 5,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 5.0684088933640865,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.1638188451739095,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.05153846153846153,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.454543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.700906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_85": {
+    "symbol": "PLTR",
+    "horizonTrading": 7,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.533049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.08846153846153848,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.5914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.977620629414902,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_90": {
+    "symbol": "PLTR",
+    "horizonTrading": 7,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.033049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.038461538461538436,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.0914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.4776206294149015,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.800906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_95": {
+    "symbol": "PLTR",
+    "horizonTrading": 7,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.668408893364086,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 4.763818845173909,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.011538461538461497,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.054543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "7D_99": {
+    "symbol": "PLTR",
+    "horizonTrading": 7,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 5.0684088933640865,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.1638188451739095,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.05153846153846153,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.454543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.700906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_85": {
+    "symbol": "PLTR",
+    "horizonTrading": 10,
+    "coverage": 0.85,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.533049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.08846153846153848,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.5914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.977620629414902,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.09615384615384615,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 6.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.15000000000000002,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.09999999999999998,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_90": {
+    "symbol": "PLTR",
+    "horizonTrading": 10,
+    "coverage": 0.9,
+    "modelScores": [
+      {
+        "model": "Range-YZ",
+        "score": 5.033049614404678,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.038461538461538436,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-RS",
+        "score": 5.0914858164410095,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.4776206294149015,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0461538461538461,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.800906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.09999999999999998,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.04999999999999993,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-YZ",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_95": {
+    "symbol": "PLTR",
+    "horizonTrading": 10,
+    "coverage": 0.95,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 4.668408893364086,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 4.763818845173909,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.011538461538461497,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.054543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.0038461538461538325,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.300906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.050000000000000044,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  },
+  "10D_99": {
+    "symbol": "PLTR",
+    "horizonTrading": 10,
+    "coverage": 0.99,
+    "modelScores": [
+      {
+        "model": "Range-RS",
+        "score": 5.0684088933640865,
+        "metrics": {
+          "model": "Range-RS",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.0745115384615394,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 355.54358164410087,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-YZ",
+        "score": 5.1638188451739095,
+        "metrics": {
+          "model": "Range-YZ",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.2122115384615382,
+          "coverage": 0.9384615384615385,
+          "coverageError": 0.05153846153846153,
+          "avgWidthBp": 343.62226913277556,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-GK",
+        "score": 5.454543706337979,
+        "metrics": {
+          "model": "Range-GK",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.4735038461538457,
+          "coverage": 0.9461538461538461,
+          "coverageError": 0.04384615384615387,
+          "avgWidthBp": 354.2578321722595,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      },
+      {
+        "model": "Range-P",
+        "score": 5.700906433621572,
+        "metrics": {
+          "model": "Range-P",
+          "alpha": 0.010000000000000009,
+          "n": 260,
+          "intervalScore": 1.71606153846154,
+          "coverage": 0.95,
+          "coverageError": 0.040000000000000036,
+          "avgWidthBp": 358.48448951600324,
+          "kupiecPValue": 1,
+          "ccPValue": 1,
+          "trafficLight": "green"
+        }
+      }
+    ],
+    "defaultMethod": "Range-RS",
+    "selectionDate": "2025-11-23",
+    "weights": {
+      "wIntervalScore": 1,
+      "wCoverageError": 10,
+      "wWidthBp": 0.01,
+      "wVaR": 5
+    }
+  }
+}

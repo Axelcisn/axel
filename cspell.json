@@ -58,6 +58,7 @@
     "muStar",
     "NASDAQ",
     "NYSE",
+    "PLTR",
     "VLab",
     "PI",
     "PIs",
@@ -123,7 +124,10 @@
     "Refinitiv",
     "XETRA",
     "Forecasts",
-    "Uncond"
+    "Uncond",
+    "yHat",
+    "Hilferty",
+    "Coeff"
   ],
   "flagWords": []
 }

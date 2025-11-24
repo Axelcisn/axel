@@ -1,0 +1,36 @@
+{
+  "symbol": "AAPL",
+  "defaults": {
+    "1D": {
+      "0.85": "Range-YZ",
+      "0.90": "Range-YZ",
+      "0.95": "Range-YZ",
+      "0.99": "Range-RS"
+    },
+    "3D": {
+      "0.85": "Range-YZ",
+      "0.90": "Range-YZ",
+      "0.95": "Range-YZ",
+      "0.99": "Range-RS"
+    },
+    "5D": {
+      "0.85": "Range-YZ",
+      "0.90": "Range-YZ",
+      "0.95": "Range-YZ",
+      "0.99": "Range-RS"
+    },
+    "7D": {
+      "0.85": "Range-YZ",
+      "0.90": "Range-YZ",
+      "0.95": "Range-YZ",
+      "0.99": "Range-RS"
+    },
+    "10D": {
+      "0.85": "Range-YZ",
+      "0.90": "Range-YZ",
+      "0.95": "Range-YZ",
+      "0.99": "Range-RS"
+    }
+  },
+  "lastUpdated": "2025-11-23"
+}

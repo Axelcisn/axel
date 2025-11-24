@@ -1,7 +1,17 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { VarDiagnostics, computeVarDiagnostics } from '@/lib/var/backtest';
+
+// VarDiagnostics type (simplified for client use)
+interface VarDiagnostics {
+  alpha: number;
+  n: number;
+  I: number;
+  empiricalRate: number;
+  kupiec: { pValue: number; };
+  christoffersen: { pValue_cc: number; };
+  trafficLight: "green" | "yellow" | "red";
+}
 
 interface VarDiagnosticsPanelProps {
   symbol: string;
@@ -18,6 +28,35 @@ interface VarDiagnosticsState {
   error: string | null;
 }
 
+// Helper function to fetch VaR diagnostics from API
+async function fetchVarDiagnostics(
+  symbol: string,
+  model: ModelKey,
+  horizon: number,
+  coverage: number
+): Promise<VarDiagnostics | null> {
+  try {
+    const params = new URLSearchParams({
+      symbol,
+      model,
+      horizon: horizon.toString(),
+      coverage: coverage.toString()
+    });
+
+    const response = await fetch(`/api/var-diagnostics?${params}`);
+    
+    if (!response.ok) {
+      console.error(`VaR diagnostics API error for ${model}:`, response.status, response.statusText);
+      return null;
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error(`Failed to load VaR diagnostics for ${model}:`, error);
+    return null;
+  }
+}
+
 export default function VarDiagnosticsPanel({ 
   symbol, 
   horizonTrading, 
@@ -30,7 +69,7 @@ export default function VarDiagnosticsPanel({
     error: null
   });
 
-  // Compute VaR diagnostics when inputs change
+  // Load VaR diagnostics when inputs change
   useEffect(() => {
     async function loadDiagnostics() {
       if (!symbol) return;
@@ -39,157 +78,165 @@ export default function VarDiagnosticsPanel({
 
       try {
         const models: ModelKey[] = ["GBM", "GARCH11-N", "GARCH11-t"];
-        const alpha = 1 - coverage;
         
-        // Use last 250 trading days as backtest window
-        const endDate = new Date().toISOString().split('T')[0];
-        const startDate = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]; // Approx 1 year back
+        // Fetch diagnostics for all models in parallel
+        const diagnosticsPromises = models.map(model => 
+          fetchVarDiagnostics(symbol, model, horizonTrading, coverage)
+        );
         
-        const diagnostics = await computeVarDiagnostics({
-          symbol,
-          models,
-          horizonTrading,
-          coverage,
-          startDate,
-          endDate
+        const results = await Promise.all(diagnosticsPromises);
+        
+        // Combine results into data object
+        const data: { [model: string]: VarDiagnostics } = {};
+        models.forEach((model, index) => {
+          if (results[index]) {
+            data[model] = results[index]!;
+          }
         });
 
-        setState({
-          data: diagnostics,
-          loading: false,
-          error: null
-        });
+        setState(prev => ({ 
+          ...prev, 
+          data, 
+          loading: false 
+        }));
 
       } catch (error) {
-        console.error('Failed to load VaR diagnostics:', error);
-        setState({
-          data: null,
-          loading: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
+        console.error('Error loading VaR diagnostics:', error);
+        setState(prev => ({ 
+          ...prev, 
+          loading: false, 
+          error: 'Failed to load VaR diagnostics' 
+        }));
       }
     }
 
     loadDiagnostics();
   }, [symbol, horizonTrading, coverage]);
 
-  if (state.loading) {
+  const { data, loading, error } = state;
+
+  if (loading) {
     return (
-      <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">VaR Diagnostics</h3>
-        </div>
-        <div className="p-4">
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-            <span className="ml-3 text-gray-600">Loading VaR diagnostics...</span>
-          </div>
+      <div className={className}>
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+          <div className="h-32 bg-gray-200 rounded"></div>
         </div>
       </div>
     );
   }
 
-  if (state.error) {
+  if (error) {
     return (
-      <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">VaR Diagnostics</h3>
-        </div>
-        <div className="p-4">
-          <div className="text-red-600 text-sm">
-            Error: {state.error}
-          </div>
+      <div className={className}>
+        <div className="text-red-600 p-4 border border-red-200 rounded-lg">
+          <p className="font-semibold">Error Loading VaR Diagnostics</p>
+          <p className="text-sm mt-1">{error}</p>
         </div>
       </div>
     );
   }
 
-  if (!state.data) {
+  if (!data || Object.keys(data).length === 0) {
     return (
-      <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-        <div className="px-4 py-3 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-900">VaR Diagnostics</h3>
-        </div>
-        <div className="p-4">
-          <div className="text-gray-500 text-sm">No data available</div>
+      <div className={className}>
+        <div className="text-gray-600 p-4 border border-gray-200 rounded-lg">
+          <p>No VaR diagnostics available</p>
         </div>
       </div>
     );
   }
 
-  const alpha = 1 - coverage;
-  const alphaPercent = (alpha * 100).toFixed(1);
+  const modelOrder: ModelKey[] = ["GBM", "GARCH11-N", "GARCH11-t"];
 
   return (
-    <div className={`bg-white rounded-lg border border-gray-200 ${className}`}>
-      <div className="px-4 py-3 border-b border-gray-200">
-        <h3 className="text-lg font-semibold text-gray-900">VaR Diagnostics</h3>
-        <p className="text-sm text-gray-600 mt-1">
-          {symbol} • {horizonTrading}D Horizon • {(coverage * 100).toFixed(1)}% Coverage (α = {alphaPercent}%)
-        </p>
-      </div>
-      
-      <div className="p-4">
+    <div className={className}>
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+          <h3 className="text-lg font-semibold text-gray-900">VaR Diagnostics</h3>
+          <p className="text-sm text-gray-600 mt-1">
+            Backtesting results for {symbol} • {horizonTrading}D horizon • {(coverage * 100).toFixed(0)}% coverage
+          </p>
+        </div>
+
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-2 font-semibold text-gray-700">Model</th>
-                <th className="text-center py-2 font-semibold text-gray-700">α</th>
-                <th className="text-center py-2 font-semibold text-gray-700">I/n</th>
-                <th className="text-center py-2 font-semibold text-gray-700">Kupiec p</th>
-                <th className="text-center py-2 font-semibold text-gray-700">LR_ind p</th>
-                <th className="text-center py-2 font-semibold text-gray-700">LR_cc p</th>
-                <th className="text-center py-2 font-semibold text-gray-700">Zone</th>
+          <table className="w-full">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Model
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  α
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Breaches
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Empirical Rate
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Kupiec p
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  CC p
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Zone
+                </th>
               </tr>
             </thead>
-            <tbody>
-              {(["GBM", "GARCH11-N", "GARCH11-t"] as ModelKey[]).map((model) => {
-                const diag = state.data![model];
+            <tbody className="bg-white divide-y divide-gray-200">
+              {modelOrder.map((model) => {
+                const diag = data[model];
                 if (!diag) return null;
 
-                const { coverage, kupiec, christoffersen, trafficLight } = diag;
-                
+                const zoneColors = {
+                  green: 'text-green-600 bg-green-50',
+                  yellow: 'text-amber-600 bg-amber-50',
+                  red: 'text-red-600 bg-red-50'
+                };
+                const zoneColor = zoneColors[diag.trafficLight];
+
                 return (
-                  <tr key={model} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-2 font-medium text-gray-900">{model}</td>
-                    <td className="text-center py-2 text-gray-600">{(coverage.alpha * 100).toFixed(1)}%</td>
-                    <td className="text-center py-2 text-gray-600">
-                      {kupiec.I}/{coverage.n}
-                      <span className="text-xs text-gray-500 ml-1">
-                        ({(coverage.empiricalRate * 100).toFixed(1)}%)
+                  <tr key={model} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {model}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {(diag.alpha * 100).toFixed(1)}%
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {diag.I}/{diag.n}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      <span className={`${
+                        Math.abs(diag.empiricalRate - diag.alpha) > 0.01 ? 'text-red-600' : 'text-green-600'
+                      }`}>
+                        {(diag.empiricalRate * 100).toFixed(1)}%
                       </span>
                     </td>
-                    <td className="text-center py-2">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                       <span className={`${
-                        kupiec.pValue < 0.05 ? 'text-red-600' : 
-                        kupiec.pValue < 0.10 ? 'text-yellow-600' : 
+                        diag.kupiec.pValue < 0.05 ? 'text-red-600' :
+                        diag.kupiec.pValue < 0.10 ? 'text-yellow-600' :
                         'text-green-600'
                       }`}>
-                        {kupiec.pValue.toFixed(3)}
+                        {diag.kupiec.pValue.toFixed(3)}
                       </span>
                     </td>
-                    <td className="text-center py-2">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                       <span className={`${
-                        christoffersen.pValue_ind < 0.05 ? 'text-red-600' : 
-                        christoffersen.pValue_ind < 0.10 ? 'text-yellow-600' : 
+                        diag.christoffersen.pValue_cc < 0.05 ? 'text-red-600' :
+                        diag.christoffersen.pValue_cc < 0.10 ? 'text-yellow-600' :
                         'text-green-600'
                       }`}>
-                        {christoffersen.pValue_ind.toFixed(3)}
+                        {diag.christoffersen.pValue_cc.toFixed(3)}
                       </span>
                     </td>
-                    <td className="text-center py-2">
-                      <span className={`${
-                        christoffersen.pValue_cc < 0.05 ? 'text-red-600' : 
-                        christoffersen.pValue_cc < 0.10 ? 'text-yellow-600' : 
-                        'text-green-600'
-                      }`}>
-                        {christoffersen.pValue_cc.toFixed(3)}
-                      </span>
-                    </td>
-                    <td className="text-center py-2">
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTrafficLightStyles(trafficLight)}`}>
-                        {trafficLight}
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${zoneColor}`}>
+                        {diag.trafficLight.toUpperCase()}
                       </span>
                     </td>
                   </tr>
@@ -199,67 +246,16 @@ export default function VarDiagnosticsPanel({
           </table>
         </div>
 
-        {/* Summary Information */}
-        <div className="mt-4 pt-4 border-t border-gray-100">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-gray-600">
-            <div>
-              <span className="font-semibold">Kupiec POF:</span> Tests if breach rate = α
-            </div>
-            <div>
-              <span className="font-semibold">LR_ind:</span> Tests independence of violations
-            </div>
-            <div>
-              <span className="font-semibold">LR_cc:</span> Combined coverage test
-            </div>
-          </div>
-          <div className="mt-2 text-xs text-gray-500">
-            p-values: <span className="text-green-600">Green ≥ 0.10</span>, 
-            <span className="text-yellow-600 ml-1">Yellow 0.05-0.10</span>, 
-            <span className="text-red-600 ml-1">Red &lt; 0.05</span>
+        {/* Interpretation guide */}
+        <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+          <h4 className="text-sm font-semibold text-gray-900 mb-2">Interpretation Guide</h4>
+          <div className="text-xs text-gray-600 space-y-1">
+            <p><strong>Kupiec POF:</strong> Tests if empirical breach rate equals nominal α (p {">"} 0.05 preferred)</p>
+            <p><strong>Conditional Coverage (CC):</strong> Joint test of correct rate and independence (p {">"} 0.05 preferred)</p>
+            <p><strong>Traffic Light:</strong> 🟢 Green (good), 🟡 Yellow (attention), 🔴 Red (concern)</p>
           </div>
         </div>
-
-        {/* Model Comparison Summary */}
-        {state.data && (
-          <div className="mt-4 pt-4 border-t border-gray-100">
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">Coverage Analysis</h4>
-            <div className="space-y-1 text-xs text-gray-600">
-              {(["GBM", "GARCH11-N", "GARCH11-t"] as ModelKey[]).map((model) => {
-                const diag = state.data![model];
-                if (!diag || diag.coverage.n === 0) return null;
-
-                const errorBps = Math.abs(diag.coverage.coverageError * 10000);
-                const direction = diag.coverage.coverageError > 0 ? 'over' : 'under';
-                
-                return (
-                  <div key={model} className="flex justify-between">
-                    <span>{model}:</span>
-                    <span className={`${Math.abs(diag.coverage.coverageError) > 0.01 ? 'text-red-600' : 'text-green-600'}`}>
-                      {direction}-estimates by {errorBps.toFixed(0)}bp
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
-}
-
-/**
- * Get CSS classes for traffic light styling
- */
-function getTrafficLightStyles(zone: "green" | "yellow" | "red"): string {
-  switch (zone) {
-    case "green":
-      return "bg-green-100 text-green-800";
-    case "yellow":
-      return "bg-yellow-100 text-yellow-800";
-    case "red":
-      return "bg-red-100 text-red-800";
-    default:
-      return "bg-gray-100 text-gray-800";
-  }
 }

@@ -129,7 +129,7 @@ export function getNthTradingCloseAfter(
   startDate: string, 
   tradingSteps: number,
   tz: string = 'America/New_York'
-): { verifyDate: string; tradingStepsActual: number } {
+): { verifyDate: string; calendarDays: number } {
   const tradingDays = listTradingDays(
     tz,
     startDate,
@@ -148,9 +148,13 @@ export function getNthTradingCloseAfter(
   }
   
   const verifyDate = tradingDays[startIndex + tradingSteps].date;
+  
+  // Calculate calendar days between start and verify dates
+  const calendarDays = computeEffectiveHorizonDays(startDate, verifyDate);
+  
   return {
     verifyDate,
-    tradingStepsActual: tradingSteps
+    calendarDays
   };
 }
 

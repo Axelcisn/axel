@@ -5,11 +5,43 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 import { GbmForecast } from '@/lib/storage/fsStore';
 
+// Helper function to get inline VaR diagnostics for current model/horizon/coverage
+async function getInlineVarDiagnostics(
+  symbol: string, 
+  model: "GBM-CC" | "GARCH11-N" | "GARCH11-t" | "HAR-RV" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ", 
+  horizon: number, 
+  coverage: number
+) {
+  try {
+    const params = new URLSearchParams({
+      symbol,
+      model,
+      horizon: horizon.toString(),
+      coverage: coverage.toString()
+    });
+
+    const response = await fetch(`/api/var-diagnostics?${params}`);
+    
+    if (!response.ok) {
+      console.error('VaR diagnostics API error:', response.status, response.statusText);
+      return null;
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Failed to load VaR diagnostics:', error);
+    return null;
+  }
+}
+
 interface ModelDetailsProps {
+  symbol: string; // Add symbol for VaR diagnostics
   activeForecast?: GbmForecast | any; // any for backward compatibility with conformal-modified forecasts
   gbmForecast?: GbmForecast | any;
   conformalState?: {
     mode?: string;
+    q_cal?: number;
     coverage?: {
       last60?: number;
       lastCal?: number;
@@ -17,9 +49,77 @@ interface ModelDetailsProps {
   };
   horizon?: number;
   coverage?: number;
+  recommendedModel?: string | null; // Add recommended model
+  isLoadingRecommendations?: boolean; // Add loading state
 }
 
-function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, coverage }: ModelDetailsProps) {
+// VaR Diagnostics Snippet Component
+interface VarDiagnosticsSnippetProps {
+  symbol: string;
+  model: "GBM-CC" | "GARCH11-N" | "GARCH11-t" | "HAR-RV" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ";
+  horizon: number;
+  coverage: number;
+}
+
+function VarDiagnosticsSnippet({ symbol, model, horizon, coverage }: VarDiagnosticsSnippetProps) {
+  const [diagnostics, setDiagnostics] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadDiagnostics = async () => {
+      setLoading(true);
+      const result = await getInlineVarDiagnostics(symbol, model, horizon, coverage);
+      setDiagnostics(result);
+      setLoading(false);
+    };
+
+    loadDiagnostics();
+  }, [symbol, model, horizon, coverage]);
+
+  if (loading) {
+    return (
+      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+        <h5 className="text-sm font-semibold text-gray-900 mb-2">VaR Diagnostics</h5>
+        <span className="text-sm text-gray-600">Loading...</span>
+      </div>
+    );
+  }
+
+  if (!diagnostics) {
+    return (
+      <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+        <h5 className="text-sm font-semibold text-gray-900 mb-2">VaR Diagnostics</h5>
+        <span className="text-sm text-gray-600">N/A</span>
+      </div>
+    );
+  }
+
+  const { alpha, n, I, empiricalRate, kupiec, christoffersen, trafficLight } = diagnostics;
+
+  // Color classes based on traffic light zone
+  const zoneColors: { [key: string]: string } = {
+    green: 'text-green-600',
+    yellow: 'text-amber-500',
+    red: 'text-red-600'
+  };
+  const zoneColor = zoneColors[trafficLight] || 'text-gray-600';
+
+  return (
+    <div className="mt-4 p-3 bg-gray-50 rounded-lg">
+      <h5 className="text-sm font-semibold text-gray-900 mb-2">
+        VaR Diagnostics (last {n} days):
+      </h5>
+      <div className="text-sm text-gray-700">
+        α = {(alpha * 100).toFixed(1)}%, breaches = {I}/{n} ({(empiricalRate * 100).toFixed(1)}%), 
+        Kupiec p = {kupiec.pValue.toFixed(2)}, 
+        CC p = {christoffersen.pValue_cc.toFixed(2)}, 
+        Zone: <span className={`font-semibold ${zoneColor}`}>{trafficLight}</span>
+      </div>
+    </div>
+  );
+}
+
+function ModelDetails({ symbol, activeForecast, gbmForecast, conformalState, horizon, coverage, recommendedModel, isLoadingRecommendations }: ModelDetailsProps) {
   // Determine the primary forecast to use (prefer activeForecast, fallback to gbmForecast)
   const forecast = activeForecast || gbmForecast;
   
@@ -41,17 +141,26 @@ function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, co
   // Determine forecast type flags
   const isGbm = baseMethod === "GBM";
   const isGarch = baseMethod?.startsWith("GARCH11");  // handles "GARCH11-N" and "GARCH11-t"
+  const isRange = baseMethod?.startsWith("Range-");    // handles all Range estimators
 
   // Extract horizon information from actual forecast data
-  const horizonTrading = forecast.params?.horizonTrading || forecast.horizonTrading || horizon || 1;
-  const h_eff_days = forecast.h_eff_days ?? (horizonTrading === 1 ? 1 : horizonTrading); // Fallback for old forecasts
-  const horizonDisplay = h_eff_days !== null 
-    ? `${horizonTrading}D (h_eff = ${h_eff_days} days)` 
-    : `${horizonTrading}D (h_eff = N/A)`;
+  const horizonTrading = forecast.horizonTrading 
+    ?? forecast.target?.h 
+    ?? horizon 
+    ?? 1;
+
+  const h_eff_days = forecast.h_eff_days 
+    ?? horizonTrading; // fallback if h_eff_days missing
+
+  const horizonDisplay = h_eff_days !== horizonTrading 
+    ? `${horizonTrading}D (${h_eff_days} calendar day${h_eff_days === 1 ? "" : "s"})` 
+    : `${horizonTrading}D`;
 
   // Extract dates with proper formatting
   const forecastDate = forecast.date_t || 'N/A';
-  const verifyDate = forecast.verifyDate || 'N/A';
+  const verifyDate = forecast.verifyDate 
+    ?? forecast.target?.verifyDate 
+    ?? forecastDate; // fallback if old format
 
   // Extract GBM parameters (only for GBM forecasts)
   const estimates = forecast.estimates || {};
@@ -93,16 +202,40 @@ function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, co
     
     parametersDisplay = `ω = ${omegaStr}, α = ${alphaStr}, β = ${betaStr}, α+β = ${phiStr}, σ²_uncond = ${sigma2UncondStr}`;
     parametersLabel = 'GARCH Parameters';
+  } else if (isRange) {
+    // Range-specific parameters
+    const rangeParams = estimates.range_params || {};
+    const ewmaParams = estimates.ewma_params || {};
+    const volDiagnostics = estimates.volatility_diagnostics || {};
+    
+    const estimatorType = baseMethod.replace('Range-', ''); // Extract P, GK, RS, or YZ
+    const windowSize = rangeParams.window_size ?? estimates.window_size ?? 'N/A';
+    const lambdaEwma = ewmaParams.lambda ?? estimates.lambda_ewma ?? 0.94;
+    const sigma1d = estimates.sigma_forecast ?? estimates.sigma_1d ?? NaN;
+    const sigma1dStr = isFinite(sigma1d) ? sigma1d.toFixed(6) : 'N/A';
+    
+    parametersDisplay = `Estimator = ${estimatorType}, Window = ${windowSize}, λ_EWMA = ${lambdaEwma.toFixed(3)}, σ_1d = ${sigma1dStr}`;
+    parametersLabel = 'Range Parameters';
   }
 
-  // Extract prediction interval (preferably conformal-adjusted)
-  // Try multiple possible field locations
+  // Extract prediction interval (use pre-computed conformal bands if available)
+  // Try multiple possible field locations for base bands
   const intervals = forecast.intervals || forecast.pi || forecast;
-  const L_conf = forecast.L_h || intervals.L_h || intervals.L1 || intervals.lower;
-  const U_conf = forecast.U_h || intervals.U_h || intervals.U1 || intervals.upper;
+  const L_base = forecast.L_h || intervals.L_h || intervals.L1 || intervals.lower;
+  const U_base = forecast.U_h || intervals.U_h || intervals.U1 || intervals.upper;
+
+  // Use pre-computed conformal bands if available, otherwise fallback to base bands
+  let L_conf = intervals.L_conf || L_base;
+  let U_conf = intervals.U_conf || U_base;
+  let useConformalBand = !!(intervals.L_conf && intervals.U_conf);
+
   const piDisplay = (L_conf !== undefined && U_conf !== undefined) 
     ? `[$${L_conf.toFixed(2)}, $${U_conf.toFixed(2)}]` 
     : 'N/A';
+
+  const baseBandDisplay = (L_base !== undefined && U_base !== undefined && useConformalBand)
+    ? `Base band (model): [$${L_base.toFixed(2)}, $${U_base.toFixed(2)}]`
+    : null;
 
   // Calculate center and width
   const center = (L_conf !== undefined && U_conf !== undefined) ? (L_conf + U_conf) / 2 : null;
@@ -159,6 +292,9 @@ function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, co
         <div className="flex flex-col md:col-span-2">
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Prediction Interval</span>
           <span className="text-sm text-gray-900 font-medium">{piDisplay}</span>
+          {baseBandDisplay && (
+            <span className="text-xs text-gray-600 mt-1">{baseBandDisplay}</span>
+          )}
         </div>
         
         {/* GARCH-specific volatility row */}
@@ -177,6 +313,21 @@ function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, co
           </div>
         )}
         
+        {/* Range-specific volatility row */}
+        {isRange && (
+          <div className="flex flex-col md:col-span-2">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Range Volatility</span>
+            <span className="text-sm text-gray-900 font-mono">
+              {(() => {
+                const estimatorType = baseMethod.replace('Range-', ''); // Extract P, GK, RS, or YZ
+                const sigma1d = estimates.sigma_forecast ?? estimates.sigma_1d ?? NaN;
+                const sigma1dStr = isFinite(sigma1d) ? sigma1d.toFixed(6) : 'N/A';
+                return `σ_1d (EWMA of ${estimatorType}) = ${sigma1dStr}`;
+              })()}
+            </span>
+          </div>
+        )}
+        
         {/* Row 3: Statistics */}
         <div className="flex flex-col md:col-span-2">
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Center & Width</span>
@@ -188,6 +339,14 @@ function ModelDetails({ activeForecast, gbmForecast, conformalState, horizon, co
           <span className="text-sm text-gray-900">{coverageDisplay}</span>
         </div>
       </div>
+      
+      {/* VaR Diagnostics Snippet */}
+      <VarDiagnosticsSnippet 
+        symbol={symbol}
+        model={baseMethod as "GBM-CC" | "GARCH11-N" | "GARCH11-t" | "HAR-RV" | "Range-P" | "Range-GK" | "Range-RS" | "Range-YZ"} 
+        horizon={horizonTrading}
+        coverage={coverage || 0.95}
+      />
     </div>
   );
 }
@@ -200,6 +359,9 @@ interface PriceChartProps {
   conformalState?: any;
   horizon?: number;
   coverage?: number;
+  recommendedModel?: string | null; // Add recommended model
+  isLoadingRecommendations?: boolean; // Add loading state
+  forecastStatus?: "idle" | "loading" | "ready" | "error"; // Add forecast status
 }
 
 type TimeRange = '5d' | '1m' | '3m' | '6m' | '1y' | '2y' | '5y' | 'max';
@@ -211,7 +373,10 @@ export default function PriceChart({
   gbmForecast, 
   conformalState, 
   horizon = 1, 
-  coverage = 0.95 
+  coverage = 0.95,
+  recommendedModel,
+  isLoadingRecommendations,
+  forecastStatus = "ready"
 }: PriceChartProps) {
   const [data, setData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -503,6 +668,27 @@ export default function PriceChart({
     );
   }
 
+  // Show loading state if forecasts are being computed or activeForecast is not ready
+  if (forecastStatus === "loading" || (forecastStatus === "ready" && !activeForecast && !gbmForecast)) {
+    return (
+      <div className={className + ' p-6 bg-white border rounded-3xl shadow-sm'}>
+        <div className="animate-pulse">
+          <div className="h-4 bg-gray-200 rounded w-1/4 mb-4"></div>
+          <div className="h-64 bg-gray-200 rounded mb-4"></div>
+          <div className="flex justify-center items-center py-4">
+            <div className="inline-flex items-center px-4 py-2 font-semibold leading-6 text-sm shadow rounded-md text-blue-500 bg-blue-100">
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {forecastStatus === "loading" ? "Updating forecasts..." : "Loading chart..."}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={className + ' p-6 bg-white border rounded-3xl shadow-sm'}>
       {/* Header */}
@@ -785,11 +971,14 @@ export default function PriceChart({
         <div className="mt-4 pt-4 border-t border-gray-200">
           {/* Model Details Section */}
           <ModelDetails 
+            symbol={symbol}
             activeForecast={activeForecast}
             gbmForecast={gbmForecast}
             conformalState={conformalState}
             horizon={horizon}
             coverage={coverage}
+            recommendedModel={recommendedModel}
+            isLoadingRecommendations={isLoadingRecommendations}
           />
         </div>
       )}

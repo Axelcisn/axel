@@ -92,14 +92,14 @@ export function computeGbmInterval(params: {
   S_t: number;              // adj close at origin date
   muStarUsed: number;       // μ*_used (per trading day)
   sigmaHat: number;         // σ_hat (per trading day)
-  h_eff: number;            // effective horizon in "time units" for GBM
+  h_trading: number;        // horizon in TRADING days (1,2,3,5) - NOT calendar days
   coverage: number;         // e.g. 0.95
 }): { L_h: number; U_h: number; m_t: number; s_t: number; z_alpha: number } {
-  const { S_t, muStarUsed, sigmaHat, h_eff, coverage } = params;
+  const { S_t, muStarUsed, sigmaHat, h_trading, coverage } = params;
   
-  // Log-price mean and std for horizon h_eff
-  const m_t = Math.log(S_t) + muStarUsed * h_eff;
-  const s_t = sigmaHat * Math.sqrt(h_eff);
+  // Log-price mean and std for horizon h_trading (TRADING DAYS ONLY)
+  const m_t = Math.log(S_t) + muStarUsed * h_trading;
+  const s_t = sigmaHat * Math.sqrt(h_trading);
   
   const alpha = 1 - coverage;
   const z_alpha = normalInverse(1 - alpha / 2);
@@ -122,12 +122,12 @@ export function computeGbmInterval(params: {
 export function computeGbmPI(S_t: number, est: GbmEstimates): GbmPI {
   const { mu_star_used, sigma_hat, z_alpha } = est;
   
-  // Use h_eff = 1 for backward compatibility
+  // Use h_trading = 1 for backward compatibility
   const result = computeGbmInterval({
     S_t,
     muStarUsed: mu_star_used,
     sigmaHat: sigma_hat,
-    h_eff: 1,
+    h_trading: 1,
     coverage: 0.95 // Default coverage for legacy calls
   });
   

@@ -12,7 +12,7 @@ import { specFileFor } from '../../../../lib/paths';
 import { getNormalCritical, getStudentTCritical } from '../../../../lib/forecast/critical';
 import { computeGbmForecast } from '../../../../lib/gbm/engine_old';
 import { computeGbmExpectedPrice } from '../../../../lib/gbm/engine';
-// import { getNthTradingCloseAfter, computeEffectiveHorizonDays } from '../../../../lib/calendar/service';
+import { getNthTradingCloseAfter } from '../../../../lib/calendar/service';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -82,14 +82,14 @@ export async function POST(
     let h_eff_days: number;
     
     try {
-      // Simple fallback for now to get server working
-      verifyDate = date_t; // Use current date as verify date  
-      h_eff_days = h; // Use target horizon as effective days
-      console.log(`[VOL-API] Calendar computation with fallback: ${date_t} + ${horizonTrading}D = ${verifyDate} (h_eff=${h_eff_days})`);
+      const { verifyDate: calcVerifyDate, calendarDays } = getNthTradingCloseAfter(date_t, horizonTrading, tz);
+      verifyDate = calcVerifyDate;
+      h_eff_days = calendarDays;
+      console.log(`[VOL-API] Calendar computation: ${date_t} + ${horizonTrading}D = ${verifyDate} (h_eff=${h_eff_days})`);
     } catch (error) {
       console.warn('Could not compute calendar fields for', date_t, 'h=', horizonTrading, 'error:', error);
       verifyDate = date_t; // Fallback to current date
-      h_eff_days = h; // Fallback to target horizon
+      h_eff_days = horizonTrading; // Fallback approximation
       console.log(`[VOL-API] Calendar fallback: verifyDate=${verifyDate}, h_eff_days=${h_eff_days}`);
     }
 
@@ -261,11 +261,11 @@ export async function POST(
       ? { type: 't' as const, value: getStudentTCritical(df, coverage), df }
       : { type: 'normal' as const, value: getNormalCritical(coverage) };
 
-    // Compose prediction interval
+    // Compose prediction interval using TRADING DAYS ONLY
     const piComposeInput: PiComposeInput = {
       symbol,
       date_t,
-      h: h,
+      h: horizonTrading,  // Use trading days, NOT calendar days
       coverage: coverage,
       mu_star_used,
       S_t,
@@ -287,7 +287,7 @@ export async function POST(
       mu_star_used,
       z_alpha: critical.value // Not needed for prediction
     };
-    const y_hat = computeGbmExpectedPrice(S_t, gbmEst, h);
+    const y_hat = computeGbmExpectedPrice(S_t, gbmEst, horizonTrading);
 
     // Create forecast record
     console.log(`[VOL-API] Creating forecast with horizonTrading=${horizonTrading}, h_eff_days=${h_eff_days}, verifyDate=${verifyDate}`);

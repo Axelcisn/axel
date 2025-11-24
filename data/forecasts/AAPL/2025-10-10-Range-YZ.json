@@ -2,7 +2,11 @@
   "symbol": "AAPL",
   "method": "Range-YZ",
   "date_t": "2025-10-10",
-  "created_at": "2025-11-21T23:00:40.580Z",
+  "horizonTrading": 1,
+  "h_eff_days": 3,
+  "verifyDate": "2025-10-13",
+  "domain": "log",
+  "created_at": "2025-11-24T05:38:05.854Z",
   "locked": true,
   "y_hat": 245.27,
   "target": {
@@ -14,14 +18,14 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.01380603598392889,
+    "sigma_hat": 0.018477627531413687,
     "mu_star_used": 0,
     "window_start": "2021-10-18",
     "window_end": "2025-10-10",
     "n": 11296,
     "S_t": 245.27,
-    "sigma_forecast": 0.01380603598392889,
-    "sigma2_forecast": 0.00019060662958953931,
+    "sigma_forecast": 0.018477627531413687,
+    "sigma2_forecast": 0.0003414227191896571,
     "critical_value": 1.96,
     "window_span": {
       "start": "2021-10-18",
@@ -38,9 +42,9 @@
     }
   },
   "intervals": {
-    "L_h": 238.7220284162651,
-    "U_h": 251.9975776810268,
-    "band_width_bp": 556.1091011514363
+    "L_h": 236.5461898065568,
+    "U_h": 254.31554382336768,
+    "band_width_bp": 751.2001791845524
   },
   "provenance": {
     "rng_seed": null,
@@ -60,7 +64,7 @@
   "diagnostics": {
     "method_source": "Range-YZ",
     "m_log": 5.502359644559846,
-    "s_scale": 0.01380603598392889,
+    "s_scale": 0.018477627531413687,
     "critical_type": "normal"
   },
   "critical": {
@@ -71,6 +75,5 @@
     "start": "2021-10-18",
     "end": "2025-10-10",
     "n_obs": 1000
-  },
-  "is_active": false
+  }
 }

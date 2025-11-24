@@ -44,8 +44,14 @@ export async function computeRangeSigma(params: RangeParams): Promise<SigmaForec
   // Compute daily variance estimates
   const dailyVariances = computeDailyVariances(windowData, estimator);
   
-  if (dailyVariances.length < window) {
-    throw new Error('Insufficient variance estimates');
+  // Validation: YZ returns single window-level estimate, others return daily estimates
+  const minVariances = estimator === 'YZ' ? 1 : Math.min(window, windowData.length - 1);
+  if (dailyVariances.length < minVariances) {
+    if (estimator === 'YZ') {
+      throw new Error(`Insufficient data for Yang-Zhang estimator: need at least 2 days, have ${windowData.length}`);
+    } else {
+      throw new Error(`Insufficient variance estimates: need ${minVariances}, have ${dailyVariances.length}`);
+    }
   }
   
   // Check for gap warnings (for YZ and RS estimators)
@@ -86,24 +92,38 @@ export async function computeRangeSigma(params: RangeParams): Promise<SigmaForec
  * Compute daily variance estimates using the specified estimator
  */
 function computeDailyVariances(data: CanonicalRow[], estimator: string): number[] {
+  if (estimator === 'YZ') {
+    // Yang-Zhang is a window-level estimator, not per-day
+    const yzVariance = computeYangZhangVariance(data);
+    return yzVariance > 0 ? [yzVariance] : [];
+  }
+  
   const variances: number[] = [];
   
   for (let i = 1; i < data.length; i++) {
     const prevRow = data[i - 1];
     const currRow = data[i];
     
-    // OHLC prices
-    const O = currRow.open;
-    const H = currRow.high;
-    const L = currRow.low;
-    const C = currRow.close;
-    const C_prev = prevRow.close;
+    // Compute adjusted OHLC prices using adj_close ratio when available
+    const adjFactor = (currRow.adj_close && currRow.close) 
+      ? currRow.adj_close / currRow.close 
+      : 1.0;
+    const prevAdjFactor = (prevRow.adj_close && prevRow.close) 
+      ? prevRow.adj_close / prevRow.close 
+      : 1.0;
+    
+    // Use adjusted OHLC prices for split consistency
+    const O = currRow.open * adjFactor;
+    const H = currRow.high * adjFactor;
+    const L = currRow.low * adjFactor;
+    const C = currRow.adj_close ?? currRow.close * adjFactor;
+    const C_prev = prevRow.adj_close ?? prevRow.close * prevAdjFactor;
     
     // Validate prices
     if (!O || !H || !L || !C || !C_prev || H <= 0 || L <= 0 || O <= 0 || C <= 0 || C_prev <= 0) {
       continue;
     }
-    
+
     let variance: number;
     
     switch (estimator) {
@@ -126,11 +146,6 @@ function computeDailyVariances(data: CanonicalRow[], estimator: string): number[
         variance = u * (u - c) + d * (d - c);
         break;
         
-      case 'YZ':
-        // Yang-Zhang: computed separately as it requires multiple components
-        variance = computeYangZhangVariance(data, i);
-        break;
-        
       default:
         throw new Error(`Unknown estimator: ${estimator}`);
     }
@@ -141,42 +156,79 @@ function computeDailyVariances(data: CanonicalRow[], estimator: string): number[
   }
   
   return variances;
-}
-
-/**
- * Compute Yang-Zhang variance for a single day
+}/**
+ * Compute Yang-Zhang variance using proper sample-based estimator
+ * Following Yang & Zhang (2000) specification:
+ * σ²_YZ = σ²_g + k * σ²_c + (1-k) * mean(RS_t)
+ * where k = 0.34 / (1.34 + (N+1)/(N-1))
  */
-function computeYangZhangVariance(data: CanonicalRow[], index: number): number {
-  if (index === 0) return 0;
+function computeYangZhangVariance(data: CanonicalRow[], maxIndex?: number): number {
+  // Use the full window if maxIndex not specified, otherwise use up to maxIndex
+  const endIndex = maxIndex ?? data.length - 1;
   
-  const currRow = data[index];
-  const prevRow = data[index - 1];
+  // Collect all overnight, open-close returns and RS components for the window
+  const overnightReturns: number[] = [];
+  const openCloseReturns: number[] = [];
+  const rsComponents: number[] = [];
   
-  const O = currRow.open;
-  const H = currRow.high;
-  const L = currRow.low;
-  const C = currRow.close;
-  const C_prev = prevRow.close;
+  // Process the window up to endIndex
+  for (let j = 1; j <= endIndex; j++) {
+    const currRow = data[j];
+    const prevRow = data[j - 1];
+    
+    // Compute adjusted prices
+    const adjFactor = (currRow.adj_close && currRow.close) 
+      ? currRow.adj_close / currRow.close 
+      : 1.0;
+    const prevAdjFactor = (prevRow.adj_close && prevRow.close) 
+      ? prevRow.adj_close / prevRow.close 
+      : 1.0;
+    
+    const O = currRow.open * adjFactor;
+    const H = currRow.high * adjFactor;
+    const L = currRow.low * adjFactor;
+    const C = currRow.adj_close ?? currRow.close * adjFactor;
+    const C_prev = prevRow.adj_close ?? prevRow.close * prevAdjFactor;
+    
+    if (!O || !H || !L || !C || !C_prev || O <= 0 || H <= 0 || L <= 0 || C <= 0 || C_prev <= 0) {
+      continue;
+    }
+    
+    // Overnight return: g_t = ln(O_t / C_{t-1})
+    const g = Math.log(O / C_prev);
+    
+    // Open-to-close return: c_t = ln(C_t / O_t)
+    const c = Math.log(C / O);
+    
+    // Rogers-Satchell component: u(u-c) + d(d-c)
+    const u = Math.log(H / O);
+    const d = Math.log(L / O);
+    const rs = u * (u - c) + d * (d - c);
+    
+    overnightReturns.push(g);
+    openCloseReturns.push(c);
+    rsComponents.push(rs);
+  }
   
-  if (!O || !H || !L || !C || !C_prev) return 0;
+  if (overnightReturns.length < 2) return 0;
   
-  // Overnight return: g = ln(O/C_{t-1})
-  const g = Math.log(O / C_prev);
+  const N = overnightReturns.length;
   
-  // Close-to-close return: c = ln(C/O)
-  const c = Math.log(C / O);
+  // Compute sample variances
+  const meanG = overnightReturns.reduce((sum, g) => sum + g, 0) / N;
+  const meanC = openCloseReturns.reduce((sum, c) => sum + c, 0) / N;
   
-  // Rogers-Satchell component
-  const u = Math.log(H / O);
-  const d = Math.log(L / O);
-  const rs = u * (u - c) + d * (d - c);
+  const sigma2_g = overnightReturns.reduce((sum, g) => sum + Math.pow(g - meanG, 2), 0) / (N - 1);
+  const sigma2_c = openCloseReturns.reduce((sum, c) => sum + Math.pow(c - meanC, 2), 0) / (N - 1);
+  const sigma2_rs = rsComponents.reduce((sum, rs) => sum + rs, 0) / N; // mean of RS components
   
-  // For YZ, we need to estimate k and variance components over a window
-  // This is simplified - in practice would use rolling window
-  const k = 0.34 / (1.34 + (22 + 1) / (22 - 1)); // Assuming N=22 for monthly window
+  // Compute Yang-Zhang k parameter with actual N
+  const k = 0.34 / (1.34 + (N + 1) / (N - 1));
   
-  // Simplified YZ (proper implementation would need rolling statistics)
-  return g * g + k * c * c + (1 - k) * rs;
+  // Yang-Zhang variance estimate
+  const sigma2_yz = sigma2_g + k * sigma2_c + (1 - k) * sigma2_rs;
+  
+  return Math.max(0, sigma2_yz);
 }
 
 /**

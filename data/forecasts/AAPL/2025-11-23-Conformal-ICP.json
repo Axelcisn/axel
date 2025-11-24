@@ -2,51 +2,51 @@
   "symbol": "AAPL",
   "method": "Conformal:ICP",
   "date_t": "2025-11-23",
-  "created_at": "2025-11-23T04:43:36.022Z",
+  "created_at": "2025-11-23T15:27:37.416Z",
   "locked": true,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 250
+      "min_days": 500
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.016996682326887988,
+    "sigma_hat": 0.018477627531413687,
     "mu_star_used": 0,
-    "window_start": "2025-03-18",
+    "window_start": "2024-07-11",
     "window_end": "2025-11-23",
-    "n": 250,
-    "sigma_forecast": 0.016996682326887988,
-    "sigma2_forecast": 0.0002888872101211465,
-    "critical_value": 2.263213055223333,
+    "n": 500,
+    "sigma_forecast": 0.018477627531413687,
+    "sigma2_forecast": 0.00034142271918965707,
+    "critical_value": 1.96,
     "window_span": {
-      "start": "2025-03-18",
+      "start": "2024-07-11",
       "end": "2025-11-23"
     }
   },
   "intervals": {
-    "L_h": 235.89828534458562,
-    "U_h": 255.01403205252586,
-    "band_width_bp": 810.3385185702882
+    "L_h": 236.95798300671126,
+    "U_h": 253.87358609604743,
+    "band_width_bp": 713.8650858982487
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 250,
+      "cal_window": 500,
       "coverage": 0.95,
       "h": 1,
-      "base_method": "GARCH11-t"
+      "base_method": "Range-YZ"
     },
     "regime_tag": null,
     "conformal": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 250,
-      "q_cal": 0.03895892674157863,
+      "cal_window": 500,
+      "q_cal": 0.03447680603340656,
       "eta": null,
       "K": null
     }
@@ -54,62 +54,79 @@
   "diagnostics": {
     "method_source": "ICP",
     "m_log": 5.502359644559846,
-    "s_scale": 0.016996682326887988,
-    "critical_type": "t",
-    "base_method": "GARCH11-t",
+    "s_scale": 0.018477627531413687,
+    "critical_type": "normal",
+    "base_method": "Range-YZ",
     "conformal": {
       "mode": "ICP",
       "domain": "log",
-      "cal_window": 250,
+      "cal_window": 500,
       "params": {
         "eta": null,
         "K": null,
-        "q_cal": 0.03895892674157863
+        "q_cal": 0.03447680603340656
       },
       "coverage": {
         "last60": 1,
-        "lastCal": 0.984,
-        "miss_count": 4,
+        "lastCal": 0.988,
+        "miss_count": 6,
         "miss_details": [
+          {
+            "date": "2024-05-02",
+            "realized": 5.211560502621754,
+            "y_pred": 5.153464989868557,
+            "L_base": 5.09762404504592,
+            "U_base": 5.209305934691195,
+            "miss_type": "above",
+            "miss_magnitude": 0.002254567930559226
+          },
+          {
+            "date": "2024-06-10",
+            "realized": 5.333443168523411,
+            "y_pred": 5.263311757349221,
+            "L_base": 5.20744769267779,
+            "U_base": 5.319175822020653,
+            "miss_type": "above",
+            "miss_magnitude": 0.014267346502758294
+          },
           {
             "date": "2025-04-02",
             "realized": 5.314141501894922,
-            "y_pred": 5.411828276557693,
-            "L_base": 5.355566043536904,
-            "U_base": 5.468090509578482,
+            "y_pred": 5.411154859811406,
+            "L_base": 5.3567749760871655,
+            "U_base": 5.465534743535646,
             "miss_type": "below",
-            "miss_magnitude": 0.04142454164198206
+            "miss_magnitude": 0.04263347419224317
           },
           {
             "date": "2025-04-03",
             "realized": 5.238461199394671,
-            "y_pred": 5.314806168482246,
-            "L_base": 5.25851607700546,
-            "U_base": 5.371096259959032,
+            "y_pred": 5.314141501894922,
+            "L_base": 5.259726372548142,
+            "U_base": 5.368556631241702,
             "miss_type": "below",
-            "miss_magnitude": 0.02005487761078939
+            "miss_magnitude": 0.02126517315347165
           },
           {
             "date": "2025-04-08",
             "realized": 5.2925507716536995,
-            "y_pred": 5.1505831440395715,
-            "L_base": 5.094268937133525,
-            "U_base": 5.206897350945618,
+            "y_pred": 5.1499333607817785,
+            "L_base": 5.095221975944104,
+            "U_base": 5.204644745619453,
             "miss_type": "above",
-            "miss_magnitude": 0.08565342070808146
+            "miss_magnitude": 0.08790602603424613
           },
           {
             "date": "2025-05-09",
             "realized": 5.350862377211803,
-            "y_pred": 5.291601330127586,
-            "L_base": 5.235243858667639,
-            "U_base": 5.347958801587533,
+            "y_pred": 5.290940222208987,
+            "L_base": 5.236874933204327,
+            "U_base": 5.345005511213647,
             "miss_type": "above",
-            "miss_magnitude": 0.0029035756242707933
+            "miss_magnitude": 0.00585686599815638
           }
         ]
       }
-    },
-    "df": 8
+    }
   }
 }
