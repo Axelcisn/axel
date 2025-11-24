@@ -348,9 +348,22 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [showCoverageDetails, setShowCoverageDetails] = useState(false);
 
   // Stable accessors to prevent variable shadowing - using server spec
-  const persistedCoverage = typeof serverTargetSpec?.spec?.coverage === "number" ? serverTargetSpec.spec.coverage : null;
-  const persistedTZ = serverTargetSpec?.spec?.exchange_tz ?? null;
-  const canonicalCount = uploadResult?.counts?.canonical ?? 0;
+  const resolvedTargetSpec = useMemo(() => targetSpecResult || serverTargetSpec, [targetSpecResult, serverTargetSpec]);
+  const persistedCoverage = typeof resolvedTargetSpec?.spec?.coverage === "number" ? resolvedTargetSpec.spec.coverage : null;
+  const persistedTZ = resolvedTargetSpec?.spec?.exchange_tz ?? null;
+  const canonicalCount = useMemo(() => {
+    if (uploadResult?.counts?.canonical) return uploadResult.counts.canonical;
+    if (uploadResult?.meta?.rows) return uploadResult.meta.rows;
+    return 0;
+  }, [uploadResult]);
+
+  // Pipeline prerequisites to avoid premature runs that show false errors
+  const pipelineReady = useMemo(() => {
+    const hasCoverage = typeof resolvedTargetSpec?.spec?.coverage === "number";
+    const hasHorizon = typeof resolvedTargetSpec?.spec?.h === "number";
+    const hasTZ = Boolean(resolvedTargetSpec?.spec?.exchange_tz);
+    return isInitialized && hasCoverage && hasHorizon && hasTZ && canonicalCount > 0;
+  }, [canonicalCount, isInitialized, resolvedTargetSpec]);
 
   console.log("SERVER_SPEC", serverTargetSpec);
   console.log("[RENDER] Component rendering, serverTargetSpec:", serverTargetSpec);
@@ -749,7 +762,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [conformalMode, conformalDomain, conformalCalWindow, conformalState]);
 
   // Handle generation of base forecasts for conformal prediction
-  const handleGenerateBaseForecasts = useCallback(async () => {
+  const handleGenerateBaseForecasts = useCallback(async (): Promise<boolean> => {
     // Use selected base method from current UI selection
     const baseMethod = selectedBaseMethod;
 
@@ -792,7 +805,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       if (!response.ok) {
         console.error('[Conformal] Generate base forecasts error:', data);
         setConformalError(data.error || data.details || 'Failed to generate base forecasts');
-        return;
+        return false;
       }
 
       console.log('[Conformal] Generated base forecasts:', data);
@@ -808,9 +821,11 @@ export default function TimingPage({ params }: TimingPageProps) {
       // You could also show a temporary success message
       // setConformalError(null); // Clear any previous errors
       
+      return true;
     } catch (err) {
       console.error('[Conformal] Generate base forecasts error:', err);
       setConformalError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setIsGeneratingBase(false);
     }
@@ -872,7 +887,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [window, lambdaDrift, coverage, params.ticker, loadLatestForecast]);
 
-  const generateVolatilityForecast = useCallback(async () => {
+  const generateVolatilityForecast = useCallback(async (): Promise<boolean> => {
     console.log("[VOL][handler] click", new Date().toISOString());
     console.log("[VOL][handler] click", { time: new Date().toISOString() });
     setVolatilityError(null);
@@ -881,7 +896,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     const currentTargetSpec = targetSpecResult || serverTargetSpec;
     const persistedCoverage = currentTargetSpec?.spec?.coverage;
     const persistedTZ = currentTargetSpec?.spec?.exchange_tz;
-    const currentCanonicalCount = uploadResult?.meta?.rows || 0;
+    const currentCanonicalCount = canonicalCount;
     const currentRvAvailable = rvAvailable;
 
     console.log("[VOL][handler] inputs", {
@@ -922,28 +937,28 @@ export default function TimingPage({ params }: TimingPageProps) {
       const errorMessage = !isInitialized 
         ? 'System is still initializing. Please wait a moment and try again.'
         : 'Target specification not found. Save Forecast Target first by setting Horizon and Coverage values.'; 
-      setVolatilityError(errorMessage); 
-      return; 
+      setVolatilityError(errorMessage);
+      return false;
     }
     if (!hasData) { 
       console.log("[VOL][handler] early-return", { reason: "insufficient-data" });
-      setVolatilityError(`Insufficient history: need ${windowN} days, have ${currentCanonicalCount}.`); 
-      return; 
+      setVolatilityError(`Insufficient history: need ${windowN} days, have ${currentCanonicalCount}.`);
+      return false;
     }
     if (!covOK) { 
       console.log("[VOL][handler] early-return", { reason: "coverage-invalid" });
-      setVolatilityError("Coverage must be between 50% and 99.9%."); 
-      return; 
+      setVolatilityError("Coverage must be between 50% and 99.9%.");
+      return false;
     }
     if (!hasTZ) { 
       console.log("[VOL][handler] early-return", { reason: "no-timezone" });
-      setVolatilityError("Exchange timezone missing in Target Spec."); 
-      return; 
+      setVolatilityError("Exchange timezone missing in Target Spec.");
+      return false;
     }
     if (!harAvailable) { 
       console.log("[VOL][handler] early-return", { reason: "har-unavailable" });
-      setVolatilityError("Realized-volatility inputs not found (daily/weekly/monthly). HAR-RV requires RV."); 
-      return; 
+      setVolatilityError("Realized-volatility inputs not found (daily/weekly/monthly). HAR-RV requires RV.");
+      return false;
     }
 
     setIsGeneratingVolatility(true);
@@ -1066,7 +1081,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           console.error('[VOL] Server error body:', htmlText);
           setVolatilityError(`Server error ${resp.status}. Check console for details.`);
         }
-        return;
+        return false;
       }
 
       const bodyText = await resp.text();
@@ -1097,8 +1112,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       });
 
       // Note: Don't call loadLatestForecast here - pipeline will handle state management
+      return true;
     } catch (err) {
       setVolatilityError(err instanceof Error ? err.message : 'Unknown error');
+      return false;
     } finally {
       setIsGeneratingVolatility(false);
     }
@@ -1116,6 +1133,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     rangeEwmaLambda,
     gbmWindow,
     gbmLambda,
+    canonicalCount,
   ]);
 
   // Validation Gates Functions
@@ -1150,10 +1168,10 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [params.ticker]);
 
-  const applyConformalPrediction = useCallback(async () => {
+  const applyConformalPrediction = useCallback(async (): Promise<boolean> => {
     // Check validation gates first
     const canProceed = await checkGatesBeforeAction('conformal prediction');
-    if (!canProceed) return;
+    if (!canProceed) return false;
 
     // Ensure we have a base forecast to calibrate
     if (!baseForecast) {
@@ -1161,7 +1179,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         ? 'System is still initializing. Please wait a moment and try again.'
         : 'No base forecast found. Please generate a volatility forecast first by clicking on a model button (GBM, GARCH, HAR-RV, or Range).';
       setConformalError(errorMessage);
-      return;
+      return false;
     }
 
     // Use selected base method from current UI selection
@@ -1280,10 +1298,10 @@ export default function TimingPage({ params }: TimingPageProps) {
             setShowCoverageDetails(true);
             
             console.log('[Conformal] Successfully applied conformal prediction with batched state updates');
-            return;
+            return true;
           } else {
             setConformalError('Operation cancelled: domain conflict not resolved');
-            return;
+            return false;
           }
         } else if (data.error && data.error.includes('Insufficient base forecasts')) {
           // Enhanced error message for insufficient base forecasts
@@ -1300,7 +1318,7 @@ export default function TimingPage({ params }: TimingPageProps) {
               `${data.error}. Consider generating more base forecasts or reducing the calibration window.`
             );
           }
-          return;
+          return false;
         } else {
           throw new Error(data.error || 'Failed to apply conformal prediction');
         }
@@ -1354,14 +1372,16 @@ export default function TimingPage({ params }: TimingPageProps) {
       setConformalState(data.state);
       setActiveForecast(finalForecast);
       setCurrentForecast(finalForecast); // Keep for legacy compatibility
-      
+
       // Auto-expand coverage details after successful conformal calibration
       setShowCoverageDetails(true);
-      
+
       console.log('[Conformal] Successfully applied conformal prediction with batched state updates');
-      
+      return true;
+
     } catch (err) {
       setConformalError(err instanceof Error ? err.message : 'Unknown error');
+      return false;
     } finally {
       setIsApplyingConformal(false);
     }
@@ -1384,18 +1404,18 @@ export default function TimingPage({ params }: TimingPageProps) {
   const handleUnifiedGenerate = useCallback(async () => {
     try {
       // 1) First generate/update volatility forecast (GBM / GARCH / HAR / Range)
-      // This ensures we have an active forecast for base forecast generation
-      await generateVolatilityForecast();
-      
+      const volSuccess = await generateVolatilityForecast();
+      if (!volSuccess) return;
+
       // Wait for the forecast to be loaded and active method to be updated
       await loadLatestForecast();
 
       // 2) Then ensure base forecasts exist for current method + cal window
-      // Now activeBaseMethod should be properly set from the new forecast
       if (baseForecastCount !== null && baseForecastCount < conformalCalWindow) {
-        await handleGenerateBaseForecasts();
+        const baseSuccess = await handleGenerateBaseForecasts();
         await loadBaseForecastCount();
         await loadModelLine();
+        if (!baseSuccess) return;
       }
 
       // 3) Finally apply conformal calibration
@@ -1417,37 +1437,62 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Centralized forecast pipeline with status management
   const runForecastPipeline = useCallback(async () => {
     console.log('[ForecastPipeline] Starting pipeline execution:', { h, coverage, volModel, garchEstimator, rangeEstimator });
-    
+
+    if (!pipelineReady) {
+      console.log('[ForecastPipeline] Skipping pipeline - prerequisites not ready', {
+        pipelineReady,
+        isInitialized,
+        hasTargetSpec: Boolean(resolvedTargetSpec?.spec),
+        hasCoverage: typeof resolvedTargetSpec?.spec?.coverage === 'number',
+        hasHorizon: typeof resolvedTargetSpec?.spec?.h === 'number',
+        hasTZ: Boolean(resolvedTargetSpec?.spec?.exchange_tz),
+        canonicalCount,
+      });
+      return;
+    }
+
     try {
       setForecastStatus("loading");
       setForecastError(null);
       setConformalError(null);
       setVolatilityError(null);
-      
+
       // Clear stale state
       setBaseForecastsStale(true);
       setConformalStale(true);
       setCoverageStatsStale(true);
       setBaseForecastCount(null);
       setConformalState(null);
-      
+
       console.log('[ForecastPipeline] Step 1: Generating volatility forecast');
       // 1) Generate volatility forecast for current volModel/estimator
-      await generateVolatilityForecast();
-      
+      const volSuccess = await generateVolatilityForecast();
+      if (!volSuccess) {
+        setForecastStatus("error");
+        return;
+      }
+
       console.log('[ForecastPipeline] Step 2: Generating base forecasts');
       // 2) Generate / refresh base forecasts for conformal (if needed)
-      await handleGenerateBaseForecasts();
-      
+      const baseSuccess = await handleGenerateBaseForecasts();
+      if (!baseSuccess) {
+        setForecastStatus("error");
+        return;
+      }
+
       console.log('[ForecastPipeline] Step 3: Applying conformal prediction');
       // 3) Apply conformal prediction to build the final activeForecast
-      await applyConformalPrediction();
-      
+      const conformalSuccess = await applyConformalPrediction();
+      if (!conformalSuccess) {
+        setForecastStatus("error");
+        return;
+      }
+
       // Clear stale flags on success
       setBaseForecastsStale(false);
       setConformalStale(false);
       setCoverageStatsStale(false);
-      
+
       console.log('[ForecastPipeline] Pipeline complete - setting status to ready');
       setForecastStatus("ready");
     } catch (error) {
@@ -1464,38 +1509,42 @@ export default function TimingPage({ params }: TimingPageProps) {
     generateVolatilityForecast,
     handleGenerateBaseForecasts,
     applyConformalPrediction,
+    pipelineReady,
+    isInitialized,
+    resolvedTargetSpec,
+    canonicalCount,
   ]);
 
   // Handlers for explicit pipeline triggers
   const handleHorizonChange = useCallback((newH: number) => {
     setH(newH);
-    if (!isInitialized) return;
+    if (!pipelineReady) return;
     runForecastPipeline(); // Trigger pipeline on horizon change
-  }, [isInitialized, runForecastPipeline]);
+  }, [pipelineReady, runForecastPipeline]);
 
   const handleCoverageChange = useCallback((newCoverage: number) => {
     setCoverage(newCoverage);
-    if (!isInitialized) return;
+    if (!pipelineReady) return;
     runForecastPipeline(); // Trigger pipeline on coverage change
-  }, [isInitialized, runForecastPipeline]);
+  }, [pipelineReady, runForecastPipeline]);
 
   const handleModelChange = useCallback((newModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range') => {
     setVolModel(newModel);
-    if (!isInitialized) return;
+    if (!pipelineReady) return;
     runForecastPipeline(); // Trigger pipeline on model change
-  }, [isInitialized, runForecastPipeline]);
+  }, [pipelineReady, runForecastPipeline]);
 
   const handleEstimatorChange = useCallback((newEstimator: 'P' | 'GK' | 'RS' | 'YZ') => {
     setRangeEstimator(newEstimator);
-    if (!isInitialized) return;
+    if (!pipelineReady) return;
     runForecastPipeline(); // Trigger pipeline on estimator change
-  }, [isInitialized, runForecastPipeline]);
+  }, [pipelineReady, runForecastPipeline]);
 
   const handleGarchEstimatorChange = useCallback((newEstimator: 'Normal' | 'Student-t') => {
     setGarchEstimator(newEstimator);
-    if (!isInitialized) return;
+    if (!pipelineReady) return;
     runForecastPipeline(); // Trigger pipeline on GARCH estimator change
-  }, [isInitialized, runForecastPipeline]);
+  }, [pipelineReady, runForecastPipeline]);
 
   // Override the early handleApplyBestModel with the proper implementation that calls the pipeline
   const handleApplyBestModelWithPipeline = useCallback(() => {
@@ -1513,10 +1562,10 @@ export default function TimingPage({ params }: TimingPageProps) {
     
     console.log(`Applied recommended model: ${recommendedModel}`);
     
-    // Run pipeline if initialized
-    if (!isInitialized) return;
+    // Run pipeline only when prerequisites are satisfied
+    if (!pipelineReady) return;
     runForecastPipeline();
-  }, [recommendedModel, isInitialized, runForecastPipeline]);
+  }, [recommendedModel, pipelineReady, runForecastPipeline]);
 
   // Override the early onGenerateBaseForecastsClick with the proper implementation
   const onGenerateBaseForecastsClickWithPipeline = useCallback(async () => {
@@ -1526,15 +1575,15 @@ export default function TimingPage({ params }: TimingPageProps) {
       return;
     }
     
-    // Guard with isInitialized
-    if (!isInitialized) {
-      console.log('[BaseForecasts] Skipping - not initialized');
+    // Guard with pipeline readiness to avoid false errors
+    if (!pipelineReady) {
+      console.log('[BaseForecasts] Skipping - pipeline not ready');
       return;
     }
     
     console.log('[BaseForecasts] Triggering full pipeline - no forecasts available');
     await runForecastPipeline();
-  }, [baseForecastCount, isInitialized, runForecastPipeline]);
+  }, [baseForecastCount, pipelineReady, runForecastPipeline]);
 
   const saveTargetSpec = async () => {
     setIsSavingTarget(true);
