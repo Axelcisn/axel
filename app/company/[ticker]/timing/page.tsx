@@ -955,9 +955,15 @@ export default function TimingPage({ params }: TimingPageProps) {
       setVolatilityError("Exchange timezone missing in Target Spec.");
       return false;
     }
-    if (!harAvailable) { 
+    if (!harAvailable) {
       console.log("[VOL][handler] early-return", { reason: "har-unavailable" });
       setVolatilityError("Realized-volatility inputs not found (daily/weekly/monthly). HAR-RV requires RV.");
+      return false;
+    }
+
+    if (!canonicalCount || canonicalCount <= 0) {
+      console.log("[VOL][handler] early-return", { reason: "no-canonical-data" });
+      setVolatilityError('No canonical data available. Please upload price history before generating forecasts.');
       return false;
     }
 

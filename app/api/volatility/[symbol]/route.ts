@@ -48,11 +48,24 @@ export async function POST(
     const { h, coverage, exchange_tz } = specRes;
 
     // Load canonical data to get latest price and determine date_t
-    const canonicalData = await loadCanonicalData(symbol);
+    let canonicalData;
+    try {
+      canonicalData = await loadCanonicalData(symbol);
+    } catch (error: any) {
+      const message = error?.message || '';
+      if (message.includes('No canonical data')) {
+        return NextResponse.json(
+          { error: `No canonical data found for ${symbol}` },
+          { status: 404 }
+        );
+      }
+      throw error;
+    }
+
     if (!canonicalData || canonicalData.length === 0) {
       return NextResponse.json(
         { error: 'Canonical dataset not found' },
-        { status: 400 }
+        { status: 404 }
       );
     }
 
