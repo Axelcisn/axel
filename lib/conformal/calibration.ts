@@ -309,11 +309,11 @@ export function isMatchingBaseForecast(
   
   // Horizon filter - check if forecast was generated for specific horizon
   if (horizon !== undefined) {
-    // For GBM forecasts, use horizonTrading
-    if (forecast.horizonTrading !== undefined) {
+    // For GBM forecasts, use horizonTrading when it's a valid number
+    if (typeof forecast.horizonTrading === "number") {
       if (forecast.horizonTrading !== horizon) return false;
     }
-    // For other forecasts, use target.h
+    // Otherwise fall back to target.h (for older forecasts or non-GBM)
     else if (forecast.target?.h !== undefined) {
       if (forecast.target.h !== horizon) return false;
     }
@@ -380,25 +380,42 @@ export async function loadBaseForecastPairs(
       
       if (!isMatching) continue;
       
-      // Get forecast date and next day for realization
+      // Get forecast date and determine horizon for verify date calculation
       const forecastDate = forecast.date_t;
-      const nextDate = getNextTradingDay(forecastDate, canonicalData);
       
-      if (!nextDate) {
-        console.log('[DEBUG] no next trading day for forecast', forecast.date_t, 'method=', forecast.method);
+      // Determine effective horizon for this forecast (fallback to 1)
+      const effectiveHorizon =
+        typeof forecast.horizonTrading === "number"
+          ? forecast.horizonTrading
+          : typeof forecast.target?.h === "number"
+          ? forecast.target.h
+          : 1;
+      
+      const verifyDate = getTradingDayOffset(
+        forecastDate,
+        canonicalData,
+        effectiveHorizon
+      );
+      
+      if (!verifyDate) {
+        console.log(
+          '[DEBUG] no trading day', effectiveHorizon, 'days after',
+          forecast.date_t,
+          'method=', forecast.method
+        );
         continue;
       }
       
       const S_t = priceMap.get(forecastDate);
-      const S_t_plus_1 = priceMap.get(nextDate);
+      const S_t_plus_h = priceMap.get(verifyDate);
       
-      if (!S_t || !S_t_plus_1) {
-        console.log('[DEBUG] no canonical outcome for forecast', forecast.date_t, 'nextDate=', nextDate, 'S_t=', S_t, 'S_t_plus_1=', S_t_plus_1);
+      if (!S_t || !S_t_plus_h) {
+        console.log('[DEBUG] no canonical outcome for forecast', forecast.date_t, 'verifyDate=', verifyDate, 'S_t=', S_t, 'S_t_plus_h=', S_t_plus_h);
         continue;
       }
       
       // Compute realized value in chosen domain
-      const realized = domain === 'log' ? Math.log(S_t_plus_1) : S_t_plus_1;
+      const realized = domain === 'log' ? Math.log(S_t_plus_h) : S_t_plus_h;
       
       // Extract prediction values
       const m_log = forecast.m_log || forecast.diagnostics?.m_log || 0;
@@ -418,7 +435,7 @@ export async function loadBaseForecastPairs(
                                (L && U ? 'geometric_mean' : 'S_t_fallback');
       
       // Debug logging for calibration robustness
-      console.log(`[CALIBRATION] ${forecastDate}: y_pred=${y_predPrice.toFixed(2)}, realized=${S_t_plus_1.toFixed(2)}, diff=${(y_predPrice - S_t_plus_1).toFixed(2)}, source=${prediction_source}`);
+      console.log(`[CALIBRATION] ${forecastDate}: y_pred=${y_predPrice.toFixed(2)}, realized=${S_t_plus_h.toFixed(2)}, diff=${(y_predPrice - S_t_plus_h).toFixed(2)}, source=${prediction_source}`);
       
       // Convert to target domain  
       const y_pred = domain === 'log' ? Math.log(y_predPrice) : y_predPrice;
@@ -428,7 +445,7 @@ export async function loadBaseForecastPairs(
       
       pairs.push({
         forecast,
-        realizedDate: nextDate,
+        realizedDate: verifyDate,
         realized,
         y_pred,
         sigma_pred,
@@ -455,6 +472,27 @@ function getNextTradingDay(date: string, canonicalData: any[]): string | null {
     return null;
   }
   return canonicalData[currentIndex + 1].date;
+}
+
+/**
+ * Get trading day that is offset steps ahead from start date
+ */
+function getTradingDayOffset(
+  startDate: string,
+  canonicalData: any[],
+  offset: number
+): string | null {
+  if (offset <= 0) return startDate;
+
+  const startIndex = canonicalData.findIndex(row => row.date === startDate);
+  if (startIndex === -1) return null;
+
+  const targetIndex = startIndex + offset;
+  if (targetIndex >= canonicalData.length) {
+    return null; // no such future trading day in our data
+  }
+
+  return canonicalData[targetIndex].date;
 }
 
 /**

@@ -53,8 +53,15 @@ export async function generateBaseForecastsForWindow(opts: GenerateOptions): Pro
   // 3) Load existing forecasts to avoid duplicates
   const existingForecasts = await loadExistingForecasts(symbol);
 
-  // 4) Determine which dates need base forecasts
-  const datesToGenerate = getRequiredForecastDates(canonical, calWindow, existingForecasts, baseMethod);
+  // 4) Determine which dates need base forecasts (now horizon-aware)
+  const datesToGenerate = getRequiredForecastDates(
+    canonical, 
+    calWindow, 
+    existingForecasts, 
+    baseMethod,
+    horizon,  // Pass horizon for horizon-aware duplicate detection
+    coverage  // Pass coverage for coverage-aware duplicate detection
+  );
 
   let created = 0;
   let alreadyExisting = existingForecasts.filter(f => 
@@ -131,7 +138,9 @@ function getRequiredForecastDates(
   canonical: any[],
   calWindow: number,
   existingForecasts: ForecastRecord[],
-  baseMethod: string
+  baseMethod: string,
+  horizon?: number,
+  coverage?: number
 ): string[] {
   if (canonical.length < calWindow + 1) {
     throw new Error(`Insufficient canonical data: need ${calWindow + 1} days, have ${canonical.length}`);
@@ -147,13 +156,35 @@ function getRequiredForecastDates(
   for (let i = startIdx; i < endIdx; i++) {
     const date = canonical[i].date;
     
-    // Check if we already have a locked base forecast for this date and method
-    const existing = existingForecasts.find(f => 
-      f.date_t === date && 
-      f.method === baseMethod && 
-      f.locked && 
-      !f.method.includes('Conformal')
-    );
+    // Check if we already have a locked base forecast for this date, method, and horizon
+    const existing = existingForecasts.find(f => {
+      if (f.date_t !== date) return false;
+      if (f.method !== baseMethod) return false;
+      if (!f.locked) return false;
+      if (f.method.includes('Conformal')) return false;
+
+      // Horizon-aware duplicate detection
+      if (typeof horizon === "number") {
+        const forecastH =
+          typeof f.horizonTrading === "number"
+            ? f.horizonTrading
+            : typeof f.target?.h === "number"
+            ? f.target.h
+            : undefined;
+
+        if (forecastH !== undefined && forecastH !== horizon) {
+          return false; // This is a base forecast for a different horizon
+        }
+      }
+
+      // Coverage-aware duplicate detection (optional)
+      if (typeof coverage === "number" && typeof f.target?.coverage === "number") {
+        const covDiff = Math.abs(f.target.coverage - coverage);
+        if (covDiff > 1e-6) return false;
+      }
+
+      return true;
+    });
     
     if (!existing) {
       requiredDates.push(date);
@@ -197,7 +228,9 @@ async function generateSingleBaseForecast(opts: {
   // Generate forecast using the appropriate method
   let forecast: ForecastRecord;
 
-  if (baseMethod === 'GBM') {
+  const isGbmBaseMethod = baseMethod === 'GBM' || baseMethod === 'GBM-CC';
+
+  if (isGbmBaseMethod) {
     forecast = await generateGbmForecast(symbol, date_t, historicalData, effectiveTargetSpec, domain);
   } else if (baseMethod.startsWith('GARCH')) {
     forecast = await generateGarchForecast(symbol, date_t, historicalData, effectiveTargetSpec, domain, baseMethod);
@@ -263,6 +296,7 @@ async function generateGbmForecast(
     created_at: new Date().toISOString(),
     locked: true,
     y_hat, // Add explicit predicted price
+    horizonTrading: targetSpec.h, // Add horizonTrading field from target spec
     target: {
       h: targetSpec.h,
       coverage: targetSpec.coverage,
