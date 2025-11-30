@@ -19,6 +19,7 @@ import { formatTicker, getAllExchanges, getExchangesByRegion, getExchangeInfo } 
 import { parseExchange, normalizeTicker } from '@/lib/utils/parseExchange';
 import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
+import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
 
 // Badge component interface and implementation
@@ -124,6 +125,9 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Dark mode hook
   const isDarkMode = useDarkMode();
   
+  // Auto-cleanup hook for generated forecast files
+  const { trackGeneratedFile, cleanupTrackedFiles } = useAutoCleanupForecasts(params.ticker);
+  
   // Server-confirmed Target Spec (what the API route reads)  
   const [serverTargetSpec, setServerTargetSpec] = useState<any | null>(null);
   const [isLoadingServerSpec, setIsLoadingServerSpec] = useState(false);
@@ -202,7 +206,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [conformalError, setConformalError] = useState<string | null>(null);
   const [baseForecastCount, setBaseForecastCount] = useState<number | null>(null);
   const [isLoadingBaseForecasts, setIsLoadingBaseForecasts] = useState(false);
-  const [showMissDetails, setShowMissDetails] = useState(false);
+  const [showMissDetails, setShowMissDetails] = useState(false); // Changed to false (closed by default)
   const [baseForecastsToGenerate, setBaseForecastsToGenerate] = useState(250); // Default to cal window
 
   // Model prediction line for the active method
@@ -834,6 +838,14 @@ export default function TimingPage({ params }: TimingPageProps) {
 
       console.log('[Conformal] Generated base forecasts:', data);
       
+      // Track generated file IDs for auto-cleanup
+      if (data.generatedFileIds && Array.isArray(data.generatedFileIds)) {
+        data.generatedFileIds.forEach((fileId: string) => {
+          trackGeneratedFile(fileId);
+          console.log('[AutoCleanup] Tracked base forecast file:', fileId);
+        });
+      }
+      
       // Show success message briefly
       const successMessage = `Generated ${data.created} new forecasts. ${data.alreadyExisting} already existed.`;
       console.log('[Conformal]', successMessage);
@@ -856,7 +868,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsGeneratingBase(false);
     }
-  }, [tickerParam, selectedBaseMethod, conformalCalWindow, conformalDomain, h, coverage, loadBaseForecastCount, loadModelLine, volModel, garchEstimator, rangeEstimator, targetSpecResult]);
+  }, [tickerParam, selectedBaseMethod, conformalCalWindow, conformalDomain, h, coverage, loadBaseForecastCount, loadModelLine, volModel, garchEstimator, rangeEstimator, targetSpecResult, trackGeneratedFile]);
 
   // Generate base forecasts for current configuration (symbol, base method, horizon, coverage, domain)
   const handleGenerateBaseForecastsForCurrentConfig = useCallback(async () => {
@@ -898,6 +910,14 @@ export default function TimingPage({ params }: TimingPageProps) {
       const data = await resp.json();
       console.log("[BASE] Generated base forecasts successfully:", data);
 
+      // Track generated file IDs for auto-cleanup
+      if (data.generatedFileIds && Array.isArray(data.generatedFileIds)) {
+        data.generatedFileIds.forEach((fileId: string) => {
+          trackGeneratedFile(fileId);
+          console.log('[AutoCleanup] Tracked base forecast file (manual):', fileId);
+        });
+      }
+
       // Show success info
       if (data.message) {
         console.log("[BASE]", data.message);
@@ -912,7 +932,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsGeneratingBase(false);
     }
-  }, [tickerParam, selectedBaseMethod, baseForecastsToGenerate, conformalDomain, h, coverage, loadBaseForecastCount]);
+  }, [tickerParam, selectedBaseMethod, baseForecastsToGenerate, conformalDomain, h, coverage, loadBaseForecastCount, trackGeneratedFile]);
 
   const generateGbmForecast = useCallback(async () => {
     setIsGeneratingForecast(true);
@@ -2776,15 +2796,17 @@ export default function TimingPage({ params }: TimingPageProps) {
           </button>
           <button
             onClick={() => setShowDataQualityModal(true)}
-            className={`flex items-center justify-center w-9 h-9 rounded-full shadow-sm transition-all duration-200 border-2 ${
+            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 ${
               isDarkMode 
-                ? 'bg-gray-800 hover:bg-gray-700 text-white hover:text-gray-300 border-gray-600 hover:border-gray-500'
-                : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700'
+                ? 'bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white border border-gray-600/50 hover:border-gray-500'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 border border-slate-300/50 hover:border-slate-400'
             }`}
             title="Data Quality Information"
           >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+              <path d="M12 17h.01"/>
             </svg>
           </button>
           <button
@@ -3267,8 +3289,8 @@ export default function TimingPage({ params }: TimingPageProps) {
                 <div className="mb-4 pt-4 border-t border-gray-200">
                   <h5 className="text-sm font-semibold text-gray-800 mb-3">Coverage Statistics</h5>
                   
-                  {/* Coverage Metrics Grid - 4 Columns */}
-                  <div className="grid grid-cols-4 gap-4 mb-4">
+                  {/* Coverage Metrics Grid - 5 Columns including Date Range */}
+                  <div className="grid grid-cols-5 gap-4 mb-4">
                     <div className="bg-blue-50 p-3 rounded-full text-center">
                       <div className="text-lg font-mono font-bold text-blue-900">
                         {((conformalState.coverage.last60 || 0) * 100).toFixed(1)}%
@@ -3301,6 +3323,29 @@ export default function TimingPage({ params }: TimingPageProps) {
                         <div className="text-xs text-gray-400">No calibration</div>
                       </div>
                     )}
+                    {/* Date Range as 5th column */}
+                    <div className="bg-blue-50 p-3 rounded-full text-center">
+                      <div className="text-lg font-mono font-bold text-blue-900 leading-tight">
+                        {(() => {
+                          // Use a fixed last available date (2025-10-10) for now
+                          // TODO: In production, this should be dynamically loaded from canonical data
+                          const lastAvailableDate = new Date('2025-10-10');
+                          const startDate = new Date(lastAvailableDate);
+                          startDate.setDate(lastAvailableDate.getDate() - conformalCalWindow);
+                          
+                          // Format as DD/MM/YY
+                          const formatDate = (date: Date) => {
+                            const day = String(date.getDate()).padStart(2, '0');
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const year = String(date.getFullYear()).slice(-2);
+                            return `${day}/${month}/${year}`;
+                          };
+                          
+                          return `${formatDate(startDate)} → ${formatDate(lastAvailableDate)}`;
+                        })()}
+                      </div>
+                      <div className="text-xs text-gray-600">Data Range</div>
+                    </div>
                   </div>
 
                   {/* Hide/Show Details Toggle */}
@@ -3316,38 +3361,237 @@ export default function TimingPage({ params }: TimingPageProps) {
                   {/* Miss Details Table */}
                   {showCoverageDetails && conformalState.coverage.miss_details && conformalState.coverage.miss_details.length > 0 && (
                     <div className="mb-4">
-                      <h6 className="text-sm font-medium text-gray-700 mb-2">
+                      <h6 className={`text-sm font-medium mb-4 ${
+                        isDarkMode ? 'text-gray-200' : 'text-gray-700'
+                      }`}>
                         Miss Details ({conformalState.coverage.miss_count} misses)
                       </h6>
+                      
                       <div className="overflow-x-auto">
-                        <table className="w-full text-xs border border-gray-200 rounded">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-2 py-1 text-left border-b">Date</th>
-                              <th className="px-2 py-1 text-right border-b">Realized</th>
-                              <th className="px-2 py-1 text-right border-b">Predicted</th>
-                              <th className="px-2 py-1 text-right border-b">L_base</th>
-                              <th className="px-2 py-1 text-right border-b">U_base</th>
-                              <th className="px-2 py-1 text-center border-b">Type</th>
-                              <th className="px-2 py-1 text-right border-b">Magnitude</th>
+                        <table className={`table-auto w-full text-xs border-2 border-gray-300 rounded-xl overflow-hidden ${
+                          isDarkMode 
+                            ? 'bg-gray-800' 
+                            : 'bg-white'
+                        }`}>
+                          {/* Single header row */}
+                          <thead>
+                            {/* Group headers */}
+                            <tr className={`text-[10px] uppercase tracking-[0.1em] border-b ${
+                              isDarkMode 
+                                ? 'text-gray-500 border-gray-600 bg-gray-800/60' 
+                                : 'text-gray-400 border-border/40 bg-muted/20'
+                            }`}>
+                              <th className={`px-2 py-1 text-center font-semibold ${
+                                isDarkMode 
+                                  ? 'bg-sky-900/40 text-sky-200' 
+                                  : 'bg-sky-100 text-sky-800'
+                              }`} colSpan={4}>Forecast</th>
+                              <th className={`px-2 py-1 text-center font-semibold ${
+                                isDarkMode 
+                                  ? 'text-black' 
+                                  : 'text-black'
+                              }`} colSpan={2}>Realized</th>
+                              <th className={`px-2 py-1 text-center font-semibold ${
+                                isDarkMode 
+                                  ? 'bg-sky-900/40 text-sky-200' 
+                                  : 'bg-sky-100 text-sky-800'
+                              }`} colSpan={3}>Analysis</th>
+                            </tr>
+                            
+                            {/* Column headers */}
+                            <tr className={`text-[11px] uppercase tracking-[0.08em] border-b ${
+                              isDarkMode 
+                                ? 'text-gray-400 border-gray-600 bg-gray-700/40' 
+                                : 'text-muted-foreground border-border/60 bg-muted/40'
+                            }`}>
+                              <th className="px-2 py-1.5 text-left whitespace-nowrap">Year</th>
+                              <th className="px-2 py-1.5 text-left whitespace-nowrap">Month</th>
+                              <th className="px-2 py-1.5 text-left whitespace-nowrap">Day</th>
+                              <th className="px-2 py-1.5 text-left whitespace-nowrap">Horizon</th>
+                              <th className="px-2 py-1.5 text-left whitespace-nowrap">R.Month</th>
+                              <th className="px-2 py-1.5 text-left whitespace-nowrap">R.Day</th>
+                              <th className="px-2 py-1.5 text-left w-[220px]">Band</th>
+                              <th className="px-2 py-1.5 text-center">Direction</th>
+                              <th className="px-2 py-1.5 text-right">Magnitude</th>
                             </tr>
                           </thead>
-                          <tbody>
-                            {conformalState.coverage.miss_details.map((miss: any, idx: number) => (
-                              <tr key={`${miss.date}-${idx}`} className="border-b border-gray-100">
-                                <td className="px-2 py-1 text-gray-700">{miss.date}</td>
-                                <td className="px-2 py-1 text-right font-mono">{miss.realized?.toFixed(4)}</td>
-                                <td className="px-2 py-1 text-right font-mono">{miss.y_pred?.toFixed(4)}</td>
-                                <td className="px-2 py-1 text-right font-mono text-blue-600">{miss.L_base?.toFixed(4)}</td>
-                                <td className="px-2 py-1 text-right font-mono text-blue-600">{miss.U_base?.toFixed(4)}</td>
-                                <td className="px-2 py-1 text-center">
-                                  <span className={`${miss.miss_type === 'above' ? 'text-red-500' : 'text-orange-500'}`}>
-                                    {miss.miss_type === 'above' ? '↑' : '↓'}
-                                  </span>
-                                </td>
-                                <td className="px-2 py-1 text-right font-mono">{miss.miss_magnitude?.toFixed(4)}</td>
-                              </tr>
-                            ))}
+                          
+                          <tbody className={`${
+                            isDarkMode ? 'divide-gray-600' : 'divide-border/40'
+                          } divide-y`}>
+                            {conformalState.coverage.miss_details.map((miss: any, idx: number) => {
+                              const predictionDate = miss.date;
+                              const realizedDate = miss.realized_date ?? miss.date;
+                              const horizonValue = typeof miss.horizon === "number" ? miss.horizon : h ?? 1;
+                              const horizonLabel = `${horizonValue}D`;
+                              const directionUp = miss.miss_type === "above";
+
+                              // Parse prediction date into Year, Month, Day
+                              const predDateParts = predictionDate.split('-');
+                              const predYear = predDateParts[0];
+                              const predMonthNum = parseInt(predDateParts[1]);
+                              const predDay = predDateParts[2];
+                              
+                              // Parse realized date into Month, Day
+                              const realizedDateParts = realizedDate.split('-');
+                              const realizedMonthNum = parseInt(realizedDateParts[1]);
+                              const realizedDay = realizedDateParts[2];
+                              
+                              // Month abbreviations
+                              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                                                 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                              const predMonth = monthNames[predMonthNum - 1] || '';
+                              const realizedMonth = monthNames[realizedMonthNum - 1] || '';
+
+                              const L = miss.L_base;
+                              const U = miss.U_base;
+                              const C = miss.y_pred;
+                              const R = miss.realized;
+
+                              let realizedOffsetPercent = 50; // default in the middle
+                              const OUTSIDE_OFFSET_PCT = 8;   // how far outside the band to place misses
+
+                              if (typeof L === "number" && typeof U === "number" && typeof R === "number" && U !== L) {
+                                const t = (R - L) / (U - L); // normalized position relative to band
+
+                                if (t >= 0 && t <= 1) {
+                                  // inside band → map to [0,100]%
+                                  realizedOffsetPercent = t * 100;
+                                } else if (t < 0) {
+                                  // below band → place just left of Low
+                                  realizedOffsetPercent = -OUTSIDE_OFFSET_PCT;
+                                } else {
+                                  // above band → place just right of Up
+                                  realizedOffsetPercent = 100 + OUTSIDE_OFFSET_PCT;
+                                }
+                              }
+
+                              return (
+                                <tr
+                                  key={`${miss.date}-${idx}`}
+                                  className={`border-t transition-colors ${
+                                    isDarkMode 
+                                      ? 'border-gray-600/40 hover:bg-gray-700/40' 
+                                      : 'border-border/40 hover:bg-muted/40'
+                                  }`}
+                                >
+                                  {/* Year */}
+                                  <td className={`px-2 py-1.5 text-left whitespace-nowrap ${
+                                    isDarkMode ? 'text-gray-300' : 'text-foreground'
+                                  }`}>
+                                    {predYear}
+                                  </td>
+
+                                  {/* Month */}
+                                  <td className={`px-2 py-1.5 text-left whitespace-nowrap ${
+                                    isDarkMode ? 'text-gray-300' : 'text-foreground'
+                                  }`}>
+                                    {predMonth}
+                                  </td>
+
+                                  {/* Day */}
+                                  <td className={`px-2 py-1.5 text-left whitespace-nowrap ${
+                                    isDarkMode ? 'text-gray-300' : 'text-foreground'
+                                  }`}>
+                                    {predDay}
+                                  </td>
+
+                                  {/* Horizon badge */}
+                                  <td className="px-2 py-1.5 whitespace-nowrap">
+                                    <div className="flex justify-start">
+                                      <span className={`inline-flex items-center rounded-full border px-2 py-[2px] text-[10px] font-medium ${
+                                        isDarkMode 
+                                          ? 'border-gray-600/60 bg-gray-800 text-gray-300/80' 
+                                          : 'border-border/60 bg-background text-foreground/80'
+                                      }`}>
+                                        {horizonLabel.toLowerCase()}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Realized Month */}
+                                  <td className={`px-2 py-1.5 text-left whitespace-nowrap ${
+                                    isDarkMode ? 'text-gray-300' : 'text-foreground'
+                                  }`}>
+                                    {realizedMonth}
+                                  </td>
+
+                                  {/* Realized Day */}
+                                  <td className={`px-2 py-1.5 text-left whitespace-nowrap ${
+                                    isDarkMode ? 'text-gray-300' : 'text-foreground'
+                                  }`}>
+                                    {realizedDay}
+                                  </td>
+
+                                  {/* BAND: simplified text layout with Up/Center/Low + positioned Realized */}
+                                  <td className="px-2 py-1.5">
+                                    <div className="w-[220px] flex flex-col items-start gap-1 text-[10px] font-mono tabular-nums">
+                                      {/* Show Realized above Up if it's a miss above - GREEN */}
+                                      {typeof R === "number" && typeof U === "number" && R > U && (
+                                        <div className="text-green-600 font-bold">
+                                          Realized: {R.toFixed(4)}
+                                        </div>
+                                      )}
+                                      
+                                      {/* Up */}
+                                      <div className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>
+                                        Up: {U?.toFixed(4)}
+                                      </div>
+                                      
+                                      {/* Center */}
+                                      <div className={isDarkMode ? 'text-gray-200' : 'text-gray-900'}>
+                                        Center: {C?.toFixed(4)}
+                                      </div>
+                                      
+                                      {/* Show Realized in middle if it's within bounds */}
+                                      {typeof R === "number" && typeof L === "number" && typeof U === "number" && R >= L && R <= U && (
+                                        <div className="text-blue-600 font-bold">
+                                          Realized: {R.toFixed(4)}
+                                        </div>
+                                      )}
+                                      
+                                      {/* Low */}
+                                      <div className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>
+                                        Low: {L?.toFixed(4)}
+                                      </div>
+                                      
+                                      {/* Show Realized below Low if it's a miss below - RED */}
+                                      {typeof R === "number" && typeof L === "number" && R < L && (
+                                        <div className="text-red-500 font-bold">
+                                          Realized: {R.toFixed(4)}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Direction */}
+                                  <td className="px-2 py-1.5 text-center">
+                                    <span
+                                      className={
+                                        "inline-flex items-center justify-center rounded-full px-1.5 py-[1px] text-[12px] font-medium " +
+                                        (directionUp
+                                          ? "bg-green-100 text-green-600"
+                                          : "bg-red-100 text-red-600")
+                                      }
+                                      title={
+                                        directionUp
+                                          ? "Realized above upper band"
+                                          : "Realized below lower band"
+                                      }
+                                    >
+                                      {directionUp ? "↑" : "↓"}
+                                    </span>
+                                  </td>
+
+                                  {/* Magnitude */}
+                                  <td className={`px-2 py-1.5 text-right font-mono tabular-nums ${
+                                    isDarkMode ? 'text-gray-300' : 'text-foreground'
+                                  }`}>
+                                    {miss.miss_magnitude?.toFixed(4)}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -3384,14 +3628,17 @@ export default function TimingPage({ params }: TimingPageProps) {
                   isDarkMode ? 'text-red-400' : 'text-red-600'
                 }`}>{forecastError}</p>
               )}
+              
+
+              
               <button
                 type="button"
                 onClick={handleGenerateClick}
                 disabled={!pipelineReady || forecastStatus === "loading"}
-                className={`px-6 py-2 rounded-md text-sm font-semibold transition-colors ${
+                className={`px-6 py-2 rounded-full text-sm font-semibold transition-colors ${
                   !pipelineReady || forecastStatus === "loading"
-                    ? 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
-                    : 'border border-emerald-500 text-emerald-600 hover:bg-emerald-50'
+                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
               >
                 {forecastStatus === "loading" ? "Generating…" : "Generate"}

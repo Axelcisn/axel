@@ -1,0 +1,107 @@
+{
+  "symbol": "AAPL",
+  "mode": "ICP",
+  "domain": "log",
+  "cal_window": 250,
+  "params": {
+    "eta": null,
+    "K": null,
+    "q_cal": 0.06573192597121552
+  },
+  "coverage": {
+    "last60": 0.9833333333333333,
+    "lastCal": 0.968,
+    "miss_count": 8,
+    "miss_details": [
+      {
+        "date": "2025-03-07",
+        "realized_date": "2025-03-11",
+        "horizon": 2,
+        "realized": 5.397438457415844,
+        "y_pred": 5.4773252106678125,
+        "L_base": 5.399319844936835,
+        "U_base": 5.555330576398788,
+        "miss_type": "below",
+        "miss_magnitude": 0.0018813875209913178
+      },
+      {
+        "date": "2025-04-01",
+        "realized_date": "2025-04-03",
+        "horizon": 2,
+        "realized": 5.314141501894922,
+        "y_pred": 5.4085783896241075,
+        "L_base": 5.33059944643382,
+        "U_base": 5.486557332814395,
+        "miss_type": "below",
+        "miss_magnitude": 0.016457944538897706
+      },
+      {
+        "date": "2025-04-02",
+        "realized_date": "2025-04-04",
+        "horizon": 2,
+        "realized": 5.238461199394671,
+        "y_pred": 5.411710333587858,
+        "L_base": 5.333734856860211,
+        "U_base": 5.489685810315505,
+        "miss_type": "below",
+        "miss_magnitude": 0.0952736574655404
+      },
+      {
+        "date": "2025-04-03",
+        "realized_date": "2025-04-07",
+        "horizon": 2,
+        "realized": 5.201035243741483,
+        "y_pred": 5.314678691469953,
+        "L_base": 5.236664604892135,
+        "U_base": 5.392692778047773,
+        "miss_type": "below",
+        "miss_magnitude": 0.03562936115065174
+      },
+      {
+        "date": "2025-04-04",
+        "realized_date": "2025-04-08",
+        "horizon": 2,
+        "realized": 5.1499333607817785,
+        "y_pred": 5.238984262119911,
+        "L_base": 5.1609479663073925,
+        "U_base": 5.317020557932428,
+        "miss_type": "below",
+        "miss_magnitude": 0.011014605525613952
+      },
+      {
+        "date": "2025-04-07",
+        "realized_date": "2025-04-09",
+        "horizon": 2,
+        "realized": 5.2925507716536995,
+        "y_pred": 5.201551426180346,
+        "L_base": 5.1235122307313015,
+        "U_base": 5.279590621629393,
+        "miss_type": "above",
+        "miss_magnitude": 0.012960150024306394
+      },
+      {
+        "date": "2025-04-08",
+        "realized_date": "2025-04-10",
+        "horizon": 2,
+        "realized": 5.249232158857545,
+        "y_pred": 5.1504401048225,
+        "L_base": 5.072392595964899,
+        "U_base": 5.2284876136801,
+        "miss_type": "above",
+        "miss_magnitude": 0.020744545177445062
+      },
+      {
+        "date": "2025-08-05",
+        "realized_date": "2025-08-07",
+        "horizon": 2,
+        "realized": 5.39376390069205,
+        "y_pred": 5.313340126128192,
+        "L_base": 5.2353894766613935,
+        "U_base": 5.39129077559499,
+        "miss_type": "above",
+        "miss_magnitude": 0.0024731250970599916
+      }
+    ]
+  },
+  "updated_at": "2025-11-30T12:45:05.640Z"
+}

@@ -29,6 +29,8 @@ export type ConformalState = {
     miss_count: number;
     miss_details?: Array<{
       date: string;
+      realized_date: string;        // Date when outcome was realized
+      horizon: number;              // Trading horizon in days
       realized: number;
       y_pred: number;
       L_base: number;

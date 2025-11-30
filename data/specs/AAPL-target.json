@@ -1,9 +1,9 @@
 {
   "symbol": "AAPL",
-  "h": 5,
+  "h": 2,
   "coverage": 0.95,
   "exchange_tz": "America/New_York",
   "variable": "NEXT_CLOSE_ADJ",
   "cutoff_note": "compute at t close; verify at t+1 close",
-  "updated_at": "2025-11-28T05:46:04.778Z"
+  "updated_at": "2025-11-30T12:44:56.337Z"
 }

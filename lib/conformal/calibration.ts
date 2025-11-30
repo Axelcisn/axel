@@ -615,6 +615,8 @@ function computeCoverageStats(pairs: ForecastPair[]): {
   miss_count: number;
   miss_details: Array<{
     date: string;
+    realized_date: string;
+    horizon: number;
     realized: number;
     y_pred: number;
     L_base: number;
@@ -641,7 +643,9 @@ function computeCoverageStats(pairs: ForecastPair[]): {
   const miss_details = pairs
     .filter(pair => pair.realized < pair.L_base || pair.realized > pair.U_base)
     .map(pair => ({
-      date: pair.forecast.date_t,
+      date: pair.forecast.date_t,  // ← Forecast date
+      realized_date: pair.realizedDate,  // ← Outcome date (when realized value was observed)
+      horizon: pair.forecast.horizonTrading ?? pair.forecast.target?.h ?? 1,  // ← Trading horizon
       realized: pair.realized,
       y_pred: pair.y_pred,
       L_base: pair.L_base,

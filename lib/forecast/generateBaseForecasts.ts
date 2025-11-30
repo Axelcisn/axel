@@ -29,6 +29,7 @@ interface GenerateResult {
   created: number;
   alreadyExisting: number;
   errors: number;
+  generatedFileIds: string[];   // Add tracking for auto-cleanup
 }
 
 /**
@@ -70,6 +71,7 @@ export async function generateBaseForecastsForWindow(opts: GenerateOptions): Pro
     !f.method.includes('Conformal')
   ).length;
   let errors = 0;
+  const generatedFileIds: string[] = [];   // Track generated files for cleanup
 
   // 5) Generate forecasts for each required date
   for (const date_t of datesToGenerate) {
@@ -86,7 +88,8 @@ export async function generateBaseForecastsForWindow(opts: GenerateOptions): Pro
       });
 
       if (forecast) {
-        await saveForecast(symbol, forecast);
+        const fileId = await saveForecast(symbol, forecast);
+        generatedFileIds.push(fileId);
         created++;
       }
     } catch (err) {
@@ -95,7 +98,7 @@ export async function generateBaseForecastsForWindow(opts: GenerateOptions): Pro
     }
   }
 
-  return { created, alreadyExisting, errors };
+  return { created, alreadyExisting, errors, generatedFileIds };
 }
 
 /**
@@ -634,15 +637,21 @@ async function generateHarForecast(
 /**
  * Save a single forecast to the filesystem
  */
-async function saveForecast(symbol: string, forecast: ForecastRecord): Promise<void> {
+async function saveForecast(symbol: string, forecast: ForecastRecord): Promise<string> {
   const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
   
   // Ensure directory exists
   fs.mkdirSync(forecastsDir, { recursive: true });
   
+  // Generate timestamp ID for tracking
+  const timestampId = Date.now().toString();
+  
   // Generate filename based on date and method
-  const filename = `${forecast.date_t}_${forecast.method.replace(/[^a-zA-Z0-9]/g, '-')}_${Date.now()}.json`;
+  const filename = `${forecast.date_t}_${forecast.method.replace(/[^a-zA-Z0-9]/g, '-')}_${timestampId}.json`;
   const filePath = path.join(forecastsDir, filename);
   
   fs.writeFileSync(filePath, JSON.stringify(forecast, null, 2));
+  
+  // Return the timestamp ID for tracking
+  return timestampId;
 }

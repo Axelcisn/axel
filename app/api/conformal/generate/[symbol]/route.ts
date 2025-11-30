@@ -30,9 +30,9 @@ export async function POST(
       );
     }
 
-    if (calWindow > 1000) {
+    if (calWindow > 20000) {
       return NextResponse.json(
-        { error: 'Calibration window too large. Maximum allowed: 1000 days' },
+        { error: 'Calibration window too large. Maximum allowed: 20000 days' },
         { status: 400 }
       );
     }
@@ -64,6 +64,7 @@ export async function POST(
       cal_window: calWindow,
       domain,
       ...result,
+      generatedFileIds: result.generatedFileIds,  // Include file IDs for cleanup tracking
       message: `Generated ${result.created} new forecasts. ${result.alreadyExisting} already existed.${result.errors > 0 ? ` ${result.errors} errors occurred.` : ''}`
     });
 
