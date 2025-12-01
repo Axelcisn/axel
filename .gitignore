@@ -33,3 +33,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Generated data files
+/data/forecasts/
+/data/backtest/
+/data/audit/
+/data/uploads/
+
+# Test files
+test-*.ts
+test-*.js
