@@ -1,0 +1,336 @@
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+} from "recharts";
+import { useDarkMode } from "@/lib/hooks/useDarkMode";
+import {
+  sliceByRange,
+  calculateRangePerformance,
+  getRangeLabel,
+  type PriceRange,
+} from "@/lib/chart/ranges";
+
+type PricePoint = {
+  date: string;
+  adj_close: number; // Match the ranges.ts interface
+};
+
+interface ChartPoint {
+  date: string;
+  value: number; // For the chart component
+}
+
+interface PriceChartProps {
+  symbol: string;
+  className?: string;
+}
+
+const RANGE_OPTIONS: PriceRange[] = [
+  "1D",
+  "5D", 
+  "1M",
+  "6M",
+  "YTD",
+  "1Y",
+  "5Y",
+  "ALL",
+];
+
+export const PriceChart: React.FC<PriceChartProps> = ({
+  symbol,
+  className,
+}) => {
+  const isDarkMode = useDarkMode();
+  const [fullData, setFullData] = useState<PricePoint[]>([]);
+  const [selectedRange, setSelectedRange] = useState<PriceRange>("1M");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch full history once
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const res = await fetch(`/api/history/${encodeURIComponent(symbol)}`);
+        if (!res.ok) {
+          throw new Error(`Failed to load history (${res.status})`);
+        }
+        const json = await res.json();
+        const rows = Array.isArray(json.rows) ? json.rows : [];
+
+        const points: PricePoint[] = rows
+          .filter((row: any) => row.valid !== false)
+          .map((row: any) => ({
+            date: row.date,
+            adj_close:
+              typeof row.adj_close === "number"
+                ? row.adj_close
+                : typeof row.close === "number"
+                ? row.close
+                : NaN,
+          }))
+          .filter((p: PricePoint) => Number.isFinite(p.adj_close));
+
+        if (!cancelled) {
+          setFullData(points);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err?.message || "Failed to load history");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  // Slice by selected range
+  const rangeData = useMemo(
+    () => sliceByRange(fullData, selectedRange),
+    [fullData, selectedRange],
+  );
+
+  // Convert to chart format
+  const chartData: ChartPoint[] = useMemo(
+    () => rangeData.map(p => ({ date: p.date, value: p.adj_close })),
+    [rangeData]
+  );
+
+  // Compute performance per range for selector chips
+  const perfByRange = useMemo(() => {
+    const result: Record<PriceRange, number | null> = {} as any;
+    for (const range of RANGE_OPTIONS) {
+      const rangeSlice = sliceByRange(fullData, range);
+      const perf = calculateRangePerformance(rangeSlice);
+      result[range] = perf.percentage;
+    }
+    return result;
+  }, [fullData]);
+
+  const latestRangePerf = perfByRange[selectedRange];
+  const isPositive =
+    latestRangePerf != null ? latestRangePerf >= 0 : undefined;
+
+  const lineColor =
+    isPositive === false ? "#F97373" : "#00E5A0"; // neon teal when positive
+
+  const chartBg = "w-full";
+
+  const containerClasses = (className ?? "") + " w-full";
+
+  return (
+    <div className={containerClasses}>
+      {/* Range Selector - positioned like TradingView */}
+      <RangeSelector
+        selectedRange={selectedRange}
+        perfByRange={perfByRange}
+        onChange={setSelectedRange}
+      />
+      
+      {/* Chart Area */}
+      <div className={chartBg}>
+        {loading ? (
+          <div className="flex h-[400px] items-center justify-center">
+            <div className="flex flex-col items-center space-y-2">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"></div>
+              <div className="text-sm text-gray-500">Loading chart...</div>
+            </div>
+          </div>
+        ) : error ? (
+          <div className="flex h-[400px] items-center justify-center text-xs text-red-400">
+            {error}
+          </div>
+        ) : chartData.length === 0 ? (
+            <div className="flex h-[400px] items-center justify-center text-xs text-muted-foreground">
+              No historical data available.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={400}>
+              <AreaChart
+                data={chartData}
+                margin={{ top: 20, right: 40, left: 0, bottom: 8 }}
+              >
+                <defs>
+                  <linearGradient
+                    id="priceFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor={lineColor}
+                      stopOpacity={0.5}
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor={lineColor}
+                      stopOpacity={0}
+                    />
+                  </linearGradient>
+                </defs>
+
+                <XAxis
+                  dataKey="date"
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={8}
+                  minTickGap={24}
+                  tick={{
+                    fontSize: 10,
+                    fill: "rgba(148, 163, 184, 0.9)",
+                  }}
+                  tickFormatter={formatXAxisDate}
+                />
+                <YAxis
+                  orientation="right"
+                  axisLine={false}
+                  tickLine={false}
+                  tickMargin={8}
+                  width={56}
+                  tick={{
+                    fontSize: 10,
+                    fill: "rgba(148, 163, 184, 0.9)",
+                  }}
+                  domain={["dataMin", "dataMax"]}
+                  tickFormatter={(v: number) => v.toFixed(0)}
+                />
+                <Tooltip
+                  content={<PriceTooltip />}
+                  animationDuration={0}
+                  cursor={{
+                    stroke: "rgba(255,255,255,0.2)",
+                    strokeWidth: 1,
+                  }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="value"
+                  stroke={lineColor}
+                  strokeWidth={2}
+                  fill="url(#priceFill)"
+                  dot={false}
+                  activeDot={{ r: 3 }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type PerfMap = Record<PriceRange, number | null>;
+
+interface RangeSelectorProps {
+  selectedRange: PriceRange;
+  perfByRange: PerfMap;
+  onChange: (range: PriceRange) => void;
+}
+
+const RangeSelector: React.FC<RangeSelectorProps> = ({
+  selectedRange,
+  perfByRange,
+  onChange,
+}) => {
+  return (
+    <div className="flex flex-wrap gap-1 mb-6">
+      {RANGE_OPTIONS.map((range) => {
+        const perf = perfByRange[range];
+        const isSelected = range === selectedRange;
+        const isPositive = perf != null && perf >= 0;
+
+        return (
+          <button
+            key={range}
+            type="button"
+            onClick={() => onChange(range)}
+            className={`
+              relative px-3 py-2 text-sm font-medium rounded-lg transition-all
+              ${isSelected 
+                ? 'bg-white/10 text-white border border-white/20' 
+                : 'bg-transparent text-gray-400 hover:bg-white/5 hover:text-gray-300 border border-transparent'
+              }
+            `}
+          >
+            <div className="text-center">
+              <div className="text-xs font-medium">{range}</div>
+              {perf != null && (
+                <div className={`text-xs font-semibold ${
+                  isPositive ? 'text-green-400' : 'text-red-400'
+                }`}>
+                  {isPositive ? '+' : ''}{perf.toFixed(2)}%
+                </div>
+              )}
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+interface PriceTooltipProps {
+  active?: boolean;
+  label?: string;
+  payload?: { value: number }[];
+}
+
+const PriceTooltip: React.FC<PriceTooltipProps> = ({
+  active,
+  label,
+  payload,
+}) => {
+  if (!active || !payload || !payload.length || !label) return null;
+  const value = payload[0].value;
+  return (
+    <div className="rounded-lg border border-white/10 bg-[#111827] px-3 py-2 text-xs text-slate-100 shadow-lg">
+      <div className="text-sm font-mono tabular-nums">
+        {typeof value === "number" ? value.toFixed(2) : value}
+      </div>
+      <div className="mt-1 text-[11px] text-slate-300">
+        {formatTooltipDate(label)}
+      </div>
+    </div>
+  );
+};
+
+function formatXAxisDate(label: string): string {
+  const d = new Date(label + "T00:00:00Z");
+  const opts: Intl.DateTimeFormatOptions = {
+    month: "short",
+    day: "numeric",
+  };
+  return d.toLocaleDateString(undefined, opts);
+}
+
+function formatTooltipDate(label: string): string {
+  const d = new Date(label + "T00:00:00Z");
+  const opts: Intl.DateTimeFormatOptions = {
+    month: "short",
+    day: "numeric",
+    year: "2-digit",
+  };
+  return d.toLocaleDateString(undefined, opts);
+}

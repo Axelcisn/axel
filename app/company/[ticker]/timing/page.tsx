@@ -21,6 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
+import { PriceChart } from '@/components/PriceChart';
 
 // Badge component interface and implementation
 interface BadgeProps {
@@ -2826,6 +2827,14 @@ export default function TimingPage({ params }: TimingPageProps) {
             <span className="text-xl font-bold">{isInWatchlist ? '✓' : '+'}</span>
           </button>
         </div>
+      </div>
+      
+      {/* Price Chart Section */}
+      <div className="mb-8">
+        <PriceChart 
+          symbol={params.ticker} 
+          className="w-full"
+        />
       </div>
       
       {/* Unified Forecast Bands Card - Full Width */}

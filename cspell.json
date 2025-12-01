@@ -15,9 +15,11 @@
   "allowCompoundWords": true,
   "words": [
     "OHLC",
+    "OHLCV",
     "AdjClose",
     "Delistings",
     "delisted",
+    "nums",
     "Backtest",
     "Watchlist",
     "watchlist",
