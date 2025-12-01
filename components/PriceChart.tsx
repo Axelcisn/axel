@@ -85,6 +85,21 @@ interface ChartPoint {
   ewma_upper?: number | null;
 };
 
+/**
+ * Normalize a date-like string into YYYY-MM-DD to keep chart + overlay data aligned.
+ */
+const normalizeDateString = (value: string): string => {
+  if (!value) return value;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return value;
+  }
+  const parsed = new Date(value);
+  if (isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toISOString().split("T")[0];
+};
+
 interface ForecastOverlayProps {
   activeForecast?: any | null;
   volModel?: string;
@@ -417,23 +432,13 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       return chartData;
     }
 
-    // Normalize date to YYYY-MM-DD format (strip time component if present)
-    const normalizeDate = (d: string): string => {
-      // If already in YYYY-MM-DD format, return as-is
-      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-      // Otherwise try to parse and format
-      const parsed = new Date(d);
-      if (isNaN(parsed.getTime())) return d;
-      return parsed.toISOString().split('T')[0];
-    };
-
     // Build maps of date_tp1 -> EWMA values (forecast, lower, upper)
     // The EWMA walker forecasts FOR date_tp1 using data available at date_t
     // So we plot y_hat_tp1 at date_tp1 (the target date)
     const ewmaMap = new Map<string, { forecast: number; lower: number; upper: number }>();
     
     ewmaPath.forEach(point => {
-      const normalizedDate = normalizeDate(point.date_tp1);
+      const normalizedDate = normalizeDateString(point.date_tp1);
       ewmaMap.set(normalizedDate, {
         forecast: point.y_hat_tp1,
         lower: point.L_tp1,
@@ -442,7 +447,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     });
 
     // Get chart date range
-    const chartDates = chartData.map(p => normalizeDate(p.date));
+    const chartDates = chartData.map(p => normalizeDateString(p.date));
     const firstChartDate = chartDates[0];
     const lastChartDate = chartDates[chartDates.length - 1];
 
@@ -451,7 +456,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       chartRange: { first: firstChartDate, last: lastChartDate, count: chartDates.length },
       ewmaTotal: ewmaPath.length,
       sampleChartDates: chartDates.slice(0, 3),
-      sampleEwmaDates: ewmaPath.slice(0, 3).map(p => normalizeDate(p.date_tp1)),
+      sampleEwmaDates: ewmaPath.slice(0, 3).map(p => normalizeDateString(p.date_tp1)),
     });
 
     // Count matches
@@ -459,7 +464,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
     // Add EWMA fields to chartData points
     const result = chartData.map(point => {
-      const chartDate = normalizeDate(point.date);
+      const chartDate = normalizeDateString(point.date);
       
       // If exact match exists, use it
       const ewmaData = ewmaMap.get(chartDate);
@@ -546,17 +551,19 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       return [];
     }
 
-    // Get the visible date range from chartData
-    const chartDateSet = new Set(chartData.map(p => p.date));
+    // Get the visible date range from chartData (normalized to YYYY-MM-DD)
+    const normalizedChartDates = chartData.map(p => normalizeDateString(p.date));
+    const chartDateSet = new Set(normalizedChartDates);
     
     // Filter EWMA points to only those in the visible chart range
-    // and create a simple array with date + ewma_forecast
+    // and create a simple array with date + ewma_forecast (normalized dates)
     const filtered = ewmaPath
-      .filter(p => chartDateSet.has(p.date_tp1))
       .map(p => ({
-        date: p.date_tp1,
+        date: normalizeDateString(p.date_tp1),
         ewma_forecast: p.y_hat_tp1,
-      }));
+      }))
+      .filter(p => chartDateSet.has(p.date))
+      .sort((a, b) => a.date.localeCompare(b.date));
     
     console.log("[EWMA Line Data] Created:", {
       ewmaPathTotal: ewmaPath.length,
@@ -1843,18 +1850,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 
                 {/* EWMA Forecast Path Overlay - Simple Line */}
                 {showEwmaOverlay && (
-                  <Line
-                    yAxisId="price"
-                    type="linear"
-                    dataKey="ewma_forecast"
-                    stroke="#A855F7"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={<AnimatedEwmaDot />}
-                    connectNulls={true}
-                    isAnimationActive={false}
-                    filter="url(#ewmaGlow)"
-                  />
+                  <>
+                    <Line
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="ewma_forecast"
+                      stroke="transparent"
+                      strokeWidth={0}
+                      dot={false}
+                      activeDot={<AnimatedEwmaDot />}
+                      connectNulls={true}
+                      isAnimationActive={false}
+                    />
+                    {ewmaLineData.length > 0 && (
+                      <Customized component={<CustomEwmaLine ewmaLineData={ewmaLineData} />} />
+                    )}
+                  </>
                 )}
               </ComposedChart>
             </ResponsiveContainer>
@@ -2273,4 +2284,3 @@ const CustomEwmaLine: React.FC<CustomEwmaLineProps> = ({
     />
   );
 };
-
