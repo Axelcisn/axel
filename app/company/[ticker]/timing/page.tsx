@@ -1,7 +1,7 @@
 // cspell:words OHLC Delistings delisted ndist cooldown efron Backtest
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { IngestionResult } from '@/lib/types/canonical';
 import { TargetSpec, TargetSpecResult } from '@/lib/types/targetSpec';
 import { ForecastRecord } from '@/lib/forecast/types';
@@ -160,6 +160,85 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Single source for what the "Final Prediction Intervals" card shows
   const [activeForecast, setActiveForecast] = useState<any | null>(null);
+  
+  // Track forecast changes for debugging
+  const forecastChangeLog = useRef<Array<{timestamp: number, action: string, forecast: any}>>([]);
+  const logForecastChange = (action: string, forecast: any) => {
+    const entry = {timestamp: Date.now(), action, forecast: forecast ? {method: forecast.method, date_t: forecast.date_t} : null};
+    forecastChangeLog.current.push(entry);
+    console.log('[FORECAST_CHANGE_LOG]', entry);
+    // Keep only last 10 entries
+    if (forecastChangeLog.current.length > 10) {
+      forecastChangeLog.current = forecastChangeLog.current.slice(-10);
+    }
+  };
+  
+  // Wrap setActiveForecast to add logging
+  const setActiveForecastWithLogging = useCallback((forecast: any) => {
+    logForecastChange('setActiveForecast called', forecast);
+    setActiveForecast(forecast);
+  }, []);
+  
+  // Debug: Monitor activeForecast changes for forecast overlay
+  useEffect(() => {
+    const timestamp = new Date().toISOString();
+    console.log(`[FORECAST_OVERLAY_DEBUG] ${timestamp} activeForecast changed:`, {
+      hasActiveForecast: !!activeForecast,
+      activeForecastKeys: activeForecast ? Object.keys(activeForecast) : null,
+      hasIntervals: !!activeForecast?.intervals,
+      intervalKeys: activeForecast?.intervals ? Object.keys(activeForecast.intervals) : null,
+      hasConformal: !!activeForecast?.conformal,
+      method: activeForecast?.method || 'none',
+      date_t: activeForecast?.date_t || 'none',
+      stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+    });
+  }, [activeForecast]);
+
+  // Stable forecast overlay state - use the best available forecast for chart display
+  const stableOverlayForecast = useMemo(() => {
+    // Priority: activeForecast > currentForecast > gbmForecast
+    const forecast = activeForecast || currentForecast || gbmForecast || null;
+    
+    // Persist to localStorage as backup (only on client side)
+    if (forecast) {
+      // Use a setTimeout to avoid SSR issues
+      setTimeout(() => {
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem(`overlay-forecast-${params.ticker}`, JSON.stringify(forecast));
+          } catch (e) {
+            // Ignore localStorage errors
+          }
+        }
+      }, 0);
+    }
+    
+    return forecast;
+  }, [activeForecast, currentForecast, gbmForecast, params.ticker]);
+
+  // Use useState for localStorage fallback to handle SSR properly
+  const [storedForecast, setStoredForecast] = useState<any>(null);
+  
+  // Load stored forecast on client side only
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(`overlay-forecast-${params.ticker}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setStoredForecast(parsed);
+          console.log('[FallbackForecast] Loaded stored forecast from localStorage:', parsed.method, parsed.date_t);
+        }
+      } catch (e) {
+        // Ignore localStorage errors
+      }
+    }
+  }, [params.ticker]);
+
+  // Fallback overlay forecast 
+  const fallbackOverlayForecast = useMemo(() => {
+    return stableOverlayForecast || storedForecast || null;
+  }, [stableOverlayForecast, storedForecast]);
 
   const [window, setWindow] = useState(504);
   const [lambdaDrift, setLambdaDrift] = useState(0.25);
@@ -185,6 +264,36 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [rvAvailable, setRvAvailable] = useState<boolean>(false);
   const [isGeneratingVolatility, setIsGeneratingVolatility] = useState(false);
   const [volatilityError, setVolatilityError] = useState<string | null>(null);
+  
+  // Track when horizon changes but forecast hasn't been regenerated
+  const [forecastHorizonMismatch, setForecastHorizonMismatch] = useState(false);
+
+  // EWMA Walker diagnostics state
+  type EwmaSummary = {
+    coverage: number;
+    targetCoverage: number;
+    intervalScore: number;
+    avgWidth: number;
+    zMean: number;
+    zStd: number;
+    directionHitRate: number;
+    nPoints: number;
+  };
+
+  type EwmaWalkerPathPoint = {
+    date_t: string;
+    date_tp1: string;
+    S_t: number;
+    S_tp1: number;
+    y_hat_tp1: number;
+    L_tp1: number;
+    U_tp1: number;
+  };
+
+  const [ewmaSummary, setEwmaSummary] = useState<EwmaSummary | null>(null);
+  const [ewmaPath, setEwmaPath] = useState<EwmaWalkerPathPoint[] | null>(null);
+  const [isLoadingEwma, setIsLoadingEwma] = useState(false);
+  const [ewmaError, setEwmaError] = useState<string | null>(null);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -408,6 +517,14 @@ export default function TimingPage({ params }: TimingPageProps) {
   console.log("SERVER_SPEC", serverTargetSpec);
   console.log("[RENDER] Component rendering, serverTargetSpec:", serverTargetSpec);
 
+  // Memoize forecast overlay props to prevent unnecessary re-renders
+  const forecastOverlayProps = useMemo(() => ({
+    activeForecast: fallbackOverlayForecast,
+    volModel,
+    coverage,
+    conformalState,
+  }), [fallbackOverlayForecast, volModel, coverage, conformalState]);
+
   // Exchange TZ resolver helper
   function resolveExchangeTZ(opts: { canonicalTZ?: string | null; selectedExchange?: string | null }): string | null {
     // Prefer canonical meta (Data Quality already shows this)
@@ -613,6 +730,8 @@ export default function TimingPage({ params }: TimingPageProps) {
         // Get the most recent forecast (array is sorted by date_t descending)
         if (forecasts.length > 0) {
           setCurrentForecast(forecasts[0]);
+          // Also set as active forecast if no active forecast is currently set
+          setActiveForecast((prevActive: any) => prevActive || forecasts[0]);
         }
       } else if (response.status !== 404) {
         console.error('Failed to load forecasts:', response.statusText);
@@ -629,6 +748,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       const response = await fetch(`/api/forecast/gbm/${params.ticker}`);
       if (response.ok) {
         const forecasts = await response.json();
+        
         // Find the most recent locked forecast
         const latestLocked = forecasts.find((f: any) => f.locked === true);
         if (latestLocked) {
@@ -636,11 +756,18 @@ export default function TimingPage({ params }: TimingPageProps) {
           setActiveForecast(latestLocked);
           return latestLocked;
         }
+        
+        // If no locked forecast, use the most recent forecast
+        if (forecasts.length > 0) {
+          console.log('[LoadActiveForecast] Using most recent forecast:', forecasts[0].method, forecasts[0].date_t);
+          setActiveForecast(forecasts[0]);
+          return forecasts[0];
+        }
       }
       
-      // If no locked forecast found, check if we have a GBM forecast
+      // If no API forecasts found, check if we have a GBM forecast in state
       if (gbmForecast) {
-        console.log('[LoadActiveForecast] Using GBM forecast as active:', gbmForecast.method);
+        console.log('[LoadActiveForecast] Using GBM forecast from state:', gbmForecast.method);
         setActiveForecast(gbmForecast);
         return gbmForecast;
       }
@@ -651,7 +778,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.error('Failed to load active forecast:', error);
       return null;
     }
-  }, [params.ticker, gbmForecast]);
+  }, [params.ticker]); // Removed gbmForecast dependency to avoid race conditions with pipeline
 
   const loadServerTargetSpec = useCallback(async () => {
     try {
@@ -755,6 +882,51 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Load model line when dependencies change
   useEffect(() => { loadModelLine(); }, [loadModelLine]);
 
+  // Load latest active forecast when page loads
+  useEffect(() => { loadLatestActiveForecast(); }, [loadLatestActiveForecast]);
+
+  // Auto-set activeForecast from currentForecast if activeForecast is not set
+  useEffect(() => {
+    if (!activeForecast && currentForecast) {
+      const timestamp = new Date().toISOString();
+      console.log(`🎯 BROWSER DEBUG [${timestamp}] ⚠️ AutoSetActive from currentForecast:`, {
+        currentForecastMethod: currentForecast.method,
+        currentForecastDate: currentForecast.date_t,
+        stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+      });
+      console.log('[AutoSetActive] Setting activeForecast from currentForecast:', currentForecast.method, currentForecast.date_t);
+      setActiveForecast(currentForecast);
+    }
+  }, [activeForecast, currentForecast]);
+
+  // Auto-set activeForecast from gbmForecast if activeForecast is not set
+  useEffect(() => {
+    if (!activeForecast && gbmForecast) {
+      const timestamp = new Date().toISOString();
+      console.log(`🎯 BROWSER DEBUG [${timestamp}] ⚠️ AutoSetActive from gbmForecast:`, {
+        gbmForecastMethod: gbmForecast.method,
+        gbmForecastDate: gbmForecast.date_t,
+        stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+      });
+      console.log('[AutoSetActive] Setting activeForecast from gbmForecast:', gbmForecast.method, gbmForecast.date_t);
+      setActiveForecast(gbmForecast);
+    }
+  }, [activeForecast, gbmForecast]);
+
+  // 🔍 CRITICAL DEBUG: Monitor activeForecast changes with browser console output
+  useEffect(() => {
+    const timestamp = new Date().toISOString();
+    console.log(`🎯 BROWSER DEBUG [${timestamp}] activeForecast changed:`, {
+      hasActiveForecast: !!activeForecast,
+      activeForecastKeys: activeForecast ? Object.keys(activeForecast) : 'null',
+      method: activeForecast?.method,
+      date_t: activeForecast?.date_t,
+      hasIntervals: !!activeForecast?.intervals,
+      hasConformal: !!activeForecast?.conformal,
+      stackTrace: new Error().stack?.split('\n').slice(1, 6).join('\n')
+    });
+  }, [activeForecast]);
+
   // Load conformal state
   const loadConformalState = useCallback(async () => {
     try {
@@ -772,6 +944,85 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Load conformal state on mount and when ticker changes
   useEffect(() => { loadConformalState(); }, [loadConformalState]);
+
+  // Load EWMA Walker diagnostics
+  const loadEwmaWalker = useCallback(async () => {
+    if (!params?.ticker) return;
+
+    try {
+      setIsLoadingEwma(true);
+      setEwmaError(null);
+
+      // Adjust query params as needed (lambda, start/end)
+      const res = await fetch(
+        `/api/volatility/ewma/${encodeURIComponent(params.ticker)}?lambda=0.94`
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `EWMA API error ${res.status}`);
+      }
+
+      const json = await res.json();
+
+      // Expecting shape like:
+      // { points: EwmaWalkerPoint[], piMetrics: {...}, zMean, zStd, directionHitRate }
+      const points = json.points || [];
+      const m = json.piMetrics || {};
+      const zMean = typeof json.zMean === "number" ? json.zMean : NaN;
+      const zStd = typeof json.zStd === "number" ? json.zStd : NaN;
+      const directionHitRate =
+        typeof json.directionHitRate === "number" ? json.directionHitRate : NaN;
+
+      const coverageValue = typeof m.empiricalCoverage === "number"
+        ? m.empiricalCoverage
+        : NaN;
+      const targetCoverage = typeof m.coverage === "number"
+        ? m.coverage
+        : NaN;
+      const intervalScore = typeof m.intervalScore === "number"
+        ? m.intervalScore
+        : NaN;
+      const avgWidth = typeof m.avgWidth === "number"
+        ? m.avgWidth
+        : NaN;
+
+      setEwmaSummary({
+        coverage: coverageValue,
+        targetCoverage,
+        intervalScore,
+        avgWidth,
+        zMean,
+        zStd,
+        directionHitRate,
+        nPoints: points.length,
+      });
+
+      // Map to a clean path type for chart overlay
+      const mappedPath: EwmaWalkerPathPoint[] = points.map((p: any) => ({
+        date_t: p.date_t,
+        date_tp1: p.date_tp1,
+        S_t: p.S_t,
+        S_tp1: p.S_tp1,
+        y_hat_tp1: p.y_hat_tp1,
+        L_tp1: p.L_tp1,
+        U_tp1: p.U_tp1,
+      }));
+
+      setEwmaPath(mappedPath);
+    } catch (err: any) {
+      console.error("[EWMA] loadEwmaWalker error", err);
+      setEwmaError(err?.message || "Failed to load EWMA walker data.");
+      setEwmaSummary(null);
+      setEwmaPath(null);
+    } finally {
+      setIsLoadingEwma(false);
+    }
+  }, [params?.ticker]);
+
+  // Load EWMA Walker on mount/ticker change
+  useEffect(() => {
+    loadEwmaWalker();
+  }, [loadEwmaWalker]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -960,6 +1211,15 @@ export default function TimingPage({ params }: TimingPageProps) {
       }
 
       setGbmForecast(data);            // GBM card shows only GBM
+      
+      // Critical: Setting activeForecast from GBM
+      const timestamp = new Date().toISOString();
+      console.log(`🎯 BROWSER DEBUG [${timestamp}] ✅ SETTING activeForecast in GBM generation:`, {
+        dataKeys: data ? Object.keys(data) : null,
+        method: data?.method,
+        date_t: data?.date_t,
+        stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+      });
       setActiveForecast(data);         // Final PI shows GBM until a vol model is run
       
       // Reload forecasts to get the updated list
@@ -1134,6 +1394,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           model: selectedModel,
           params: modelParams,
           overwrite: true,
+          horizon: h,
           coverage: persistedCoverage,
           tz: persistedTZ
         }
@@ -1146,7 +1407,8 @@ export default function TimingPage({ params }: TimingPageProps) {
           model: selectedModel,
           params: modelParams,
           overwrite: true,
-          // Optional: pass through for server logging; server still reads its own spec
+          // Pass horizon and coverage from UI state
+          horizon: h,
           coverage: persistedCoverage,
           tz: persistedTZ
         })
@@ -1227,6 +1489,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     rvAvailable,
     serverTargetSpec,
     targetSpecResult,
+    h, // Add horizon as dependency
   ]);
 
   // Validation Gates Functions
@@ -1426,7 +1689,19 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log("[CONF] About to set conformal state:", data.state);
       setConformalState(data.state);
       console.log("[CONF] Just set conformal state");
+      
+      // Critical moment: Setting activeForecast with conformal result
+      const timestamp = new Date().toISOString();
+      console.log(`🎯 BROWSER DEBUG [${timestamp}] ✅ SETTING activeForecast in conformal pipeline:`, {
+        updatedForecastKeys: updatedForecast ? Object.keys(updatedForecast) : null,
+        hasIntervals: !!updatedForecast?.intervals,
+        hasConformal: !!updatedForecast?.conformal,
+        method: updatedForecast?.method,
+        date_t: updatedForecast?.date_t,
+        stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+      });
       setActiveForecast(updatedForecast);
+      
       setCurrentForecast(updatedForecast); // Keep for legacy compatibility
       setShowCoverageDetails(true);
 
@@ -1518,12 +1793,13 @@ export default function TimingPage({ params }: TimingPageProps) {
       setConformalError(null);
       setVolatilityError(null);
 
-      // Clear stale state
+      // Clear stale state but preserve activeForecast for chart continuity
       setBaseForecastsStale(true);
       setConformalStale(true);
       setCoverageStatsStale(true);
       setBaseForecastCount(null);
       setConformalState(null);
+      // Note: NOT clearing activeForecast here - keep existing forecast visible until new one is ready
 
       console.log('[ForecastPipeline] Step 1: Generating volatility forecast');
       console.log('[PIPE] Step 1 start - generateVolatilityForecast', {
@@ -1538,6 +1814,8 @@ export default function TimingPage({ params }: TimingPageProps) {
         hasBaseForecastAfter: !!baseForecast 
       });
       if (!volResult.ok || !volResult.forecast) {
+        // Step 1 failed - no base forecast available for chart overlay
+        console.log('[PIPE] Step 1 failed - no forecast available for chart overlay');
         setForecastStatus("error");
         return;
       }
@@ -1552,6 +1830,15 @@ export default function TimingPage({ params }: TimingPageProps) {
         baseForecastCount: baseRes.baseForecastCount 
       });
       if (!baseRes.ok) {
+        // Step 2 failed - use base forecast for chart overlay if available
+        const timestamp = new Date().toISOString();
+        console.log(`🎯 BROWSER DEBUG [${timestamp}] ⚠️ Step 2 failed - SETTING activeForecast to baseForecastObject:`, {
+          baseForecastObjectKeys: baseForecastObject ? Object.keys(baseForecastObject) : null,
+          baseResOk: baseRes.ok,
+          stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+        });
+        console.log('[PIPE] Step 2 failed - using base forecast as activeForecast for chart overlay');
+        setActiveForecast(baseForecastObject);
         setForecastStatus("error");
         return;
       }
@@ -1565,6 +1852,16 @@ export default function TimingPage({ params }: TimingPageProps) {
         hasConformalState: !!conformalState 
       });
       if (!conformalSuccess) {
+        // Fallback: Use base forecast for chart overlay even if conformal fails
+        const timestamp = new Date().toISOString();
+        console.log(`🎯 BROWSER DEBUG [${timestamp}] ⚠️ Conformal failed - SETTING activeForecast to baseForecastObject:`, {
+          conformalSuccess,
+          baseForecastObjectKeys: baseForecastObject ? Object.keys(baseForecastObject) : null,
+          hasConformalState: !!conformalState,
+          stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+        });
+        console.log('[PIPE] Conformal failed - using base forecast as activeForecast for chart overlay');
+        setActiveForecast(baseForecastObject);
         setForecastStatus("error");
         return;
       }
@@ -1573,11 +1870,36 @@ export default function TimingPage({ params }: TimingPageProps) {
       setBaseForecastsStale(false);
       setConformalStale(false);
       setCoverageStatsStale(false);
+      setForecastHorizonMismatch(false); // Clear horizon mismatch flag
 
       console.log('[ForecastPipeline] Pipeline complete - setting status to ready');
+      console.log('[PIPE] Success - activeForecast should now be available for chart overlay');
+      
+      // Final pipeline success logging
+      const timestamp = new Date().toISOString();
+      console.log(`🎯 BROWSER DEBUG [${timestamp}] ✅ Pipeline SUCCESS - activeForecast should remain from conformal step:`, {
+        hasActiveForecast: !!activeForecast,
+        activeForecastMethod: activeForecast?.method,
+        activeForecastDate: activeForecast?.date_t,
+        stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+      });
+      
       setForecastStatus("ready");
     } catch (error) {
       console.error('[ForecastPipeline] Pipeline error:', error);
+      
+      // Fallback: If we have a base forecast from step 1, use it for chart overlay
+      if (baseForecast) {
+        const timestamp = new Date().toISOString();
+        console.log(`🎯 BROWSER DEBUG [${timestamp}] ⚠️ Pipeline failed - SETTING activeForecast to baseForecast:`, {
+          error: error instanceof Error ? error.message : error,
+          baseForecastKeys: baseForecast ? Object.keys(baseForecast) : null,
+          stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
+        });
+        console.log('[PIPE] Pipeline failed - using available baseForecast as activeForecast for chart overlay');
+        setActiveForecast(baseForecast);
+      }
+      
       setForecastStatus("error");
       setForecastError(error instanceof Error ? error.message : 'Failed to complete forecast pipeline');
     }
@@ -1598,30 +1920,44 @@ export default function TimingPage({ params }: TimingPageProps) {
     conformalState,
   ]);
 
-  // Handlers for parameter changes (no automatic pipeline execution)
-  const handleHorizonChange = useCallback((newH: number) => {
+  // Handlers for parameter changes - auto-trigger volatility forecast for Inspector
+  const handleHorizonChange = useCallback(async (newH: number) => {
+    // Update UI state immediately
     setH(newH);
-    // Do not call runForecastPipeline here – user must click Generate.
-  }, []);
+    
+    // Mark that forecast may be stale if we have an active forecast
+    if (activeForecast) {
+      setForecastHorizonMismatch(true);
+    }
+
+    console.log(`[HorizonChange] Updated horizon to h=${newH}. Volatility forecast will auto-update for Inspector.`);
+    
+    // Auto-triggers volatility forecast via useEffect (for Inspector)
+    // Conformal calibration only runs when user clicks "Generate"
+  }, [activeForecast]);
 
   const handleCoverageChange = useCallback((newCoverage: number) => {
     setCoverage(newCoverage);
-    // Do not call runForecastPipeline here – user must click Generate.
+    // Auto-triggers volatility forecast via useEffect (for Inspector)
+    // Conformal calibration only runs when user clicks "Generate"
   }, []);
 
   const handleModelChange = useCallback((newModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range') => {
     setVolModel(newModel);
-    // Do not call runForecastPipeline here – user must click Generate.
+    // Auto-triggers volatility forecast via useEffect (for Inspector)
+    // Conformal calibration only runs when user clicks "Generate"
   }, []);
 
   const handleEstimatorChange = useCallback((newEstimator: 'P' | 'GK' | 'RS' | 'YZ') => {
     setRangeEstimator(newEstimator);
-    // Do not call runForecastPipeline here – user must click Generate.
+    // Auto-triggers volatility forecast via useEffect (for Inspector)
+    // Conformal calibration only runs when user clicks "Generate"
   }, []);
 
   const handleGarchEstimatorChange = useCallback((newEstimator: 'Normal' | 'Student-t') => {
     setGarchEstimator(newEstimator);
-    // Do not call runForecastPipeline here – user must click Generate.
+    // Auto-triggers volatility forecast via useEffect (for Inspector)
+    // Conformal calibration only runs when user clicks "Generate"
   }, []);
 
   // Apply recommended model to UI state (no automatic pipeline execution)
@@ -1821,6 +2157,65 @@ export default function TimingPage({ params }: TimingPageProps) {
 
     return () => clearTimeout(timeoutId);
   }, [h, coverage, resolvedTZ, isValidH, isValidCoverage, autoSaveTargetSpec]);
+
+  // Auto-trigger volatility forecast (for Inspector) when model/parameters change
+  // This ONLY updates the base forecast for the Inspector, NOT conformal calibration
+  useEffect(() => {
+    // Guard: Only run if pipeline is ready (initialized, has target spec, etc.)
+    if (!pipelineReady || !isInitialized) {
+      console.log('[AutoForecast] Skipping - pipeline not ready');
+      return;
+    }
+    
+    // Debounce to avoid rapid-fire API calls during parameter changes
+    const timeoutId = setTimeout(async () => {
+      console.log('[AutoForecast] Triggering volatility forecast for Inspector:', {
+        volModel,
+        garchEstimator,
+        rangeEstimator,
+        h,
+        coverage,
+        volWindow,
+        garchDf,
+        rangeEwmaLambda
+      });
+      
+      try {
+        // Only generate the volatility forecast (step 1 of pipeline)
+        // This updates the Inspector WITHOUT running conformal calibration
+        const result = await generateVolatilityForecast();
+        
+        if (result.ok && result.forecast) {
+          console.log('[AutoForecast] Volatility forecast generated successfully');
+          // Set as active forecast for chart overlay and Inspector display
+          setActiveForecast(result.forecast);
+          setBaseForecast(result.forecast);
+          // Mark conformal as stale since we have a new base forecast
+          setConformalStale(true);
+        } else {
+          console.log('[AutoForecast] Volatility forecast failed:', result);
+        }
+      } catch (error) {
+        console.error('[AutoForecast] Error generating volatility forecast:', error);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    // Trigger on model/parameter changes
+    volModel,
+    garchEstimator,
+    rangeEstimator,
+    h,
+    coverage,
+    volWindow,
+    garchDf,
+    rangeEwmaLambda,
+    // Guard dependencies
+    pipelineReady,
+    isInitialized,
+    generateVolatilityForecast
+  ]);
 
   // Auto-generation effect removed - pipeline now runs only on explicit user actions
   
@@ -2831,12 +3226,98 @@ export default function TimingPage({ params }: TimingPageProps) {
       
       {/* Price Chart Section */}
       <div className="mb-8">
+        {/* Debug: Log what we're passing to PriceChart */}
+        {(() => {
+          console.log("[Timing] PriceChart props", {
+            h,
+            volModel,
+            coverage,
+            hasActiveForecast: !!activeForecast,
+            hasCurrentForecast: !!currentForecast,
+            hasGbmForecast: !!gbmForecast,
+            hasFallbackForecast: !!fallbackOverlayForecast,
+            activeForecast,
+            fallbackOverlayForecast,
+            hasEwmaPath: !!ewmaPath,
+            ewmaPathLength: ewmaPath?.length ?? 0,
+          });
+          return null;
+        })()}
         <PriceChart 
           symbol={params.ticker} 
           className="w-full"
+          horizon={h}
+          forecastOverlay={forecastOverlayProps}
+          ewmaPath={ewmaPath}
+          horizonCoverage={{
+            h,
+            coverage,
+            onHorizonChange: handleHorizonChange,
+            onCoverageChange: handleCoverageChange,
+            isLoading: forecastStatus === "loading",
+            volModel,
+            onModelChange: handleModelChange,
+            garchEstimator,
+            onGarchEstimatorChange: handleGarchEstimatorChange,
+            rangeEstimator,
+            onRangeEstimatorChange: handleEstimatorChange,
+            recommendedModel: recommendedModel ? parseMethodToUIState(recommendedModel) : null,
+            windowSize: volWindow,
+            onWindowSizeChange: setVolWindow,
+            ewmaLambda: rangeEwmaLambda,
+            onEwmaLambdaChange: setRangeEwmaLambda,
+            degreesOfFreedom: garchDf,
+            onDegreesOfFreedomChange: setGarchDf,
+          }}
         />
       </div>
       
+      {/* GBM Forecast Inspector */}
+      <div className="mb-8">
+        <GbmForecastInspector
+          symbol={tickerParam}
+          volModel={volModel}
+          horizon={h}
+          coverage={coverage}
+          activeForecast={activeForecast}
+          baseForecast={baseForecast}
+          conformalState={conformalState}
+          forecastStatus={forecastStatus}
+          forecastError={forecastError}
+        />
+      </div>
+
+      {/* GARCH Forecast Inspector */}
+      <div className="mb-8">
+        <GarchForecastInspector
+          symbol={tickerParam}
+          volModel={volModel}
+          garchEstimator={garchEstimator}
+          horizon={h}
+          coverage={coverage}
+          activeForecast={activeForecast}
+          baseForecast={baseForecast}
+          conformalState={conformalState}
+          forecastStatus={forecastStatus}
+          forecastError={volatilityError}
+        />
+      </div>
+
+      {/* Range Forecast Inspector */}
+      <div className="mb-8">
+        <RangeForecastInspector
+          symbol={tickerParam}
+          volModel={volModel}
+          horizon={h}
+          coverage={coverage}
+          activeForecast={activeForecast}
+          baseForecast={baseForecast}
+          conformalState={conformalState}
+          forecastStatus={forecastStatus}
+          volatilityError={volatilityError}
+        />
+      </div>
+
       {/* Unified Forecast Bands Card - Full Width */}
       <div className="mb-8">
         <div className={`p-6 border rounded-lg shadow-sm ${
@@ -2848,283 +3329,7 @@ export default function TimingPage({ params }: TimingPageProps) {
             isDarkMode ? 'text-white' : 'text-gray-900'
           }`}>Forecast Bands</h3>
           
-          {/* Row 1: Horizon and Coverage Controls - Side by Side */}
-          <div className="mb-6 grid grid-cols-2 gap-6">
-            {/* Column 1: Horizon Controls */}
-              <div>
-                <label className={`block text-sm font-medium mb-3 ${
-                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                }`}>Horizon {(isGeneratingBase || isApplyingConformal) && (
-                  <span className="text-xs text-blue-600 font-normal">(Recomputing bands...)</span>
-                )}</label>
-                <div className="flex items-center gap-2">
-                  {[1, 2, 3, 5].map((days) => (
-                    <button
-                      key={days}
-                      onClick={() => handleHorizonChange(days)}
-                      disabled={forecastStatus === "loading"}
-                      className={`px-3 py-1 text-sm rounded-full transition-colors ${
-                        h === days 
-                          ? 'bg-blue-600 text-white' 
-                          : (forecastStatus === "loading")
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : isDarkMode 
-                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {days}D
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Column 2: Coverage Controls */}
-              <div>
-                <label className={`block text-sm font-medium mb-3 ${
-                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                }`}>Coverage {(isGeneratingBase || isApplyingConformal) && (
-                  <span className="text-xs text-blue-600 font-normal">(Recomputing bands...)</span>
-                )}</label>
-                <div className="flex items-center gap-2">
-                  {[0.90, 0.95, 0.99].map((cov) => (
-                    <button
-                      key={cov}
-                      onClick={() => handleCoverageChange(cov)}
-                      disabled={forecastStatus === "loading"}
-                      className={`px-3 py-1 text-sm rounded-full transition-colors ${
-                        coverage === cov 
-                          ? 'bg-blue-600 text-white' 
-                          : (forecastStatus === "loading")
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : isDarkMode 
-                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {(cov * 100).toFixed(0)}%
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Row 2: Volatility Model Section */}
-            <div className="mb-6">
-              <h4 className={`text-xl font-semibold mb-3 ${
-                isDarkMode ? 'text-gray-200' : 'text-gray-800'
-              }`}>Volatility Model</h4>
-              
-              {/* Model Selection */}
-              <div className="mb-4">
-                <label className={`block text-sm font-medium mb-2 ${
-                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                }`}>Model:</label>
-                <div className="flex items-center justify-between w-full">
-                  {/* Left side: Model buttons */}
-                  <div className="flex items-center gap-2">
-                    {['GBM', 'GARCH', 'HAR-RV', 'Range'].map((model) => (
-                      <button
-                        key={model}
-                        onClick={() => handleModelChange(model as any)}
-                        className={`px-4 py-2 text-sm rounded-full ${
-                          volModel === model 
-                            ? 'bg-blue-600 text-white' 
-                            : isDarkMode 
-                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        } mr-2`}
-                      >
-                        {model === 'GBM' ? 'GBM' : model === 'GARCH' ? 'GARCH (1,1)' : model}
-                      </button>
-                    ))}
-                  </div>
-                  
-                  {/* Right side: Best and Info buttons */}
-                  <div className="flex items-center">
-                    {/* Best Button */}
-                    <button
-                      onClick={handleApplyBestModel}
-                      disabled={!recommendedModel || isLoadingRecommendations}
-                      className={`px-4 py-2 text-sm rounded-full border-2 border-solid mr-2 transition-all ${
-                        !recommendedModel || isLoadingRecommendations
-                          ? isDarkMode 
-                            ? 'border-gray-600 text-gray-500 cursor-not-allowed opacity-50'
-                            : 'border-gray-300 text-gray-400 cursor-not-allowed opacity-50'
-                          : isDarkMode
-                            ? 'border-emerald-500 text-emerald-400 hover:bg-emerald-500 hover:text-white'
-                            : 'border-emerald-600 text-emerald-600 hover:bg-emerald-600 hover:text-white'
-                      }`}
-                      title={
-                        isLoadingRecommendations 
-                          ? "Loading recommendation..." 
-                          : !recommendedModel 
-                            ? "No recommendation available"
-                            : `Apply recommended model: ${recommendedModel}`
-                      }
-                    >
-                      {isLoadingRecommendations ? 'Loading...' : 'Best'}
-                    </button>
-
-                    {/* Info Button */}
-                    <button
-                      onClick={() => setIsModelInfoOpen(true)}
-                      disabled={!modelScores || isLoadingRecommendations}
-                      className={`p-2 text-sm rounded-full transition-all ${
-                        !modelScores || isLoadingRecommendations
-                          ? isDarkMode 
-                            ? 'text-gray-500 cursor-not-allowed opacity-50'
-                            : 'text-gray-400 cursor-not-allowed opacity-50'
-                          : isDarkMode
-                            ? 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'
-                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                      }`}
-                      title="Why is this the best?"
-                    >
-                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M9,9h0a3,3,0,0,1,5.12,2.12,3,3,0,0,1-1.7,2.72A1.16,1.16,0,0,0,12,15.09"/>
-                        <circle cx="12" cy="18.75" r="0.75"/>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              
-              {/* Model-Specific Parameters */}
-              {(volModel === 'GARCH' || volModel === 'Range') && (
-                <div className="mb-4 grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={`block text-sm font-medium mb-2 ${
-                      isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                    }`}>
-                      {volModel === 'GARCH' ? 'Distribution:' : 'Estimator:'}
-                    </label>
-                    {volModel === 'GARCH' ? (
-                      <select 
-                        value={garchEstimator} 
-                        onChange={(e) => handleGarchEstimatorChange(e.target.value as any)}
-                        className={`w-full p-2 border rounded-md ${
-                          isDarkMode 
-                            ? 'bg-gray-700 border-gray-600 text-white' 
-                            : 'bg-white border-gray-300 text-gray-900'
-                        }`}
-                      >
-                        <option value="Normal">Normal</option>
-                        <option value="Student-t">Student-t</option>
-                      </select>
-                    ) : (
-                      <select 
-                        value={rangeEstimator} 
-                        onChange={(e) => handleEstimatorChange(e.target.value as any)}
-                        className={`w-full p-2 border rounded-md ${
-                          isDarkMode 
-                            ? 'bg-gray-700 border-gray-600 text-white' 
-                            : 'bg-white border-gray-300 text-gray-900'
-                        }`}
-                      >
-                        <option value="P">Parkinson</option>
-                        <option value="GK">Garman-Klass</option>
-                        <option value="RS">Rogers-Satchell</option>
-                        <option value="YZ">Yang-Zhang</option>
-                      </select>
-                    )}
-                  </div>
-                  {volModel === 'GARCH' && garchEstimator === 'Student-t' && (
-                    <div>
-                      <label className={`block text-sm font-medium mb-2 ${
-                        isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                      }`}>Degrees of freedom:</label>
-                      <input 
-                        type="number" 
-                        value={garchDf} 
-                        onChange={(e) => setGarchDf(Number(e.target.value))}
-                        className={`w-full p-2 border rounded-md ${
-                          isDarkMode 
-                            ? 'bg-gray-700 border-gray-600 text-white' 
-                            : 'bg-white border-gray-300 text-gray-900'
-                        }`}
-                        min="3"
-                        step="1"
-                      />
-                    </div>
-                  )}
-                  {volModel === 'Range' && (
-                    <div>
-                      <label className={`block text-sm font-medium mb-2 ${
-                        isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                      }`}>EWMA λ:</label>
-                      <input 
-                        type="number" 
-                        value={rangeEwmaLambda} 
-                        onChange={(e) => setRangeEwmaLambda(Number(e.target.value))}
-                        className={`w-full p-2 border rounded-md ${
-                          isDarkMode 
-                            ? 'bg-gray-700 border-gray-600 text-white' 
-                            : 'bg-white border-gray-300 text-gray-900'
-                        }`}
-                        min="0.01"
-                        max="0.99"
-                        step="0.01"
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Window Control */}
-              <div className="mb-4">
-                <label className={`block text-sm font-medium mb-2 ${
-                  isDarkMode ? 'text-gray-200' : 'text-gray-700'
-                }`}>Window size:</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={volModel === 'GBM' ? gbmWindow : volWindow}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value);
-                      if (volModel === 'GBM') {
-                        setGbmWindow(value);
-                      } else {
-                        setVolWindow(value);
-                      }
-                    }}
-                    className={`flex-1 px-3 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-purple-500 ${
-                      isDarkMode 
-                        ? 'bg-gray-700 border-gray-600 text-white' 
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                    min="1"
-                    max="5000"
-                  />
-                  <button
-                    onClick={() => {
-                      if (volModel === 'GBM') {
-                        setGbmWindow(504);
-                      } else {
-                        setVolWindow(1000);
-                      }
-                    }}
-                    className={`px-3 py-1 text-sm rounded-full ${
-                      isDarkMode 
-                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                    title="Reset to default"
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-
-              {/* Error Display */}
-              {volatilityError && (
-                <p className={`text-sm mb-4 ${
-                  isDarkMode ? 'text-red-400' : 'text-red-600'
-                }`}>{volatilityError}</p>
-              )}
-            </div>
-
-            {/* Row 3: Conformal Section */}
+            {/* Conformal Section */}
             <div className="mb-6">
               <h4 className={`text-xl font-semibold mb-3 ${
                 isDarkMode ? 'text-gray-200' : 'text-gray-800'
@@ -3638,15 +3843,26 @@ export default function TimingPage({ params }: TimingPageProps) {
                 }`}>{forecastError}</p>
               )}
               
+              {/* Horizon mismatch indicator */}
+              {forecastHorizonMismatch && (
+                <p className={`text-sm ${
+                  isDarkMode ? 'text-amber-400' : 'text-amber-600'
+                }`}>⚠️ Horizon changed - click Generate to update forecast</p>
+              )}
 
               
               <button
                 type="button"
-                onClick={handleGenerateClick}
+                onClick={() => {
+                  console.log("[GENERATE_BUTTON_CLICKED] Main Generate button clicked!");
+                  handleGenerateClick();
+                }}
                 disabled={!pipelineReady || forecastStatus === "loading"}
                 className={`px-6 py-2 rounded-full text-sm font-semibold transition-colors ${
                   !pipelineReady || forecastStatus === "loading"
                     ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                    : forecastHorizonMismatch
+                    ? 'bg-amber-600 text-white hover:bg-amber-700' // Different color when mismatch
                     : 'bg-blue-600 text-white hover:bg-blue-700'
                 }`}
               >
@@ -3663,53 +3879,136 @@ export default function TimingPage({ params }: TimingPageProps) {
           </div>
         </div>
 
-      {/* GBM Forecast Inspector */}
+      {/* EWMA Walker diagnostics */}
       <div className="mb-8">
-        <GbmForecastInspector
-          symbol={tickerParam}
-          volModel={volModel}
-          horizon={h}
-          coverage={coverage}
-          activeForecast={activeForecast}
-          baseForecast={baseForecast}
-          conformalState={conformalState}
-          forecastStatus={forecastStatus}
-          forecastError={forecastError}
-        />
+        <div className={`rounded-xl border p-4 space-y-3 ${
+          isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+        }`}>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className={`text-sm font-semibold ${
+                isDarkMode ? 'text-gray-200' : 'text-gray-900'
+              }`}>EWMA Walker (1D)</h2>
+              <p className={`mt-1 text-[11px] ${
+                isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+              }`}>
+                Baseline volatility-only forecast using EWMA (λ = 0.94)
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {isLoadingEwma && (
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  Loading…
+                </span>
+              )}
+              <button
+                type="button"
+                className={`rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
+                  isDarkMode 
+                    ? 'border-gray-600 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+                    : 'border-gray-300 text-muted-foreground hover:bg-muted'
+                }`}
+                onClick={loadEwmaWalker}
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          {ewmaError && (
+            <p className="text-[11px] text-red-500">
+              {ewmaError}
+            </p>
+          )}
+
+          {ewmaSummary ? (
+            <div className={`grid grid-cols-2 md:grid-cols-3 gap-y-2 gap-x-6 text-xs ${
+              isDarkMode ? 'text-gray-300' : ''
+            }`}>
+              <div className="flex flex-col">
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  Coverage
+                </span>
+                <span className="font-mono tabular-nums">
+                  {(ewmaSummary.coverage * 100).toFixed(1)}%{" "}
+                  <span className={`text-[10px] ${
+                    isDarkMode ? 'text-gray-500' : 'text-muted-foreground'
+                  }`}>
+                    (target {(ewmaSummary.targetCoverage * 100).toFixed(1)}%)
+                  </span>
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  Interval score
+                </span>
+                <span className="font-mono tabular-nums">
+                  {ewmaSummary.intervalScore.toFixed(3)}
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  Avg width
+                </span>
+                <span className="font-mono tabular-nums">
+                  {(ewmaSummary.avgWidth * 100).toFixed(2)}%
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  z-mean / z-std
+                </span>
+                <span className="font-mono tabular-nums">
+                  {ewmaSummary.zMean.toFixed(3)} /{" "}
+                  {ewmaSummary.zStd.toFixed(3)}
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  Direction hit-rate
+                </span>
+                <span className="font-mono tabular-nums">
+                  {(ewmaSummary.directionHitRate * 100).toFixed(1)}%
+                </span>
+              </div>
+
+              <div className="flex flex-col">
+                <span className={`text-[11px] ${
+                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+                }`}>
+                  Points
+                </span>
+                <span className="font-mono tabular-nums">
+                  {ewmaSummary.nPoints}
+                </span>
+              </div>
+            </div>
+          ) : !isLoadingEwma && !ewmaError ? (
+            <p className={`text-[11px] ${
+              isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
+            }`}>
+              No EWMA results yet. Click Refresh to run the EWMA walker.
+            </p>
+          ) : null}
+        </div>
       </div>
 
-      {/* GARCH Forecast Inspector */}
-      <div className="mb-8">
-        <GarchForecastInspector
-          symbol={tickerParam}
-          volModel={volModel}
-          horizon={h}
-          coverage={coverage}
-          activeForecast={activeForecast}
-          baseForecast={baseForecast}
-          conformalState={conformalState}
-          forecastStatus={forecastStatus}
-          forecastError={volatilityError}
-        />
-      </div>
-
-      {/* Range Forecast Inspector */}
-      <div className="mb-8">
-        <RangeForecastInspector
-          symbol={tickerParam}
-          volModel={volModel}
-          horizon={h}
-          coverage={coverage}
-          activeForecast={activeForecast}
-          baseForecast={baseForecast}
-          conformalState={conformalState}
-          forecastStatus={forecastStatus}
-          volatilityError={volatilityError}
-        />
-      </div>
-
-      {/* Chart temporarily removed; focusing on data only */}
-      
       {/* Data Preview Panel (A-2) */}
       {previewData && (
         <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm">
@@ -3824,362 +4123,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         isOpen={showRepairsPanel}
         onClose={() => setShowRepairsPanel(false)}
       />
-      
-      {/* Breakout Card */}
-      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-breakout">
-        <h2 className="text-xl font-semibold mb-4">Breakout Detection</h2>
-        
-        {/* Controls */}
-        <div className="mb-6 space-y-3">
-          <div className="flex gap-3">
-            <button
-              onClick={detectBreakoutToday}
-              disabled={isDetectingBreakout}
-              className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-            >
-              {isDetectingBreakout ? 'Detecting...' : 'Detect Today'}
-            </button>
-            
-            <div className="flex gap-2 items-center">
-              <input
-                type="date"
-                value={breakoutDetectDate}
-                onChange={(e) => setBreakoutDetectDate(e.target.value)}
-                className="px-3 py-2 border rounded"
-              />
-              <button
-                onClick={detectBreakoutForDate}
-                disabled={isDetectingBreakout || !breakoutDetectDate}
-                className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-              >
-                Detect for Date
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Error Display */}
-        {breakoutError && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700">
-            {breakoutError}
-          </div>
-        )}
-
-        {/* Event Display */}
-        {latestEvent ? (
-          <div className="space-y-4">
-            {/* Direction and Basic Info */}
-            <div className="p-4 bg-red-50 border border-red-200 rounded-md">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="text-2xl">
-                  {latestEvent.direction === 1 ? '↑' : '↓'}
-                </span>
-                <div>
-                  <div className="font-semibold">
-                    Breakout {latestEvent.direction === 1 ? 'Up' : 'Down'}
-                  </div>
-                  <div className="text-sm text-gray-600">
-                    {latestEvent.t_date} → {latestEvent.B_date}
-                  </div>
-                </div>
-                {latestEvent.event_open && (
-                  <span className="ml-auto px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full">
-                    OPEN
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Magnitude Chips */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-gray-50 p-3 rounded text-center">
-                <div className="text-xs text-gray-600">z_B</div>
-                <div className="font-mono text-lg">{latestEvent.z_B.toFixed(3)}</div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded text-center">
-                <div className="text-xs text-gray-600">z_excess_B</div>
-                <div className="font-mono text-lg">{latestEvent.z_excess_B.toFixed(3)}</div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded text-center">
-                <div className="text-xs text-gray-600">% Outside</div>
-                <div className="font-mono text-lg">{(latestEvent.pct_outside_B * 100).toFixed(1)}%</div>
-              </div>
-              <div className="bg-gray-50 p-3 rounded text-center">
-                <div className="text-xs text-gray-600">ndist_B</div>
-                <div className="font-mono text-lg">{latestEvent.ndist_B.toFixed(3)}</div>
-              </div>
-            </div>
-
-            {/* Vol Regime */}
-            {latestEvent.vol_regime_percentile !== null && (
-              <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
-                <div className="text-sm font-medium text-blue-800">
-                  Vol Regime: {(latestEvent.vol_regime_percentile * 100).toFixed(0)}th percentile
-                </div>
-              </div>
-            )}
-
-            {/* Provenance */}
-            <div className="p-3 bg-gray-50 rounded-md">
-              <div className="text-sm space-y-1">
-                <div>
-                  <strong>Method:</strong> {latestEvent.method_provenance.base_method}
-                  {latestEvent.method_provenance.conformal_mode && ` + Conformal:${latestEvent.method_provenance.conformal_mode}`}
-                </div>
-                <div>
-                  <strong>Coverage:</strong> {(latestEvent.method_provenance.coverage_nominal * 100).toFixed(1)}%
-                </div>
-                <div>
-                  <strong>Critical:</strong> {latestEvent.method_provenance.critical.type} = {latestEvent.method_provenance.critical.value.toFixed(3)}
-                  {latestEvent.method_provenance.critical.df && ` (df=${latestEvent.method_provenance.critical.df})`}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div className="p-4 bg-green-50 border border-green-200 rounded-md text-green-700">
-            No breakout detected (price inside band)
-          </div>
-        )}
-
-        {/* Cool-down Status */}
-        {cooldownStatus && (
-          <div className="mt-4 p-3 bg-gray-50 rounded-md">
-            <div className="text-sm">
-              <strong>Cool-down (K_inside=3):</strong> {cooldownStatus.ok ? '✅ Pass' : '❌ Fail'}
-              {cooldownStatus.reason && ` (${cooldownStatus.reason})`}
-              <div className="text-xs text-gray-600 mt-1">
-                Consecutive in-band days: {cooldownStatus.inside_count}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Formulas Tooltip */}
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm text-blue-600 hover:text-blue-800">
-            📖 Formulas & Rules
-          </summary>
-          <div className="mt-2 p-3 bg-gray-50 rounded text-xs space-y-1">
-            <div><strong>outside_1d</strong> = (S_t+1 &lt; L_1) OR (S_t+1 &gt; U_1)</div>
-            <div><strong>z_B</strong> = [ ln(S_t+1) − ( ln(S_t) + mu_star_used ) ] / s_t</div>
-            <div><strong>z_excess_B</strong> = |z_B| − c</div>
-            <div><strong>pct_outside_B</strong> = (L_1 − S_t+1)/L_1 (down) OR (S_t+1 − U_1)/U_1 (up)</div>
-            <div><strong>ndist_B</strong> = | ln(S_t+1) − m_t(1) | / (c * s_t)</div>
-            <div><strong>vol_regime_percentile</strong> = Percentile( σ_t+1|t vs trailing 3y )</div>
-            <div><strong>Cool-down:</strong> K_inside = 3 in-band days required before a new event.</div>
-          </div>
-        </details>
-      </div>
-
-      {/* Continuation Clock Card */}
-      <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm" data-testid="card-continuation-clock">
-        <h2 className="text-xl font-semibold mb-4">Continuation Clock</h2>
-        
-        {/* Controls */}
-        <div className="mb-6 space-y-4">
-          {/* Stop Rule */}
-          <div>
-            <label className="block text-sm font-medium mb-2">Stop Rule</label>
-            <div className="flex gap-4">
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="stopRule"
-                  value="re-entry"
-                  checked={stopRule === 're-entry'}
-                  onChange={(e) => setStopRule(e.target.value as 're-entry')}
-                  className="mr-2"
-                />
-                Re-entry (recommended)
-              </label>
-              <label className="flex items-center">
-                <input
-                  type="radio"
-                  name="stopRule"
-                  value="sign-flip"
-                  checked={stopRule === 'sign-flip'}
-                  onChange={(e) => setStopRule(e.target.value as 'sign-flip')}
-                  className="mr-2"
-                />
-                Sign-flip
-              </label>
-            </div>
-          </div>
-
-          {/* k_inside selector (only for re-entry) */}
-          {stopRule === 're-entry' && (
-            <div>
-              <label className="block text-sm font-medium mb-2">k_inside</label>
-              <select
-                value={kInside}
-                onChange={(e) => setKInside(Number(e.target.value) as 1 | 2)}
-                className="px-3 py-2 border rounded"
-              >
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-              </select>
-            </div>
-          )}
-
-          {/* T_max */}
-          <div>
-            <label className="block text-sm font-medium mb-2">T_max</label>
-            <input
-              type="number"
-              min="1"
-              max="100"
-              value={tMax}
-              onChange={(e) => setTMax(Number(e.target.value))}
-              className="px-3 py-2 border rounded w-20"
-            />
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex gap-3">
-            <button
-              onClick={tickToday}
-              disabled={isTicking}
-              className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
-            >
-              {isTicking ? 'Ticking...' : 'Tick Today'}
-            </button>
-            
-            <div className="flex gap-2 items-center">
-              <input
-                type="date"
-                value={tickDate}
-                onChange={(e) => setTickDate(e.target.value)}
-                className="px-3 py-2 border rounded"
-              />
-              <button
-                onClick={tickForDate}
-                disabled={isTicking || !tickDate}
-                className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
-              >
-                Tick Date
-              </button>
-            </div>
-
-            <button
-              onClick={rescanFromB}
-              disabled={isTicking || !latestEvent}
-              className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
-            >
-              Rescan from B
-            </button>
-          </div>
-        </div>
-
-        {/* Error Display */}
-        {continuationError && (
-          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-red-700">
-            {continuationError}
-          </div>
-        )}
-
-        {/* Last Action */}
-        {lastContinuationAction && (
-          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md text-blue-700">
-            Last action: {lastContinuationAction}
-          </div>
-        )}
-
-        {/* Event Status Display */}
-        {latestEvent ? (
-          <div className="space-y-4">
-            {latestEvent.event_open ? (
-              // Open Event
-              <div className="p-4 bg-orange-50 border border-orange-200 rounded-md">
-                <div className="font-semibold text-orange-800 mb-2">Event Open - Continuing</div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                  <div>
-                    <div className="font-medium">T so far</div>
-                    <div className="font-mono text-lg">{latestEvent.at_risk_days || 0}</div>
-                  </div>
-                  {stopRule === 're-entry' && (
-                    <div>
-                      <div className="font-medium">In-band streak</div>
-                      <div className="font-mono text-lg">{latestEvent.inband_streak || 0}</div>
-                    </div>
-                  )}
-                  <div>
-                    <div className="font-medium">Max z_excess</div>
-                    <div className="font-mono text-lg">{latestEvent.max_z_excess?.toFixed(3) || '0.000'}</div>
-                  </div>
-                  <div>
-                    <div className="font-medium">Stop Rule</div>
-                    <div className="text-sm">{latestEvent.stop_rule || 'Not set'}</div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              // Closed Event
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
-                <div className="font-semibold text-gray-800 mb-2">
-                  Event {latestEvent.censored ? 'Censored' : 'Stopped'}
-                </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                  <div>
-                    <div className="font-medium">T</div>
-                    <div className="font-mono text-lg">{latestEvent.T || 0}</div>
-                  </div>
-                  <div>
-                    <div className="font-medium">D_stop</div>
-                    <div className="font-mono">{latestEvent.D_stop || 'N/A'}</div>
-                  </div>
-                  <div>
-                    <div className="font-medium">Censored</div>
-                    <div>{latestEvent.censored ? '✅ Yes' : '❌ No'}</div>
-                  </div>
-                  <div>
-                    <div className="font-medium">Reason</div>
-                    <div className="text-xs">{latestEvent.censor_reason || 'Reverted'}</div>
-                  </div>
-                </div>
-                
-                {/* KM Tuple */}
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded">
-                  <div className="font-medium text-blue-800 mb-1">KM Tuple</div>
-                  <div className="font-mono text-sm">
-                    time_i = {latestEvent.T || 0} ; status_i = {latestEvent.censored ? 0 : 1}
-                  </div>
-                  <div className="text-xs text-blue-600 mt-1">
-                    (1 if reverted, 0 if censored)
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="p-4 bg-gray-50 border border-gray-200 rounded-md text-gray-700">
-            No event to track
-          </div>
-        )}
-
-        {/* Note */}
-        <div className="mt-4 p-2 bg-gray-50 rounded text-xs text-gray-600">
-          Non-trading days do not increment T; missing data pauses.
-        </div>
-
-        {/* Formulas Tooltip */}
-        <details className="mt-4">
-          <summary className="cursor-pointer text-sm text-blue-600 hover:text-blue-800">
-            📖 Stop Rules & Formulas
-          </summary>
-          <div className="mt-2 p-3 bg-gray-50 rounded text-xs space-y-1">
-            <div><strong>Stop Rule A (re-entry):</strong> S_D ∈ [L_1(D−1), U_1(D−1)] → T = j − k_inside</div>
-            <div><strong>Stop Rule B (sign-flip):</strong> sign( ln(S_D/S_D−1) ) = −d → T = j − 1</div>
-            <div><strong>Right-censor:</strong> j hits T_max (Type-I) or end_of_sample</div>
-            <div><strong>KM tuple:</strong> time_i = T ; status_i = 1 if reverted else 0</div>
-          </div>
-        </details>
-      </div>
-
-
-
-      {/* QA Testing Panel */}
-      <QAPanel className="mb-8" />
 
       {/* Data Contract Popover */}
       {showDataContract && (
@@ -5500,7 +5443,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           </div>
         </div>
       )}
-      </div>
     </div>
   );
 }

@@ -1,6 +1,36 @@
 'use client';
 
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
+import { resolveForecastHorizon } from '@/lib/forecastUtils';
+
+// Helper function to calculate target date (Date t+h) accounting for business days
+function calculateTargetDate(dateT: string | null, horizon: number): string {
+  if (!dateT) return "—";
+  
+  try {
+    const date = new Date(dateT);
+    if (isNaN(date.getTime())) return "—";
+    
+    let businessDaysAdded = 0;
+    let currentDate = new Date(date);
+    
+    while (businessDaysAdded < horizon) {
+      currentDate.setDate(currentDate.getDate() + 1);
+      const dayOfWeek = currentDate.getDay();
+      
+      if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+        businessDaysAdded++;
+      }
+    }
+    
+    // Format as MM-DD
+    const month = String(currentDate.getMonth() + 1).padStart(2, '0');
+    const day = String(currentDate.getDate()).padStart(2, '0');
+    return `${month}-${day}`;
+  } catch (error) {
+    return "—";
+  }
+}
 
 interface GbmForecastInspectorProps {
   symbol: string;
@@ -33,149 +63,150 @@ export function GbmForecastInspector(props: GbmForecastInspectorProps) {
     return null;
   }
 
-  // Filter forecast to match current horizon setting
-  let forecast = null;
+  // Use the most current forecast (activeForecast preferred over baseForecast)
+  const forecast = activeForecast || baseForecast;
   
-  // Check activeForecast first
-  if (activeForecast && isHorizonMatch(activeForecast, horizon)) {
-    forecast = activeForecast;
-  }
-  // Fallback to baseForecast if it matches horizon
-  else if (baseForecast && isHorizonMatch(baseForecast, horizon)) {
-    forecast = baseForecast;
-  }
+  // Use shared horizon resolution logic
+  const horizonResolution = forecast ? resolveForecastHorizon(forecast, horizon) : null;
+  const horizonValue = horizonResolution?.horizonValue ?? horizon;
+
+  // Get lower/upper values
+  const lower = forecast?.intervals?.L_conf ??
+    forecast?.pi?.L_h ??
+    forecast?.intervals?.L_h ??
+    forecast?.L_h;
   
-  // Helper function to check if forecast matches current horizon
-  function isHorizonMatch(forecastData: any, targetHorizon: number): boolean {
-    // Check various horizon fields in the forecast data
-    const forecastHorizon = 
-      forecastData?.horizonTrading ?? 
-      forecastData?.target?.h ?? 
-      forecastData?.params?.h ?? 
-      1; // Default to 1 if no horizon found
-    
-    return forecastHorizon === targetHorizon;
-  }
+  const upper = forecast?.intervals?.U_conf ??
+    forecast?.pi?.U_h ??
+    forecast?.intervals?.U_h ??
+    forecast?.U_h;
+
+  // Get mu* and sigma values
+  const muStar = forecast?.estimates?.mu_star_used ?? forecast?.estimates?.mu_star_hat;
+  const sigma = forecast?.estimates?.sigma_hat;
+  const center = forecast?.y_hat;
+
+  // Status indicator
+  const statusColor = forecastStatus === "ready" 
+    ? "text-emerald-500" 
+    : forecastStatus === "error" 
+    ? "text-red-500" 
+    : forecastStatus === "loading"
+    ? "text-amber-500"
+    : isDarkMode ? "text-gray-500" : "text-gray-400";
+
+  const statusText = forecastStatus === "ready" 
+    ? "Ready" 
+    : forecastStatus === "error" 
+    ? "Error" 
+    : forecastStatus === "loading"
+    ? "Loading..."
+    : "Idle";
+
+  // Divider component
+  const Divider = () => (
+    <div className={`w-px h-8 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+  );
+
+  // Metric cell with value on top, label below
+  const MetricCell = ({ value, label, valueColor }: { value: string; label: string; valueColor?: string }) => (
+    <div className="flex flex-col items-center">
+      <span className={`font-mono text-xs ${valueColor || (isDarkMode ? 'text-gray-200' : 'text-gray-700')}`}>
+        {value}
+      </span>
+      <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+        {label}
+      </span>
+    </div>
+  );
 
   return (
-    <section className="mt-6">
-      <div className={`rounded-xl border p-4 space-y-3 ${
-        isDarkMode 
-          ? 'bg-gray-800 border-gray-600' 
-          : 'bg-white border-gray-200'
-      }`}>
-        <div className="flex items-center justify-between">
-          <h2 className={`text-sm font-semibold ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>
-            GBM Forecast Inspector
-          </h2>
-          <span className={`text-[11px] ${
-            isDarkMode ? 'text-gray-400' : 'text-gray-500'
-          }`}>
-            {symbol} • h={horizon} • {(coverage * 100).toFixed(1)}%
-          </span>
-        </div>
-
-        {/* Status + error */}
-        <div className="flex items-center justify-between text-xs">
-          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-700'}>
-            Status:{" "}
-            <span className={
-              forecastStatus === "ready"
-                ? "text-emerald-600"
-                : forecastStatus === "error"
-                ? "text-red-600"
-                : forecastStatus === "loading"
-                ? "text-blue-600"
-                : isDarkMode ? "text-gray-400" : "text-gray-500"
-            }>
-              {forecastStatus}
-            </span>
-          </span>
-          {forecastError && (
-            <span className="text-red-600 text-xs">
-              {forecastError}
-            </span>
-          )}
-        </div>
-
-        {/* Forecast summary */}
-        {forecast ? (
-          <div className="text-xs space-y-1">
-            <h3 className={`font-semibold ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>Forecast summary</h3>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Date t</div>
-                <div className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {forecast.date_t ?? "—"}
-                </div>
-              </div>
-              <div>
-                <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Horizon</div>
-                <div className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {forecast.horizonTrading ?? forecast.target?.h ?? forecast.params?.h ?? "—"}D
-                  {forecast.h_eff_days && forecast.h_eff_days !== (forecast.horizonTrading ?? forecast.target?.h ?? forecast.params?.h) && 
-                    ` (${forecast.h_eff_days} cal)`}
-                </div>
-              </div>
-              <div>
-                <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Center (y_hat)</div>
-                <div className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {forecast.y_hat?.toFixed?.(2) ?? "—"}
-                </div>
-              </div>
-              <div>
-                <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Lower / Upper</div>
-                <div className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {forecast.intervals?.L_conf?.toFixed?.(2) ??
-                   forecast.pi?.L_h?.toFixed?.(2) ??
-                   forecast.intervals?.L_h?.toFixed?.(2) ??
-                   forecast.L_h?.toFixed?.(2) ??
-                   "—"}
-                  {"  →  "}
-                  {forecast.intervals?.U_conf?.toFixed?.(2) ??
-                   forecast.pi?.U_h?.toFixed?.(2) ??
-                   forecast.intervals?.U_h?.toFixed?.(2) ??
-                   forecast.U_h?.toFixed?.(2) ??
-                   "—"}
-                </div>
-              </div>
-              <div>
-                <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>μ*, σ (daily)</div>
-                <div className={`font-mono ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
-                  {forecast.estimates?.mu_star_used?.toExponential?.(2) ??
-                   forecast.estimates?.mu_star_hat?.toExponential?.(2) ??
-                   "—"}
-                  {" ; "}
-                  {forecast.estimates?.sigma_hat?.toFixed?.(4) ?? "—"}
-                </div>
-              </div>
-            </div>
-
-            {/* Optional debug block */}
-            <details className="mt-2 text-[10px]">
-              <summary className={`cursor-pointer ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                Raw forecast (debug)
-              </summary>
-              <pre className={`p-2 rounded-md overflow-x-auto text-[9px] ${
-                isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600'
-              }`}>
-                {JSON.stringify(forecast, null, 2)}
-              </pre>
-            </details>
-          </div>
-        ) : (
-          <p className={`text-xs ${
-            isDarkMode ? 'text-gray-400' : 'text-gray-500'
-          }`}>
-            No GBM forecast available for h={horizon}D. Click Generate to create a
-            {horizon}D GBM forecast, or switch to a horizon with existing forecasts.
-          </p>
-        )}
+    <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full text-xs font-medium ${
+      isDarkMode 
+        ? 'bg-gray-800/80 border border-gray-700' 
+        : 'bg-gray-100 border border-gray-200'
+    }`}>
+      {/* Title - GBM */}
+      <div className="flex flex-col items-center">
+        <span className={`font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+          GBM
+        </span>
+        <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+          Model
+        </span>
       </div>
-    </section>
+      
+      <Divider />
+      
+      {/* Status */}
+      <div className="flex flex-col items-center">
+        <span className={statusColor}>●</span>
+        <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+          {statusText}
+        </span>
+      </div>
+
+      {forecast ? (
+        <>
+          <Divider />
+          
+          {/* Date t+h */}
+          <MetricCell 
+            value={calculateTargetDate(forecast.date_t, horizonValue)} 
+            label={`t+${horizonValue}`}
+          />
+
+          <Divider />
+          
+          {/* Center (ŷ) */}
+          <MetricCell 
+            value={center != null ? `$${center.toFixed(2)}` : '—'} 
+            label="ŷ"
+            valueColor={isDarkMode ? 'text-blue-400' : 'text-blue-600'}
+          />
+
+          <Divider />
+          
+          {/* Lower / Upper */}
+          <div className="flex flex-col items-center">
+            <div className="flex items-center gap-1">
+              <span className={`font-mono text-xs ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                {lower != null ? `$${lower.toFixed(2)}` : '—'}
+              </span>
+              <span className={isDarkMode ? 'text-gray-500' : 'text-gray-400'}>/</span>
+              <span className={`font-mono text-xs ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
+                {upper != null ? `$${upper.toFixed(2)}` : '—'}
+              </span>
+            </div>
+            <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              L / U
+            </span>
+          </div>
+
+          <Divider />
+          
+          {/* μ* */}
+          <MetricCell 
+            value={muStar != null ? muStar.toExponential(2) : '—'} 
+            label="μ*"
+          />
+
+          <Divider />
+          
+          {/* σ */}
+          <MetricCell 
+            value={sigma != null ? sigma.toFixed(4) : '—'} 
+            label="σ"
+          />
+        </>
+      ) : (
+        <>
+          <Divider />
+          <span className={isDarkMode ? 'text-gray-500' : 'text-gray-400'}>
+            No forecast
+          </span>
+        </>
+      )}
+    </div>
   );
 }

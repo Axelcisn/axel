@@ -59,3 +59,16 @@ body {
   border: none !important;
   box-shadow: none !important;
 }
+
+/* Chart Active Dot - Smooth movement animation */
+.chart-dot-animated {
+  transition: cx 0.15s ease-out, cy 0.15s ease-out;
+}
+
+.chart-dot-purple {
+  transition: cx 0.15s ease-out, cy 0.15s ease-out;
+}
+
+.chart-dot-cyan {
+  transition: cx 0.15s ease-out, cy 0.15s ease-out;
+}
