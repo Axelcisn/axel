@@ -1386,21 +1386,43 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                             />
                           </div>
 
-                          {/* Maximize Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              ewmaReactionMapDropdown.onMaximize();
-                            }}
-                            disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                            className={`w-full rounded-lg px-3 py-1.5 text-xs font-medium transition-colors mt-1 ${
-                              ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
-                                ? 'bg-gray-500/50 text-gray-400 cursor-not-allowed'
-                                : 'bg-amber-500/90 hover:bg-amber-500 text-white'
-                            }`}
-                          >
-                            {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
-                          </button>
+                          {/* Buttons Row */}
+                          <div className="flex gap-2 mt-1">
+                            {/* Reset Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                ewmaReactionMapDropdown.setReactionLambda(0.94);
+                                ewmaReactionMapDropdown.setReactionTrainFraction(0.7);
+                              }}
+                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
+                              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+                                ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
+                                  ? 'bg-gray-500/30 text-gray-500 cursor-not-allowed'
+                                  : isDarkMode
+                                    ? 'bg-gray-600/50 hover:bg-gray-600 text-gray-300'
+                                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                              }`}
+                            >
+                              Reset
+                            </button>
+
+                            {/* Maximize Button */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                ewmaReactionMapDropdown.onMaximize();
+                              }}
+                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
+                              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+                                ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
+                                  ? 'bg-gray-500/50 text-gray-400 cursor-not-allowed'
+                                  : 'bg-amber-500/90 hover:bg-amber-500 text-white'
+                              }`}
+                            >
+                              {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
+                            </button>
+                          </div>
 
                           {/* Loading indicator */}
                           {ewmaReactionMapDropdown.isLoadingReaction && (
