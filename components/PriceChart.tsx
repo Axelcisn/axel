@@ -16,7 +16,6 @@ import {
   ReferenceDot,
   CartesianGrid,
   Line,
-  Customized,
 } from "recharts";
 import { useDarkMode } from "@/lib/hooks/useDarkMode";
 import {
@@ -79,10 +78,15 @@ interface ChartPoint {
   forecastCenter?: number | null;
   forecastLower?: number | null;
   forecastUpper?: number | null;
-  // EWMA Walker overlay values
+  forecastModelName?: string | null;
+  // EWMA Walker overlay values (neutral)
   ewma_forecast?: number | null;
   ewma_lower?: number | null;
   ewma_upper?: number | null;
+  // EWMA Biased overlay values (tilted)
+  ewma_biased_forecast?: number | null;
+  ewma_biased_lower?: number | null;
+  ewma_biased_upper?: number | null;
 };
 
 /**
@@ -153,12 +157,29 @@ interface HorizonCoverageProps {
   onDegreesOfFreedomChange?: (df: number) => void;
 }
 
+/** EWMA Walker summary statistics for hover card */
+export interface EwmaSummary {
+  coverage: number;
+  targetCoverage: number;
+  intervalScore: number;
+  avgWidth: number;
+  zMean: number;
+  zStd: number;
+  directionHitRate: number;
+  nPoints: number;
+}
+
 interface PriceChartProps {
   symbol: string;
   className?: string;
   horizon?: number;  // Number of trading days to extend (1,2,3,5)
   forecastOverlay?: ForecastOverlayProps;
   ewmaPath?: EwmaWalkerPathPoint[] | null;
+  ewmaSummary?: EwmaSummary | null;
+  ewmaBiasedPath?: EwmaWalkerPathPoint[] | null;
+  ewmaBiasedSummary?: EwmaSummary | null;
+  onLoadEwmaBiased?: () => void;
+  isLoadingEwmaBiased?: boolean;
   horizonCoverage?: HorizonCoverageProps;
 }
 
@@ -179,26 +200,23 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   horizon,
   forecastOverlay,
   ewmaPath,
+  ewmaSummary,
+  ewmaBiasedPath,
+  ewmaBiasedSummary,
+  onLoadEwmaBiased,
+  isLoadingEwmaBiased,
   horizonCoverage,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
   
-  // EWMA overlay toggle
+  // EWMA overlay toggles
   const [showEwmaOverlay, setShowEwmaOverlay] = useState(false);
+  const [showEwmaBiasedOverlay, setShowEwmaBiasedOverlay] = useState(false);
   
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
-  
-  // Debug: Log overlay prop
-  console.log("[PriceChart] overlay prop", {
-    h,
-    hasOverlay: !!forecastOverlay,
-    hasActiveForecast: !!forecastOverlay?.activeForecast,
-    volModel: forecastOverlay?.volModel,
-    coverage: forecastOverlay?.coverage,
-  });
   
   // Determine whether the current overlay is in log domain
   const isLogDomain =
@@ -356,27 +374,13 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     // First try to find future dates in historical data (for backtesting scenarios)
     const historicalFuture = getNextTradingDates(lastDateStr, h, allDates);
     if (historicalFuture.length > 0) {
-      console.log(`PriceChart: Using historical future dates:`, historicalFuture);
       return historicalFuture;
     }
     
     // If no historical future dates, generate them (for real-time scenarios)
     const generatedFuture = generateFutureTradingDates(lastDateStr, h);
-    console.log(`PriceChart: Generated future dates:`, generatedFuture);
     return generatedFuture;
   }, [lastDateStr, allDates, h]);
-
-  // Debug log for troubleshooting
-  console.log("[PriceChart] horizon h=", h, {
-    lastDateStr,
-    futureDates,
-    rangeLength: rangeData.length,
-    fullLength: fullData.length,
-    allDatesLength: allDates.length,
-    lastDateInFull: fullData[fullData.length - 1]?.date,
-    firstDateInRange: rangeData[0]?.date,
-    lastDateInRange: rangeData[rangeData.length - 1]?.date,
-  });
 
   // Create extended chartData with future placeholders
   const chartData: ChartPoint[] = React.useMemo(() => {
@@ -426,182 +430,148 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return [...base, ...futurePoints];
   }, [rangeData, futureDates, h, forecastOverlay?.activeForecast]);
 
-  // Merge EWMA forecast path into chartData for overlay
+  // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
   const chartDataWithEwma = useMemo(() => {
-    if (!showEwmaOverlay || !ewmaPath || ewmaPath.length === 0) {
+    const showNeutral = showEwmaOverlay && ewmaPath && ewmaPath.length > 0;
+    const showBiased = showEwmaBiasedOverlay && ewmaBiasedPath && ewmaBiasedPath.length > 0;
+    
+    if (!showNeutral && !showBiased) {
       return chartData;
     }
 
     // Build maps of date_tp1 -> EWMA values (forecast, lower, upper)
-    // The EWMA walker forecasts FOR date_tp1 using data available at date_t
-    // So we plot y_hat_tp1 at date_tp1 (the target date)
-    const ewmaMap = new Map<string, { forecast: number; lower: number; upper: number }>();
+    // The EWMA walker forecasts FOR date_tp1 (target date, t+h) using data available at date_t
+    // So we plot y_hat_tp1 at date_tp1 (the h-step target date)
     
-    ewmaPath.forEach(point => {
-      const normalizedDate = normalizeDateString(point.date_tp1);
-      ewmaMap.set(normalizedDate, {
-        forecast: point.y_hat_tp1,
-        lower: point.L_tp1,
-        upper: point.U_tp1,
+    // Neutral EWMA map
+    const ewmaMap = new Map<string, { forecast: number; lower: number; upper: number }>();
+    if (showNeutral && ewmaPath) {
+      ewmaPath.forEach(point => {
+        const normalizedDate = normalizeDateString(point.date_tp1);
+        ewmaMap.set(normalizedDate, {
+          forecast: point.y_hat_tp1,
+          lower: point.L_tp1,
+          upper: point.U_tp1,
+        });
       });
-    });
+    }
 
-    // Get chart date range
-    const chartDates = chartData.map(p => normalizeDateString(p.date));
-    const firstChartDate = chartDates[0];
-    const lastChartDate = chartDates[chartDates.length - 1];
-
-    // Debug: Check date format consistency
-    console.log("[EWMA Debug] Mapping:", {
-      chartRange: { first: firstChartDate, last: lastChartDate, count: chartDates.length },
-      ewmaTotal: ewmaPath.length,
-      sampleChartDates: chartDates.slice(0, 3),
-      sampleEwmaDates: ewmaPath.slice(0, 3).map(p => normalizeDateString(p.date_tp1)),
-    });
-
-    // Count matches
-    let matchCount = 0;
+    // Biased EWMA map
+    const ewmaBiasedMap = new Map<string, { forecast: number; lower: number; upper: number }>();
+    if (showBiased && ewmaBiasedPath) {
+      ewmaBiasedPath.forEach(point => {
+        const normalizedDate = normalizeDateString(point.date_tp1);
+        ewmaBiasedMap.set(normalizedDate, {
+          forecast: point.y_hat_tp1,
+          lower: point.L_tp1,
+          upper: point.U_tp1,
+        });
+      });
+    }
 
     // Add EWMA fields to chartData points
-    const result = chartData.map(point => {
+    const result: ChartPoint[] = chartData.map(point => {
       const chartDate = normalizeDateString(point.date);
       
-      // If exact match exists, use it
+      // Neutral EWMA
       const ewmaData = ewmaMap.get(chartDate);
-      if (ewmaData) {
-        matchCount++;
-        return {
-          ...point,
-          ewma_forecast: ewmaData.forecast,
-          ewma_lower: ewmaData.lower,
-          ewma_upper: ewmaData.upper,
-        };
-      }
+      // Biased EWMA
+      const ewmaBiasedData = ewmaBiasedMap.get(chartDate);
       
       return {
         ...point,
-        ewma_forecast: null,
-        ewma_lower: null,
-        ewma_upper: null,
+        // Neutral EWMA
+        ewma_forecast: ewmaData?.forecast ?? null,
+        ewma_lower: ewmaData?.lower ?? null,
+        ewma_upper: ewmaData?.upper ?? null,
+        // Biased EWMA
+        ewma_biased_forecast: ewmaBiasedData?.forecast ?? null,
+        ewma_biased_lower: ewmaBiasedData?.lower ?? null,
+        ewma_biased_upper: ewmaBiasedData?.upper ?? null,
       };
     });
 
-    console.log("[EWMA Debug] Match stats:", { 
-      matchCount, 
-      chartTotal: chartData.length,
-      matchRate: `${((matchCount / chartData.length) * 100).toFixed(1)}%`,
-      // Show which chart dates have no EWMA data
-      unmatchedDates: chartDates.filter(d => !ewmaMap.has(d)),
-      // Show sample of result with ewma values
-      sampleWithEwma: result.filter(p => p.ewma_forecast != null).slice(0, 3).map(p => ({
-        date: p.date,
-        value: p.value,
-        ewma: p.ewma_forecast,
-      })),
-      sampleWithoutEwma: result.filter(p => p.ewma_forecast == null).map(p => ({
-        date: p.date,
-        value: p.value,
-      })),
-    });
+    // Helper function to interpolate gaps for a given set of fields
+    const interpolateGaps = (
+      data: ChartPoint[],
+      forecastKey: 'ewma_forecast' | 'ewma_biased_forecast',
+      lowerKey: 'ewma_lower' | 'ewma_biased_lower',
+      upperKey: 'ewma_upper' | 'ewma_biased_upper'
+    ) => {
+      for (let i = 0; i < data.length; i++) {
+        if (data[i][forecastKey] != null) continue;
 
-    // Find and fill gaps: interpolate EWMA values for dates with missing data
-    // This handles cases where EWMA API doesn't have data for certain dates
-    for (let i = 1; i < result.length - 1; i++) {
-      if (result[i].ewma_forecast == null) {
-        const prev = result[i - 1];
-        const next = result[i + 1];
-        
-        // If both neighbors have EWMA data, interpolate
-        if (prev.ewma_forecast != null && next.ewma_forecast != null) {
-          const interpolatedForecast = (prev.ewma_forecast + next.ewma_forecast) / 2;
-          const interpolatedLower = (prev.ewma_lower != null && next.ewma_lower != null)
-            ? (prev.ewma_lower + next.ewma_lower) / 2 : null;
-          const interpolatedUpper = (prev.ewma_upper != null && next.ewma_upper != null)
-            ? (prev.ewma_upper + next.ewma_upper) / 2 : null;
-          
-          // Mutate in place with proper typing
-          (result[i] as any).ewma_forecast = interpolatedForecast;
-          (result[i] as any).ewma_lower = interpolatedLower;
-          (result[i] as any).ewma_upper = interpolatedUpper;
-          
-          console.log(`[EWMA] Interpolated gap at ${result[i].date}: ${interpolatedForecast.toFixed(2)}`);
+        const gapStartIndex = i - 1;
+        if (gapStartIndex < 0 || data[gapStartIndex][forecastKey] == null) {
+          continue;
         }
-      }
-    }
 
-    // Log remaining gaps after interpolation
-    const remainingGaps: string[] = [];
-    for (let i = 1; i < result.length - 1; i++) {
-      if (result[i].ewma_forecast == null && 
-          (result[i-1].ewma_forecast != null || result[i+1].ewma_forecast != null)) {
-        remainingGaps.push(result[i].date);
+        let gapEndIndex = i;
+        while (
+          gapEndIndex < data.length &&
+          data[gapEndIndex][forecastKey] == null
+        ) {
+          gapEndIndex++;
+        }
+
+        if (gapEndIndex >= data.length || data[gapEndIndex][forecastKey] == null) {
+          break;
+        }
+
+        const prev = data[gapStartIndex];
+        const next = data[gapEndIndex];
+        const totalSteps = gapEndIndex - gapStartIndex;
+
+        for (let step = 1; step < totalSteps; step++) {
+          const idx = gapStartIndex + step;
+          const t = step / totalSteps;
+
+          const prevLower = prev[lowerKey];
+          const nextLower = next[lowerKey];
+          const interpolatedLower: number | null =
+            prevLower != null && nextLower != null
+              ? prevLower + t * (nextLower - prevLower)
+              : null;
+              
+          const prevUpper = prev[upperKey];
+          const nextUpper = next[upperKey];
+          const interpolatedUpper: number | null =
+            prevUpper != null && nextUpper != null
+              ? prevUpper + t * (nextUpper - prevUpper)
+              : null;
+
+          const prevForecast = prev[forecastKey]!;
+          const nextForecast = next[forecastKey]!;
+
+          data[idx] = {
+            ...data[idx],
+            [forecastKey]: prevForecast + t * (nextForecast - prevForecast),
+            [lowerKey]: interpolatedLower,
+            [upperKey]: interpolatedUpper,
+          };
+        }
+
+        i = gapEndIndex;
       }
+    };
+
+    // Interpolate gaps for neutral EWMA
+    if (showNeutral) {
+      interpolateGaps(result, 'ewma_forecast', 'ewma_lower', 'ewma_upper');
     }
-    if (remainingGaps.length > 0) {
-      console.log("[EWMA Debug] ⚠️ Remaining GAPS after interpolation:", remainingGaps);
+    
+    // Interpolate gaps for biased EWMA
+    if (showBiased) {
+      interpolateGaps(result, 'ewma_biased_forecast', 'ewma_biased_lower', 'ewma_biased_upper');
     }
 
     return result;
-  }, [chartData, ewmaPath, showEwmaOverlay]);
+  }, [chartData, ewmaPath, showEwmaOverlay, ewmaBiasedPath, showEwmaBiasedOverlay]);
 
-  // Create a CLEAN EWMA-only data array for the overlay line
-  // This bypasses all the complex merging and uses ewmaPath directly
-  const ewmaLineData = useMemo(() => {
-    if (!showEwmaOverlay || !ewmaPath || ewmaPath.length === 0) {
-      return [];
-    }
-
-    // Get the visible date range from chartData (normalized to YYYY-MM-DD)
-    const normalizedChartDates = chartData.map(p => normalizeDateString(p.date));
-    const chartDateSet = new Set(normalizedChartDates);
-    
-    // Filter EWMA points to only those in the visible chart range
-    // and create a simple array with date + ewma_forecast (normalized dates)
-    const filtered = ewmaPath
-      .map(p => ({
-        date: normalizeDateString(p.date_tp1),
-        ewma_forecast: p.y_hat_tp1,
-      }))
-      .filter(p => chartDateSet.has(p.date))
-      .sort((a, b) => a.date.localeCompare(b.date));
-    
-    console.log("[EWMA Line Data] Created:", {
-      ewmaPathTotal: ewmaPath.length,
-      chartDatesCount: chartDateSet.size,
-      filteredCount: filtered.length,
-      sample: filtered.slice(0, 5),
-    });
-    
-    return filtered;
-  }, [chartData, ewmaPath, showEwmaOverlay]);
-
-  // Test helper: find last chart points for debug dot
+  // Find last chart points
   const lastChartPoint = chartDataWithEwma[chartDataWithEwma.length - 1];
   const lastHistoricalPoint =
-    chartDataWithEwma.slice().reverse().find((p) => p.value != null) || null;
-
-  console.log("[PriceChart] last points", {
-    lastChartPoint,
-    lastHistoricalPoint,
-  });
-
-  // Debug: Log horizon/future data
-  console.log("[PriceChart] horizon/future", {
-    h,
-    lastDateStr,
-    futureDates,
-    rangeLength: rangeData.length,
-    fullLength: fullData.length,
-    chartLength: chartData.length,
-    lastChartDates: chartData.slice(-5).map(p => p.date),
-  });
-
-  // Debug chartData to see what we're actually sending to the chart
-  console.log("[PriceChart] chartData sample:", {
-    total: chartData.length,
-    last3: chartData.slice(-3),
-    futureCount: chartData.filter(p => p.isFuture).length,
-  });
+    chartDataWithEwma.slice().reverse().find((p) => p.close != null) || null;
 
   // Extract forecast band from activeForecast (if any)
   let overlayDate: string | null = null;
@@ -611,27 +581,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
   const af = forecastOverlay?.activeForecast;
 
-  console.log("[PriceChart] Debug - Forecast Overlay Check:", {
-    forecastOverlay: !!forecastOverlay,
-    activeForecast: !!af,
-    volModel: forecastOverlay?.volModel,
-    coverage: forecastOverlay?.coverage,
-    horizon: h,
-    chartDataLength: chartData.length,
-    willRenderOverlay: !!(af && chartData.length > 0)
-  });
-
   if (af && chartData.length > 0) {
-    console.log("[PriceChart] ✅ WILL RENDER OVERLAY - activeForecast available:", {
-      method: af.method,
-      date_t: af.date_t,
-      hasYHat: !!af.y_hat,
-      hasIntervals: !!af.intervals,
-      hasLH: !!af.L_h,
-      hasUH: !!af.U_h
-    });
-    console.log("[PriceChart] Available chart dates (last 10):", chartData.slice(-10).map(p => p.date));
-
     // 1) Calculate target date (Date t+h) using business days
     const forecastDateT = af.date_t || af.target_date || af.date;
     
@@ -640,24 +590,12 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     const forecastHorizon = af.horizonTrading || af.h || af.target?.h;
     const horizonValue = forecastHorizon || h || 1;
     
-    console.log("[PriceChart] Horizon selection:", {
-      uiHorizon: h,
-      forecastHorizon: forecastHorizon,
-      usingHorizon: horizonValue,
-      forecastHasHorizonData: !!forecastHorizon
-    });
-    
     // Calculate the target date (t+h) accounting for business days
     const targetDate = calculateTargetDate(forecastDateT, horizonValue);
     const lastPoint = chartData[chartData.length - 1];
     
     // Use the target date if available, otherwise fall back to last chart date
     overlayDate = targetDate || (lastPoint?.date ?? null);
-
-    console.log("[PriceChart] Forecast reference date (t):", forecastDateT);
-    console.log("[PriceChart] Horizon:", horizonValue);
-    console.log("[PriceChart] Calculated target date (t+h):", targetDate);
-    console.log("[PriceChart] Using overlay date:", overlayDate);
 
     // 2) Extract center and band exactly like the Inspector does
 
@@ -721,33 +659,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       overlayUpper =
         typeof U === "number" && Number.isFinite(U) ? U : null;
     }
-
-    console.log("[PriceChart] overlay from inspector", {
-      overlayDate,
-      overlayCenter,
-      overlayLower,
-      overlayUpper,
-      isLogDomain,
-      forecastDate_t: af.date_t,
-      horizonUsed: horizonValue,
-      horizonMismatch: forecastHorizon && forecastHorizon !== h,
-      extractedData: {
-        y_hat: af.y_hat,
-        L_h: af.L_h,
-        U_h: af.U_h,
-        intervals,
-        topLevelL,
-        topLevelU
-      }
-    });
-  } else {
-    console.log("[PriceChart] ❌ NO OVERLAY - Conditions not met:", {
-      hasActiveForecast: !!af,
-      hasChartData: chartData.length > 0,
-      activeForecastType: af ? typeof af : 'undefined',
-      activeForecastMethod: af?.method || 'none'
-    });
   }
+
+  // Get model name for forecast overlay
+  const forecastModelName = forecastOverlay?.volModel || horizonCoverage?.volModel || 'Model';
 
   // Create chart data with forecast band for rendering the connecting lines and filled area
   const chartDataWithForecastBand = useMemo(() => {
@@ -757,29 +672,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     // If we have forecast overlay data, add band values to relevant points
     if (overlayDate && overlayCenter != null && lastHistoricalPoint) {
       const lastHistDate = lastHistoricalPoint.date;
-      const lastHistValue = lastHistoricalPoint.value;
+      const lastHistValue = lastHistoricalPoint.close;
       
       // Check if overlayDate exists in data
       const overlayDateExists = data.some(p => p.date === overlayDate);
-      
-      console.log("[ForecastBand] Building forecast band data:", {
-        overlayDate,
-        overlayCenter,
-        overlayLower,
-        overlayUpper,
-        lastHistDate,
-        lastHistValue,
-        overlayDateExists,
-        dataLength: data.length,
-        lastFewDates: data.slice(-5).map(p => p.date),
-        lastFewPoints: data.slice(-5).map(p => ({
-          date: p.date,
-          value: p.value,
-          fc: p.forecastCenter,
-          fl: p.forecastLower,
-          fu: p.forecastUpper
-        }))
-      });
       
       // If overlayDate doesn't exist in data, add it
       if (!overlayDateExists) {
@@ -790,6 +686,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           forecastCenter: overlayCenter,
           forecastLower: overlayLower,
           forecastUpper: overlayUpper,
+          forecastModelName,
         }];
         // Sort by date to maintain order
         data.sort((a, b) => a.date.localeCompare(b.date));
@@ -798,12 +695,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       // Find the indices of the last historical point and the overlay date
       const lastHistIndex = data.findIndex(p => p.date === lastHistDate);
       const overlayIndex = data.findIndex(p => p.date === overlayDate);
-      
-      console.log("[ForecastBand] Index lookup:", {
-        lastHistIndex,
-        overlayIndex,
-        pointsBetween: overlayIndex - lastHistIndex - 1
-      });
       
       // Update all points from lastHistDate to overlayDate with interpolated values
       // This ensures the line/area renders continuously
@@ -818,6 +709,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               forecastCenter: lastHistValue,
               forecastLower: lastHistValue,
               forecastUpper: lastHistValue,
+              forecastModelName,
             };
           }
           
@@ -828,6 +720,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               forecastCenter: overlayCenter,
               forecastLower: overlayLower,
               forecastUpper: overlayUpper,
+              forecastModelName,
             };
           }
           
@@ -839,6 +732,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               forecastCenter: lastHistValue + t * (overlayCenter - lastHistValue),
               forecastLower: overlayLower != null ? lastHistValue + t * (overlayLower - lastHistValue) : null,
               forecastUpper: overlayUpper != null ? lastHistValue + t * (overlayUpper - lastHistValue) : null,
+              forecastModelName,
             };
           }
           
@@ -848,27 +742,14 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     }
     
     return data;
-  }, [chartDataWithEwma, overlayDate, overlayCenter, overlayLower, overlayUpper, lastHistoricalPoint]);
-
-  // Debug: Log the actual chart data with EWMA
-  console.log("[PriceChart] chartDataWithForecastBand EWMA check:", {
-    total: chartDataWithForecastBand.length,
-    withEwma: chartDataWithForecastBand.filter(p => p.ewma_forecast != null).length,
-    withoutEwma: chartDataWithForecastBand.filter(p => p.ewma_forecast == null).length,
-    // Check for gaps - consecutive points where one has ewma and next doesn't
-    samplePoints: chartDataWithForecastBand.slice(0, 10).map(p => ({
-      date: p.date,
-      value: p.value?.toFixed(2),
-      ewma: p.ewma_forecast?.toFixed(2) ?? 'null',
-    })),
-  });
+  }, [chartDataWithEwma, overlayDate, overlayCenter, overlayLower, overlayUpper, lastHistoricalPoint, forecastModelName]);
 
   // Compute Y-axis domain that includes EWMA values when overlay is active
   const priceYDomain = useMemo(() => {
     const values: number[] = [];
     
     chartDataWithForecastBand.forEach(p => {
-      if (p.value != null) values.push(p.value);
+      if (p.close != null) values.push(p.close);
       if (p.forecastCenter != null) values.push(p.forecastCenter);
       if (p.forecastLower != null) values.push(p.forecastLower);
       if (p.forecastUpper != null) values.push(p.forecastUpper);
@@ -1215,13 +1096,199 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 </div>
               </div>
             )}
+            
+            {/* Vertical Divider - before EWMA */}
+            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+            
+            {/* EWMA Section */}
+            <div className="flex flex-col gap-1">
+              <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>EWMA</span>
+              <div className="flex items-center gap-1">
+                {/* EWMA Button */}
+                <div className="relative group">
+                  <button
+                    onClick={() => setShowEwmaOverlay(!showEwmaOverlay)}
+                    disabled={!ewmaPath || ewmaPath.length === 0}
+                    className={`
+                      px-3 py-1 text-sm rounded-full transition-colors
+                      ${showEwmaOverlay && ewmaPath && ewmaPath.length > 0
+                        ? isDarkMode
+                          ? 'bg-purple-600 text-white'
+                          : 'bg-purple-500 text-white'
+                        : (!ewmaPath || ewmaPath.length === 0)
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : isDarkMode 
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
+                    `}
+                  >
+                    Unbiased
+                  </button>
+                  
+                  {/* EWMA Stats Hover Card */}
+                  {showEwmaOverlay && ewmaSummary && (
+                    <div 
+                      className={`absolute top-full mt-2 left-0 z-50 min-w-[280px] rounded-xl border shadow-xl p-3 backdrop-blur-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ${
+                        isDarkMode 
+                          ? 'bg-transparent border-gray-500/30' 
+                          : 'bg-transparent border-gray-400/30'
+                      }`}
+                    >
+                      <div className="mb-2">
+                        <h4 className={`text-xs font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                          EWMA Walker ({horizon ?? 1}D)
+                        </h4>
+                        <p className={`text-[10px] ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                          Baseline volatility-only forecast (λ = 0.94)
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                        <div className="flex flex-col">
+                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Coverage</span>
+                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {(ewmaSummary.coverage * 100).toFixed(1)}%{' '}
+                            <span className={`text-[9px] font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                              (target {(ewmaSummary.targetCoverage * 100).toFixed(1)}%)
+                            </span>
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Interval score</span>
+                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {ewmaSummary.intervalScore.toFixed(3)}
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Avg width</span>
+                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {(ewmaSummary.avgWidth * 100).toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>z-mean / z-std</span>
+                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {ewmaSummary.zMean.toFixed(3)} / {ewmaSummary.zStd.toFixed(3)}
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Direction hit-rate</span>
+                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {(ewmaSummary.directionHitRate * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Points</span>
+                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {ewmaSummary.nPoints.toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* EWMA Biased Button */}
+                {onLoadEwmaBiased && (
+                  <div className="relative group">
+                    <button
+                      onClick={() => {
+                        if (ewmaBiasedPath && ewmaBiasedPath.length > 0) {
+                          setShowEwmaBiasedOverlay(!showEwmaBiasedOverlay);
+                        } else {
+                          onLoadEwmaBiased();
+                          setShowEwmaBiasedOverlay(true);
+                        }
+                      }}
+                      disabled={isLoadingEwmaBiased}
+                      className={`
+                        px-3 py-1 text-sm rounded-full transition-colors
+                        ${showEwmaBiasedOverlay && ewmaBiasedPath && ewmaBiasedPath.length > 0
+                          ? isDarkMode
+                            ? 'bg-amber-600 text-white'
+                            : 'bg-amber-500 text-white'
+                          : isLoadingEwmaBiased
+                            ? 'bg-gray-300 text-gray-500 cursor-wait'
+                            : isDarkMode 
+                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }
+                      `}
+                    >
+                      {isLoadingEwmaBiased ? 'Loading...' : 'Biased'}
+                    </button>
+                    
+                    {/* EWMA Biased Stats Hover Card */}
+                    {showEwmaBiasedOverlay && ewmaBiasedSummary && (
+                      <div 
+                        className={`absolute top-full mt-2 left-0 z-50 min-w-[280px] rounded-xl border shadow-xl p-3 backdrop-blur-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ${
+                          isDarkMode 
+                            ? 'bg-transparent border-gray-500/30' 
+                            : 'bg-transparent border-gray-400/30'
+                        }`}
+                      >
+                        <div className="mb-2">
+                          <h4 className={`text-xs font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            EWMA Biased ({horizon ?? 1}D)
+                          </h4>
+                          <p className={`text-[10px] ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            Reaction Map tilted forecast (λ = 0.94)
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
+                          <div className="flex flex-col">
+                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Coverage</span>
+                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {(ewmaBiasedSummary.coverage * 100).toFixed(1)}%{' '}
+                              <span className={`text-[9px] font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                                (target {(ewmaBiasedSummary.targetCoverage * 100).toFixed(1)}%)
+                              </span>
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Interval score</span>
+                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {ewmaBiasedSummary.intervalScore.toFixed(3)}
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Avg width</span>
+                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {(ewmaBiasedSummary.avgWidth * 100).toFixed(2)}%
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>z-mean / z-std</span>
+                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {ewmaBiasedSummary.zMean.toFixed(3)} / {ewmaBiasedSummary.zStd.toFixed(3)}
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Direction hit-rate</span>
+                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {(ewmaBiasedSummary.directionHitRate * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Points</span>
+                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                              {ewmaBiasedSummary.nPoints.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
         
         {/* Spacer if no horizonCoverage */}
         {!horizonCoverage && <div />}
         
-        {/* Right side: Zoom and EWMA */}
+        {/* Right side: Zoom only */}
         <div className="flex items-center gap-1">
           <button
             onClick={zoomIn}
@@ -1253,27 +1320,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           >
             −
           </button>
-          
-          {/* EWMA Path Toggle */}
-          {ewmaPath && ewmaPath.length > 0 && (
-            <button
-              onClick={() => setShowEwmaOverlay(!showEwmaOverlay)}
-              className={`
-                ml-2 px-3 py-2 rounded-full text-xs font-medium transition-all
-                ${showEwmaOverlay 
-                  ? isDarkMode
-                    ? 'bg-purple-600 text-white border border-purple-500'
-                    : 'bg-purple-500 text-white border border-purple-400'
-                  : isDarkMode 
-                    ? 'bg-gray-700 hover:bg-gray-600 text-gray-300 border border-gray-600'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-300'
-                }
-              `}
-              title={showEwmaOverlay ? "Hide EWMA forecast path" : "Show EWMA forecast path"}
-            >
-              EWMA
-            </button>
-          )}
         </div>
       </div>
       
@@ -1411,18 +1457,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 }
               }
               
-              /* Line draw effect */
-              @keyframes lineReveal {
-                0% {
-                  stroke-dashoffset: 500;
-                  opacity: 0.3;
-                }
-                100% {
-                  stroke-dashoffset: 0;
-                  opacity: 1;
-                }
-              }
-              
               /* Vertical reference line fade */
               @keyframes refLineFade {
                 0% {
@@ -1455,11 +1489,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               
               .recharts-area-area {
                 animation: areaShimmer 0.8s ease-out forwards;
-              }
-              
-              .recharts-line-curve {
-                stroke-dasharray: 500;
-                animation: lineReveal 0.7s ease-out forwards;
               }
               
               .forecast-ref-line {
@@ -1546,6 +1575,64 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       <feMergeNode in="SourceGraphic"/>
                     </feMerge>
                   </filter>
+                  {/* EWMA band gradient fill - soft purple */}
+                  <linearGradient
+                    id="ewmaBandFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor="#A855F7"
+                      stopOpacity={0.25}
+                    />
+                    <stop
+                      offset="50%"
+                      stopColor="#A855F7"
+                      stopOpacity={0.15}
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="#A855F7"
+                      stopOpacity={0.25}
+                    />
+                  </linearGradient>
+                  {/* EWMA Biased band gradient fill - amber/orange for contrast */}
+                  <linearGradient
+                    id="ewmaBiasedBandFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="0%"
+                      stopColor="#F59E0B"
+                      stopOpacity={0.25}
+                    />
+                    <stop
+                      offset="50%"
+                      stopColor="#F59E0B"
+                      stopOpacity={0.15}
+                    />
+                    <stop
+                      offset="100%"
+                      stopColor="#F59E0B"
+                      stopOpacity={0.25}
+                    />
+                  </linearGradient>
+                  {/* Glow filter for biased EWMA line */}
+                  <filter id="ewmaBiasedGlow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="3" result="blur"/>
+                    <feFlood floodColor="#F59E0B" floodOpacity="0.4" result="color"/>
+                    <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                    <feMerge>
+                      <feMergeNode in="shadow"/>
+                      <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                  </filter>
                 </defs>
 
                 <XAxis
@@ -1599,10 +1686,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 />
                 
                 {/* TEMP: Test dot at last historical point */}
-                {lastHistoricalPoint && lastHistoricalPoint.value != null && (
+                {lastHistoricalPoint && lastHistoricalPoint.close != null && (
                   <ReferenceDot
                     x={lastHistoricalPoint.date}
-                    y={lastHistoricalPoint.value}
+                    y={lastHistoricalPoint.close}
                     yAxisId="price"
                     r={4}
                     fill="orange"
@@ -1622,36 +1709,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 )}
                 
                 {/* Forecast band overlay at t+h */}
-                {(() => {
-                  console.log("[PriceChart] Overlay rendering check:", {
-                    overlayDate,
-                    overlayCenter,
-                    overlayLower, 
-                    overlayUpper,
-                    hasOverlayDate: !!overlayDate,
-                    hasCenterValue: overlayCenter != null,
-                    hasLowerValue: overlayLower != null,
-                    hasUpperValue: overlayUpper != null,
-                    shouldRenderOverlay: !!(overlayDate && overlayCenter != null),
-                    dateInChartData: chartData.some(p => p.date === overlayDate),
-                    allChartDates: chartData.map(p => p.date),
-                    forecastOverlayProps: {
-                      activeForecast: !!forecastOverlay?.activeForecast,
-                      volModel: forecastOverlay?.volModel,
-                      coverage: forecastOverlay?.coverage
-                    }
-                  });
-                  return null;
-                })()}
                 {overlayDate && overlayCenter != null && (
                   <>
-                    {console.log("[PriceChart] 🎯 RENDERING OVERLAY ELEMENTS - Dots should appear!", {
-                      overlayDate,
-                      overlayCenter,
-                      overlayLower,
-                      overlayUpper,
-                      elementCount: 1 + (overlayLower != null ? 1 : 0) + (overlayUpper != null ? 1 : 0)
-                    })}
                     {/* Vertical line at forecast date */}
                     <ReferenceLine
                       x={overlayDate}
@@ -1700,33 +1759,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     )}
                   </>
                 )}
-                
-                {/* Log when overlay should render but doesn't */}
-                {(() => {
-                  if (!overlayDate) console.log("[PriceChart] ❌ NO OVERLAY DATE - Cannot render dots");
-                  if (overlayDate && overlayCenter == null) console.log("[PriceChart] ❌ NO OVERLAY CENTER - Cannot render dots", {overlayDate, overlayCenter});
-                  return null;
-                })()}
-                
-                {/* Debug log for forecast band data */}
-                {(() => {
-                  const pointsWithForecast = chartDataWithForecastBand.filter(p => 
-                    p.forecastCenter != null || p.forecastLower != null || p.forecastUpper != null
-                  );
-                  console.log("[PriceChart] 📊 FORECAST BAND DATA:", {
-                    totalPoints: chartDataWithForecastBand.length,
-                    pointsWithForecastData: pointsWithForecast.length,
-                    forecastPoints: pointsWithForecast.map(p => ({
-                      date: p.date,
-                      value: p.value,
-                      center: p.forecastCenter,
-                      lower: p.forecastLower,
-                      upper: p.forecastUpper
-                    })),
-                    willRenderBands: !!(overlayLower != null && overlayUpper != null)
-                  });
-                  return null;
-                })()}
                 
                 {/* Forecast Band - Upper boundary filled to bottom, then Lower boundary masks it */}
                 {overlayLower != null && overlayUpper != null && (
@@ -1825,16 +1857,16 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                   />
                 )}
                 
-                {/* Price Area - takes up top 75% */}
-                <Area
+                {/* Price Line - based on Close price */}
+                <Line
                   yAxisId="price"
                   type="monotone"
-                  dataKey="value"
+                  dataKey="close"
                   stroke={lineColor}
                   strokeWidth={2}
-                  fill="url(#priceFill)"
                   dot={false}
                   activeDot={<AnimatedPriceDot />}
+                  connectNulls={true}
                 />
                 
                 {/* Volume Bars - bottom 25% */}
@@ -1848,24 +1880,116 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                   ))}
                 </Bar>
                 
-                {/* EWMA Forecast Path Overlay - Simple Line */}
+                {/* EWMA Band - Upper boundary area */}
                 {showEwmaOverlay && (
-                  <>
-                    <Line
-                      yAxisId="price"
-                      type="linear"
-                      dataKey="ewma_forecast"
-                      stroke="transparent"
-                      strokeWidth={0}
-                      dot={false}
-                      activeDot={<AnimatedEwmaDot />}
-                      connectNulls={true}
-                      isAnimationActive={false}
-                    />
-                    {ewmaLineData.length > 0 && (
-                      <Customized component={<CustomEwmaLine ewmaLineData={ewmaLineData} />} />
-                    )}
-                  </>
+                  <Area
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ewma_upper"
+                    stroke="rgba(168, 85, 247, 0.3)"
+                    strokeWidth={1}
+                    fill="url(#ewmaBandFill)"
+                    fillOpacity={1}
+                    dot={false}
+                    activeDot={false}
+                    connectNulls={true}
+                    isAnimationActive={true}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                  />
+                )}
+                
+                {/* EWMA Band - Lower boundary masks the upper area */}
+                {showEwmaOverlay && (
+                  <Area
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ewma_lower"
+                    stroke="rgba(168, 85, 247, 0.3)"
+                    strokeWidth={1}
+                    fill={isDarkMode ? "#0f172a" : "#ffffff"}
+                    fillOpacity={1}
+                    dot={false}
+                    activeDot={false}
+                    connectNulls={true}
+                    isAnimationActive={true}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                  />
+                )}
+                
+                {/* EWMA Forecast Path Overlay - Center Line */}
+                {showEwmaOverlay && (
+                  <Line
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ewma_forecast"
+                    stroke="#A855F7"
+                    strokeWidth={2.5}
+                    dot={false}
+                    activeDot={<AnimatedEwmaDot />}
+                    connectNulls={true}
+                    isAnimationActive={true}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                    filter="url(#ewmaGlow)"
+                  />
+                )}
+                
+                {/* EWMA Biased Band - Upper boundary area */}
+                {showEwmaBiasedOverlay && (
+                  <Area
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ewma_biased_upper"
+                    stroke="rgba(245, 158, 11, 0.3)"
+                    strokeWidth={1}
+                    fill="url(#ewmaBiasedBandFill)"
+                    fillOpacity={1}
+                    dot={false}
+                    activeDot={false}
+                    connectNulls={true}
+                    isAnimationActive={true}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                  />
+                )}
+                
+                {/* EWMA Biased Band - Lower boundary masks the upper area */}
+                {showEwmaBiasedOverlay && (
+                  <Area
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ewma_biased_lower"
+                    stroke="rgba(245, 158, 11, 0.3)"
+                    strokeWidth={1}
+                    fill={isDarkMode ? "#0f172a" : "#ffffff"}
+                    fillOpacity={1}
+                    dot={false}
+                    activeDot={false}
+                    connectNulls={true}
+                    isAnimationActive={true}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                  />
+                )}
+                
+                {/* EWMA Biased Forecast Path Overlay - Center Line */}
+                {showEwmaBiasedOverlay && (
+                  <Line
+                    yAxisId="price"
+                    type="monotone"
+                    dataKey="ewma_biased_forecast"
+                    stroke="#F59E0B"
+                    strokeWidth={2.5}
+                    dot={false}
+                    activeDot={<AnimatedEwmaDot />}
+                    connectNulls={true}
+                    isAnimationActive={true}
+                    animationDuration={800}
+                    animationEasing="ease-out"
+                    filter="url(#ewmaBiasedGlow)"
+                  />
                 )}
               </ComposedChart>
             </ResponsiveContainer>
@@ -1913,14 +2037,14 @@ const RangeSelector: React.FC<RangeSelectorProps> = ({
               type="button"
               onClick={() => onChange(range)}
               className={`
-                flex-1 px-2 py-2 text-sm font-medium rounded-lg transition-all mx-0.5
+                flex-1 px-2 py-2 text-sm font-medium transition-all mx-0.5
                 ${isSelected 
                   ? isDarkMode 
-                    ? 'bg-white/10 text-white border border-white/20' 
-                    : 'bg-gray-200 text-gray-900 border border-gray-300'
+                    ? 'bg-white/10 text-white border border-white/20 rounded-full' 
+                    : 'bg-gray-200 text-gray-900 border border-gray-300 rounded-full'
                   : isDarkMode
-                    ? 'bg-transparent text-gray-400 hover:bg-white/5 hover:text-gray-300 border border-transparent'
-                    : 'bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800 border border-transparent'
+                    ? 'bg-transparent text-gray-400 hover:bg-white/5 hover:text-gray-300 border border-transparent rounded-lg hover:rounded-full'
+                    : 'bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800 border border-transparent rounded-lg hover:rounded-full'
                 }
               `}
             >
@@ -1961,109 +2085,114 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   if (!active || !payload || !payload.length || !label) return null;
   
   const data = payload[0].payload;
-  const price = payload[0].value;
+  // Use close price directly from data, not from payload value (which could be EWMA)
+  const price = data.close;
   
   // Check if this is a future/forecast-only point (no historical price, only forecast data)
   const isFuturePoint = data.isFuture === true;
   const hasForecastData = isFuturePoint && (data.forecastCenter != null || data.forecastLower != null || data.forecastUpper != null);
   const hasEwmaData = data.ewma_forecast != null;
+  const hasEwmaBiasedData = data.ewma_biased_forecast != null;
+  
+  // Get model name for forecast display
+  const modelName = data.forecastModelName || 'Model';
   
   return (
-    <div className={`rounded-lg border px-3 py-2 text-xs shadow-lg ${
+    <div className={`rounded-xl border px-3 py-2 text-xs shadow-xl backdrop-blur-sm ${
       isDarkMode 
-        ? 'border-white/10 bg-[#111827] text-slate-100'
-        : 'border-gray-300 bg-white text-gray-900'
+        ? 'bg-transparent border-gray-500/30 text-slate-100'
+        : 'bg-transparent border-gray-400/30 text-gray-900'
     }`}>
+      {/* Date Header - spans full width */}
+      <div className={`text-[11px] font-medium mb-2 ${
+        isDarkMode ? 'text-slate-300' : 'text-gray-600'
+      }`}>
+        {formatTooltipDate(label)}
+      </div>
+      
       <div className="flex gap-4">
-        {/* Left Column: Price Data */}
-        <div className="space-y-1 min-w-[120px]">
-          {/* Date with year */}
-          <div className={`text-[11px] font-medium ${
-            isDarkMode ? 'text-slate-300' : 'text-gray-600'
-          }`}>
-            {formatTooltipDate(label)}
-          </div>
-          
-          {/* Price - show Center forecast if available, otherwise Close price */}
-          {(hasForecastData && data.forecastCenter != null) ? (
-            <div className="text-sm font-mono tabular-nums font-semibold">
-              ${data.forecastCenter.toFixed(2)}
-            </div>
-          ) : price != null && (
-            <div className="text-sm font-mono tabular-nums font-semibold">
-              ${price.toFixed(2)}
-            </div>
-          )}
-          
-          {/* Forecast Data - show when hovering on forecast points */}
-          {hasForecastData && (
-            <div className={`space-y-1 pt-1 border-t ${
-              isDarkMode ? 'border-white/10' : 'border-gray-200'
-            }`}>
+        {/* Model Forecast Column - Blue themed (only for future forecast points) */}
+        {hasForecastData && (
+          <>
+            <div className="space-y-1 min-w-[100px]">
+              {/* Model Name Header */}
               <div className={`text-[10px] font-medium uppercase tracking-wide ${
                 isDarkMode ? 'text-blue-400' : 'text-blue-600'
               }`}>
-                Forecast
+                {modelName}
               </div>
-              {data.forecastUpper != null && (
-                <div className="flex justify-between gap-4">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper:</span>
-                  <span className="font-mono text-cyan-400">${data.forecastUpper.toFixed(2)}</span>
-                </div>
-              )}
+              
+              {/* Model Forecast (center) */}
               {data.forecastCenter != null && (
-                <div className="flex justify-between gap-4">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Center:</span>
-                  <span className="font-mono font-semibold text-blue-400">${data.forecastCenter.toFixed(2)}</span>
+                <div className={`text-sm font-mono tabular-nums font-semibold ${
+                  isDarkMode ? 'text-blue-300' : 'text-blue-700'
+                }`}>
+                  ${data.forecastCenter.toFixed(2)}
                 </div>
               )}
-              {data.forecastLower != null && (
-                <div className="flex justify-between gap-4">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower:</span>
-                  <span className="font-mono text-cyan-400">${data.forecastLower.toFixed(2)}</span>
-                </div>
-              )}
+              
+              {/* Model Bounds */}
+              <div className="space-y-0.5 pt-1">
+                {data.forecastUpper != null && (
+                  <div className="flex justify-between gap-3">
+                    <span className={isDarkMode ? 'text-blue-400/70' : 'text-blue-600'}>Upper:</span>
+                    <span className={`font-mono ${isDarkMode ? 'text-blue-300/80' : 'text-blue-700'}`}>${data.forecastUpper.toFixed(2)}</span>
+                  </div>
+                )}
+                {data.forecastLower != null && (
+                  <div className="flex justify-between gap-3">
+                    <span className={isDarkMode ? 'text-blue-400/70' : 'text-blue-600'}>Lower:</span>
+                    <span className={`font-mono ${isDarkMode ? 'text-blue-300/80' : 'text-blue-700'}`}>${data.forecastLower.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-          
-          {/* OHLCV Data - only show for historical points */}
-          {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
-            <div className="space-y-0.5 pt-1">
-              {data.open && (
-                <div className="flex justify-between">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Open:</span>
-                  <span className="font-mono">${data.open.toFixed(2)}</span>
-                </div>
-              )}
-              {data.high && (
-                <div className="flex justify-between">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>High:</span>
-                  <span className="font-mono">${data.high.toFixed(2)}</span>
-                </div>
-              )}
-              {data.low && (
-                <div className="flex justify-between">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Low:</span>
-                  <span className="font-mono">${data.low.toFixed(2)}</span>
-                </div>
-              )}
-              {data.close && (
-                <div className="flex justify-between">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Close:</span>
-                  <span className="font-mono">${data.close.toFixed(2)}</span>
-                </div>
-              )}
-              {data.volume && (
-                <div className="flex justify-between">
-                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Volume:</span>
-                  <span className="font-mono">{formatVolumeAbbreviated(data.volume)}</span>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+          </>
+        )}
         
-        {/* Right Column: EWMA Data - Purple themed */}
+        {/* OHLCV Data - only show for historical points */}
+        {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
+          <div className="space-y-0.5 min-w-[100px]">
+            {data.open && (
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Open:</span>
+                <span className="font-mono">${data.open.toFixed(2)}</span>
+              </div>
+            )}
+            {data.high && (
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>High:</span>
+                <span className="font-mono">${data.high.toFixed(2)}</span>
+              </div>
+            )}
+            {data.low && (
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Low:</span>
+                <span className="font-mono">${data.low.toFixed(2)}</span>
+              </div>
+            )}
+            {data.close && (
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Close:</span>
+                <span className={`font-mono ${
+                  data.open && data.close > data.open
+                    ? 'text-green-400'
+                    : data.open && data.close < data.open
+                      ? 'text-red-400'
+                      : 'text-yellow-400'
+                }`}>${data.close.toFixed(2)}</span>
+              </div>
+            )}
+            {data.volume && (
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Volume:</span>
+                <span className="font-mono">{formatVolumeAbbreviated(data.volume)}</span>
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* EWMA Column - Purple themed */}
         {hasEwmaData && (
           <>
             {/* Vertical Divider */}
@@ -2071,12 +2200,16 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
             
             <div className="space-y-1 min-w-[100px]">
               {/* EWMA Header */}
-              <div className="text-[10px] font-medium uppercase tracking-wide text-purple-400">
-                EWMA
+              <div className={`text-[10px] font-medium uppercase tracking-wide ${
+                isDarkMode ? 'text-purple-400' : 'text-purple-600'
+              }`}>
+                EWMA Unbiased
               </div>
               
               {/* EWMA Forecast (ŷ) */}
-              <div className="text-sm font-mono tabular-nums font-semibold text-purple-300">
+              <div className={`text-sm font-mono tabular-nums font-semibold ${
+                isDarkMode ? 'text-purple-300' : 'text-purple-700'
+              }`}>
                 ${data.ewma_forecast!.toFixed(2)}
               </div>
               
@@ -2084,14 +2217,54 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               <div className="space-y-0.5 pt-1">
                 {data.ewma_upper != null && (
                   <div className="flex justify-between gap-3">
-                    <span className="text-purple-400/70">Upper:</span>
-                    <span className="font-mono text-purple-300/80">${data.ewma_upper.toFixed(2)}</span>
+                    <span className={isDarkMode ? 'text-purple-400/70' : 'text-purple-600'}>Upper:</span>
+                    <span className={`font-mono ${isDarkMode ? 'text-purple-300/80' : 'text-purple-700'}`}>${data.ewma_upper.toFixed(2)}</span>
                   </div>
                 )}
                 {data.ewma_lower != null && (
                   <div className="flex justify-between gap-3">
-                    <span className="text-purple-400/70">Lower:</span>
-                    <span className="font-mono text-purple-300/80">${data.ewma_lower.toFixed(2)}</span>
+                    <span className={isDarkMode ? 'text-purple-400/70' : 'text-purple-600'}>Lower:</span>
+                    <span className={`font-mono ${isDarkMode ? 'text-purple-300/80' : 'text-purple-700'}`}>${data.ewma_lower.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+        
+        {/* EWMA Biased Column - Amber themed */}
+        {hasEwmaBiasedData && (
+          <>
+            {/* Vertical Divider */}
+            <div className={`w-px ${isDarkMode ? 'bg-amber-500/30' : 'bg-amber-300'}`} />
+            
+            <div className="space-y-1 min-w-[100px]">
+              {/* EWMA Biased Header */}
+              <div className={`text-[10px] font-medium uppercase tracking-wide ${
+                isDarkMode ? 'text-amber-400' : 'text-amber-600'
+              }`}>
+                EWMA Biased
+              </div>
+              
+              {/* EWMA Biased Forecast (ŷ) */}
+              <div className={`text-sm font-mono tabular-nums font-semibold ${
+                isDarkMode ? 'text-amber-300' : 'text-amber-700'
+              }`}>
+                ${data.ewma_biased_forecast!.toFixed(2)}
+              </div>
+              
+              {/* EWMA Biased Bounds */}
+              <div className="space-y-0.5 pt-1">
+                {data.ewma_biased_upper != null && (
+                  <div className="flex justify-between gap-3">
+                    <span className={isDarkMode ? 'text-amber-400/70' : 'text-amber-600'}>Upper:</span>
+                    <span className={`font-mono ${isDarkMode ? 'text-amber-300/80' : 'text-amber-700'}`}>${data.ewma_biased_upper.toFixed(2)}</span>
+                  </div>
+                )}
+                {data.ewma_biased_lower != null && (
+                  <div className="flex justify-between gap-3">
+                    <span className={isDarkMode ? 'text-amber-400/70' : 'text-amber-600'}>Lower:</span>
+                    <span className={`font-mono ${isDarkMode ? 'text-amber-300/80' : 'text-amber-700'}`}>${data.ewma_biased_lower.toFixed(2)}</span>
                   </div>
                 )}
               </div>
@@ -2218,68 +2391,6 @@ const AnimatedEwmaDot = (props: any) => {
       style={{
         filter: 'drop-shadow(0 0 4px rgba(168, 85, 247, 0.6))',
         transition: 'all 0.12s ease-out',
-      }}
-    />
-  );
-};
-
-// Custom EWMA line renderer using Customized component
-// This bypasses Recharts Line component issues with connectNulls
-interface CustomEwmaLineProps {
-  xAxisMap?: any;
-  yAxisMap?: any;
-  data?: any[];
-  ewmaLineData?: Array<{ date: string; ewma_forecast: number }>;
-}
-
-const CustomEwmaLine: React.FC<CustomEwmaLineProps> = ({ 
-  xAxisMap, 
-  yAxisMap, 
-  data,
-  ewmaLineData 
-}) => {
-  if (!xAxisMap || !yAxisMap || !ewmaLineData || ewmaLineData.length === 0) {
-    return null;
-  }
-
-  // Get the axis scales
-  const xAxis = Object.values(xAxisMap)[0] as any;
-  const yAxis = yAxisMap?.price as any;
-  
-  if (!xAxis?.scale || !yAxis?.scale) {
-    return null;
-  }
-
-  // Build the path by converting each EWMA point to SVG coordinates
-  const points: Array<{ x: number; y: number }> = [];
-  
-  ewmaLineData.forEach(point => {
-    const x = xAxis.scale(point.date);
-    const y = yAxis.scale(point.ewma_forecast);
-    
-    if (typeof x === 'number' && typeof y === 'number' && !isNaN(x) && !isNaN(y)) {
-      points.push({ x, y });
-    }
-  });
-
-  if (points.length < 2) {
-    return null;
-  }
-
-  // Create SVG path - simple line connecting all points
-  const pathD = points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`)
-    .join(' ');
-
-  return (
-    <path
-      d={pathD}
-      fill="none"
-      stroke="#A855F7"
-      strokeWidth={2.5}
-      strokeOpacity={0.9}
-      style={{
-        filter: 'drop-shadow(0 0 2px rgba(168, 85, 247, 0.5))',
       }}
     />
   );

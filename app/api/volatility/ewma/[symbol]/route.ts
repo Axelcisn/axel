@@ -14,6 +14,7 @@ interface RouteParams {
  * - endDate: End date for walk (ISO string)
  * - initialWindow: Initial window size (default: 252)
  * - coverage: Target coverage level (default: 0.95)
+ * - h: Forecast horizon in trading days (default: 1)
  */
 export async function GET(
   request: NextRequest,
@@ -35,6 +36,7 @@ export async function GET(
     const endDate = searchParams.get('endDate') || undefined;
     const initialWindow = parseInt(searchParams.get('initialWindow') || '252', 10);
     const coverage = parseFloat(searchParams.get('coverage') || '0.95');
+    const horizon = parseInt(searchParams.get('h') || '1', 10);
 
     // Validate parameters
     if (isNaN(lambda) || lambda <= 0 || lambda >= 1) {
@@ -55,6 +57,12 @@ export async function GET(
         { status: 400 }
       );
     }
+    if (isNaN(horizon) || horizon < 1) {
+      return NextResponse.json(
+        { error: 'h (horizon) must be at least 1' },
+        { status: 400 }
+      );
+    }
 
     // Run EWMA walker
     const result = await runEwmaWalker({
@@ -63,7 +71,8 @@ export async function GET(
       startDate,
       endDate,
       initialWindow,
-      coverage
+      coverage,
+      horizon,
     });
 
     // Compute summary statistics
@@ -72,6 +81,7 @@ export async function GET(
     return NextResponse.json({
       success: true,
       symbol,
+      horizon: result.params.horizon,
       points: result.points,
       piMetrics: {
         empiricalCoverage: summary.coverage,
@@ -85,7 +95,8 @@ export async function GET(
       directionHitRate: summary.directionHitRate,
       volatilityStats: summary.volatilityStats,
       dateRange: summary.dateRange,
-      params: result.params
+      params: result.params,
+      oosForecast: result.oosForecast ?? null,
     });
   } catch (error) {
     console.error('[EWMA API] Error:', error);

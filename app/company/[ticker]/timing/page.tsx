@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart } from '@/components/PriceChart';
+import { PriceChart, EwmaSummary } from '@/components/PriceChart';
 
 // Badge component interface and implementation
 interface BadgeProps {
@@ -269,17 +269,6 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [forecastHorizonMismatch, setForecastHorizonMismatch] = useState(false);
 
   // EWMA Walker diagnostics state
-  type EwmaSummary = {
-    coverage: number;
-    targetCoverage: number;
-    intervalScore: number;
-    avgWidth: number;
-    zMean: number;
-    zStd: number;
-    directionHitRate: number;
-    nPoints: number;
-  };
-
   type EwmaWalkerPathPoint = {
     date_t: string;
     date_tp1: string;
@@ -294,6 +283,42 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [ewmaPath, setEwmaPath] = useState<EwmaWalkerPathPoint[] | null>(null);
   const [isLoadingEwma, setIsLoadingEwma] = useState(false);
   const [ewmaError, setEwmaError] = useState<string | null>(null);
+
+  // EWMA Biased (tilted) state
+  const [ewmaBiasedSummary, setEwmaBiasedSummary] = useState<EwmaSummary | null>(null);
+  const [ewmaBiasedPath, setEwmaBiasedPath] = useState<EwmaWalkerPathPoint[] | null>(null);
+  const [isLoadingEwmaBiased, setIsLoadingEwmaBiased] = useState(false);
+  const [ewmaBiasedError, setEwmaBiasedError] = useState<string | null>(null);
+
+  // EWMA Reaction Map state
+  type ReactionBucketSummary = {
+    bucketId: string;
+    horizon: number;
+    nObs: number;
+    pUp: number;
+    meanReturn: number;
+    stdReturn: number;
+  };
+
+  type ReactionMapSummary = {
+    trainStart: string;
+    trainEnd: string;
+    testStart: string;
+    testEnd: string;
+    nTrain: number;
+    nTest: number;
+    buckets: ReactionBucketSummary[];
+  };
+
+  const [reactionMapSummary, setReactionMapSummary] = useState<ReactionMapSummary | null>(null);
+  const [isLoadingReaction, setIsLoadingReaction] = useState(false);
+  const [reactionError, setReactionError] = useState<string | null>(null);
+  const [reactionLambda, setReactionLambda] = useState(0.94);
+  // Coverage and Horizon for Reaction Map now come from main controls:
+  // - coverage (main Timing coverage)
+  // - h (main Timing horizon)
+  const [reactionTrainFraction, setReactionTrainFraction] = useState(0.7);
+  const [reactionMinTrainObs, setReactionMinTrainObs] = useState(500);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -953,9 +978,14 @@ export default function TimingPage({ params }: TimingPageProps) {
       setIsLoadingEwma(true);
       setEwmaError(null);
 
-      // Adjust query params as needed (lambda, start/end)
+      // Build query params including horizon
+      const query = new URLSearchParams({
+        lambda: '0.94',
+        h: String(h),
+      });
+
       const res = await fetch(
-        `/api/volatility/ewma/${encodeURIComponent(params.ticker)}?lambda=0.94`
+        `/api/volatility/ewma/${encodeURIComponent(params.ticker)}?${query.toString()}`
       );
       if (!res.ok) {
         const text = await res.text();
@@ -965,9 +995,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       const json = await res.json();
 
       // Expecting shape like:
-      // { points: EwmaWalkerPoint[], piMetrics: {...}, zMean, zStd, directionHitRate }
+      // { points: EwmaWalkerPoint[], piMetrics: {...}, zMean, zStd, directionHitRate, oosForecast }
       const points = json.points || [];
       const m = json.piMetrics || {};
+      const oosForecast = json.oosForecast || null;
       const zMean = typeof json.zMean === "number" ? json.zMean : NaN;
       const zStd = typeof json.zStd === "number" ? json.zStd : NaN;
       const directionHitRate =
@@ -994,7 +1025,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         zMean,
         zStd,
         directionHitRate,
-        nPoints: points.length,
+        nPoints: points.length,  // Keep as in-sample count only
       });
 
       // Map to a clean path type for chart overlay
@@ -1008,6 +1039,20 @@ export default function TimingPage({ params }: TimingPageProps) {
         U_tp1: p.U_tp1,
       }));
 
+      // Append OOS tail if present (extends EWMA line/band into future)
+      if (oosForecast && oosForecast.targetDate) {
+        mappedPath.push({
+          date_t: oosForecast.originDate,
+          date_tp1: oosForecast.targetDate,
+          S_t: oosForecast.S_t,
+          // No realized price for OOS; use forecast center as placeholder
+          S_tp1: oosForecast.y_hat,
+          y_hat_tp1: oosForecast.y_hat,
+          L_tp1: oosForecast.L,
+          U_tp1: oosForecast.U,
+        });
+      }
+
       setEwmaPath(mappedPath);
     } catch (err: any) {
       console.error("[EWMA] loadEwmaWalker error", err);
@@ -1017,12 +1062,178 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingEwma(false);
     }
-  }, [params?.ticker]);
+  }, [params?.ticker, h]);
 
-  // Load EWMA Walker on mount/ticker change
+  // Load EWMA Walker on mount/ticker change/horizon change
   useEffect(() => {
     loadEwmaWalker();
   }, [loadEwmaWalker]);
+
+  // Track if biased EWMA was ever loaded (so we know to auto-refresh on horizon change)
+  const biasedEverLoaded = useRef(false);
+
+
+  // Load EWMA Biased Walker (uses Reaction Map tilt)
+  const loadEwmaBiasedWalker = useCallback(async () => {
+    if (!params?.ticker) return;
+
+    try {
+      setIsLoadingEwmaBiased(true);
+      setEwmaBiasedError(null);
+
+      const query = new URLSearchParams({
+        lambda: reactionLambda.toString(),
+        coverage: coverage.toString(),              // main coverage
+        h: String(h),
+        trainFraction: reactionTrainFraction.toString(),
+        minTrainObs: reactionMinTrainObs.toString(),
+        shrinkFactor: "0.5",
+      });
+
+      const res = await fetch(
+        `/api/volatility/ewma-biased/${encodeURIComponent(params.ticker)}?${query.toString()}`
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `EWMA Biased API error ${res.status}`);
+      }
+
+      const json = await res.json();
+
+      if (!json.success) {
+        throw new Error(json.error || "Failed to load biased EWMA");
+      }
+
+      const {
+        points,
+        piMetrics,
+        zMean,
+        zStd,
+        directionHitRate,
+        oosForecast,
+      } = json;
+
+      const m = piMetrics || {};
+
+      setEwmaBiasedSummary({
+        coverage: typeof m.empiricalCoverage === "number" ? m.empiricalCoverage : NaN,
+        targetCoverage: typeof m.coverage === "number" ? m.coverage : NaN,
+        intervalScore: typeof m.intervalScore === "number" ? m.intervalScore : NaN,
+        avgWidth: typeof m.avgWidth === "number" ? m.avgWidth : NaN,
+        zMean: typeof zMean === "number" ? zMean : NaN,
+        zStd: typeof zStd === "number" ? zStd : NaN,
+        directionHitRate: typeof directionHitRate === "number" ? directionHitRate : NaN,
+        nPoints: points?.length ?? 0,
+      });
+
+      const mappedPath: EwmaWalkerPathPoint[] = (points || []).map((p: any) => ({
+        date_t: p.date_t,
+        date_tp1: p.date_tp1,
+        S_t: p.S_t,
+        S_tp1: p.S_tp1,
+        y_hat_tp1: p.y_hat_tp1,
+        L_tp1: p.L_tp1,
+        U_tp1: p.U_tp1,
+      }));
+
+      // Append OOS tail if present
+      if (oosForecast && oosForecast.targetDate) {
+        mappedPath.push({
+          date_t: oosForecast.originDate,
+          date_tp1: oosForecast.targetDate,
+          S_t: oosForecast.S_t,
+          S_tp1: oosForecast.y_hat,
+          y_hat_tp1: oosForecast.y_hat,
+          L_tp1: oosForecast.L,
+          U_tp1: oosForecast.U,
+        });
+      }
+
+      setEwmaBiasedPath(mappedPath);
+    } catch (err: any) {
+      console.error("[EWMA Biased] loadEwmaBiasedWalker error", err);
+      setEwmaBiasedError(err?.message || "Failed to load biased EWMA.");
+      setEwmaBiasedSummary(null);
+      setEwmaBiasedPath(null);
+    } finally {
+      setIsLoadingEwmaBiased(false);
+    }
+  }, [params?.ticker, h, reactionLambda, coverage, reactionTrainFraction, reactionMinTrainObs]);
+
+  // Auto-refresh biased EWMA when horizon/coverage changes (only if it was previously loaded)
+  useEffect(() => {
+    if (biasedEverLoaded.current) {
+      loadEwmaBiasedWalker();
+    }
+  }, [loadEwmaBiasedWalker]);
+
+  // Wrapper to mark biased as loaded on first click
+  const handleLoadBiasedClick = useCallback(() => {
+    biasedEverLoaded.current = true;
+    loadEwmaBiasedWalker();
+  }, [loadEwmaBiasedWalker]);
+
+  // Load EWMA Reaction Map (manual trigger only)
+  const loadReactionMap = useCallback(async () => {
+    if (!params?.ticker) return;
+
+    try {
+      setIsLoadingReaction(true);
+      setReactionError(null);
+
+      const query = new URLSearchParams({
+        lambda: reactionLambda.toString(),
+        coverage: coverage.toString(),              // main coverage
+        trainFraction: reactionTrainFraction.toString(),
+        minTrainObs: reactionMinTrainObs.toString(),
+        horizons: String(h),                        // main horizon
+      });
+
+      const res = await fetch(
+        `/api/volatility/ewma-reaction/${encodeURIComponent(params.ticker)}?${query.toString()}`,
+        { cache: "no-store" }
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `EWMA reaction API error ${res.status}`);
+      }
+
+      const json = await res.json();
+      
+      if (!json.success) {
+        throw new Error(json.error || "Failed to build reaction map");
+      }
+
+      const result = json.result;
+
+      const buckets: ReactionBucketSummary[] = (result.stats || []).map((s: any) => ({
+        bucketId: s.bucketId,
+        horizon: s.horizon,
+        nObs: s.nObs,
+        pUp: s.pUp,
+        meanReturn: s.meanReturn,
+        stdReturn: s.stdReturn,
+      }));
+
+      setReactionMapSummary({
+        trainStart: result.meta.trainStart,
+        trainEnd: result.meta.trainEnd,
+        testStart: result.meta.testStart,
+        testEnd: result.meta.testEnd,
+        nTrain: result.meta.nTrain,
+        nTest: result.meta.nTest,
+        buckets,
+      });
+    } catch (err: any) {
+      console.error("[EWMA REACTION] loadReactionMap error", err);
+      setReactionError(err?.message || "Failed to load EWMA reaction map.");
+      setReactionMapSummary(null);
+    } finally {
+      setIsLoadingReaction(false);
+    }
+  }, [params?.ticker, reactionLambda, coverage, h, reactionTrainFraction, reactionMinTrainObs]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -3249,6 +3460,11 @@ export default function TimingPage({ params }: TimingPageProps) {
           horizon={h}
           forecastOverlay={forecastOverlayProps}
           ewmaPath={ewmaPath}
+          ewmaSummary={ewmaSummary}
+          ewmaBiasedPath={ewmaBiasedPath}
+          ewmaBiasedSummary={ewmaBiasedSummary}
+          onLoadEwmaBiased={handleLoadBiasedClick}
+          isLoadingEwmaBiased={isLoadingEwmaBiased}
           horizonCoverage={{
             h,
             coverage,
@@ -3316,6 +3532,216 @@ export default function TimingPage({ params }: TimingPageProps) {
           forecastStatus={forecastStatus}
           volatilityError={volatilityError}
         />
+      </div>
+
+      {/* EWMA Reaction Map Card */}
+      <div className="mb-8">
+        <div className={`p-6 border rounded-lg shadow-sm ${
+          isDarkMode 
+            ? 'bg-gray-800 border-gray-600' 
+            : 'bg-white border-gray-200'
+        }`}>
+          {/* Header with controls */}
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+            <div>
+              <h3 className={`text-lg font-semibold ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>EWMA Reaction Map</h3>
+              <p className={`mt-1 text-xs ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
+                Forward returns conditional on standardized shock (EWMA volatility).
+              </p>
+            </div>
+
+            <div className="flex flex-col items-end gap-2 text-xs">
+              <div className="flex flex-wrap items-center gap-3 justify-end">
+                {/* Lambda */}
+                <div className="flex items-center gap-1">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ</span>
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={0.999}
+                    step={0.01}
+                    value={reactionLambda}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val)) {
+                        setReactionLambda(Math.min(0.999, Math.max(0.01, val)));
+                      }
+                    }}
+                    className={`w-16 rounded-full border px-2 py-[2px] text-right text-xs ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  />
+                </div>
+
+                {/* Coverage (from main coverage - read-only) */}
+                <div className="flex items-center gap-1">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Cov%</span>
+                  <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
+                    isDarkMode 
+                      ? 'bg-gray-800 border-gray-700 text-gray-300' 
+                      : 'bg-gray-100 border-gray-300 text-gray-600'
+                  }`}>
+                    {Math.round(coverage * 1000) / 10}%
+                  </div>
+                </div>
+
+                {/* Horizon (from main h - read-only) */}
+                <div className="flex items-center gap-1">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>H(d)</span>
+                  <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
+                    isDarkMode 
+                      ? 'bg-gray-800 border-gray-700 text-gray-300' 
+                      : 'bg-gray-100 border-gray-300 text-gray-600'
+                  }`}>
+                    {h}D
+                  </div>
+                </div>
+
+                {/* Train % */}
+                <div className="flex items-center gap-1">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Train%</span>
+                  <input
+                    type="number"
+                    min={10}
+                    max={90}
+                    step={5}
+                    value={Math.round(reactionTrainFraction * 100)}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val)) {
+                        const frac = Math.min(0.9, Math.max(0.1, val / 100));
+                        setReactionTrainFraction(frac);
+                      }
+                    }}
+                    className={`w-14 rounded-full border px-2 py-[2px] text-right text-xs ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  />
+                </div>
+
+                {/* Min train obs */}
+                <div className="flex items-center gap-1">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Min n</span>
+                  <input
+                    type="number"
+                    min={100}
+                    max={20000}
+                    step={100}
+                    value={reactionMinTrainObs}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val)) {
+                        setReactionMinTrainObs(Math.max(100, Math.floor(val)));
+                      }
+                    }}
+                    className={`w-20 rounded-full border px-2 py-[2px] text-right text-xs ${
+                      isDarkMode 
+                        ? 'bg-gray-700 border-gray-600 text-white' 
+                        : 'bg-white border-gray-300 text-gray-900'
+                    }`}
+                  />
+                </div>
+
+                {/* Run button */}
+                <button
+                  type="button"
+                  onClick={loadReactionMap}
+                  disabled={isLoadingReaction}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                    isLoadingReaction
+                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  {isLoadingReaction ? 'Running...' : 'Run'}
+                </button>
+              </div>
+
+              {/* Summary info row */}
+              {reactionMapSummary && (
+                <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>
+                  Train: {reactionMapSummary.trainStart} → {reactionMapSummary.trainEnd} ({reactionMapSummary.nTrain} obs) · 
+                  Test: {reactionMapSummary.testStart} → {reactionMapSummary.testEnd} ({reactionMapSummary.nTest} obs) ·
+                  H(d): {h} · Cov%: {Math.round(coverage * 1000) / 10}%
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Error Display */}
+          {reactionError && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded text-red-800 text-sm">
+              {reactionError}
+            </div>
+          )}
+
+          {/* Reaction Map Table */}
+          {reactionMapSummary && reactionMapSummary.buckets.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className={`w-full text-sm ${isDarkMode ? 'text-gray-200' : 'text-gray-900'}`}>
+                <thead>
+                  <tr className={`border-b ${isDarkMode ? 'border-gray-600' : 'border-gray-200'}`}>
+                    <th className="px-3 py-2 text-left font-medium">Bucket</th>
+                    <th className="px-3 py-2 text-right font-medium">h</th>
+                    <th className="px-3 py-2 text-right font-medium">n</th>
+                    <th className="px-3 py-2 text-right font-medium">P(Up)</th>
+                    <th className="px-3 py-2 text-right font-medium">Mean %</th>
+                    <th className="px-3 py-2 text-right font-medium">Std %</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reactionMapSummary.buckets.map((b, idx) => (
+                    <tr 
+                      key={`${b.bucketId}-${b.horizon}`}
+                      className={`border-b ${
+                        isDarkMode 
+                          ? 'border-gray-700 hover:bg-gray-700/50' 
+                          : 'border-gray-100 hover:bg-gray-50'
+                      }`}
+                    >
+                      <td className="px-3 py-2 font-mono text-xs">{b.bucketId}</td>
+                      <td className="px-3 py-2 text-right">{b.horizon}</td>
+                      <td className="px-3 py-2 text-right">{b.nObs}</td>
+                      <td className={`px-3 py-2 text-right font-medium ${
+                        b.pUp > 0.55 
+                          ? 'text-green-600' 
+                          : b.pUp < 0.45 
+                            ? 'text-red-600' 
+                            : isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                      }`}>
+                        {(b.pUp * 100).toFixed(1)}%
+                      </td>
+                      <td className={`px-3 py-2 text-right font-mono ${
+                        b.meanReturn > 0 
+                          ? 'text-green-600' 
+                          : b.meanReturn < 0 
+                            ? 'text-red-600' 
+                            : isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                      }`}>
+                        {(b.meanReturn * 100).toFixed(2)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {(b.stdReturn * 100).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : !isLoadingReaction && !reactionError && (
+            <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+              Click "Run" to compute the EWMA Reaction Map
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Unified Forecast Bands Card - Full Width */}
@@ -3878,136 +4304,6 @@ export default function TimingPage({ params }: TimingPageProps) {
             )}
           </div>
         </div>
-
-      {/* EWMA Walker diagnostics */}
-      <div className="mb-8">
-        <div className={`rounded-xl border p-4 space-y-3 ${
-          isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-        }`}>
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className={`text-sm font-semibold ${
-                isDarkMode ? 'text-gray-200' : 'text-gray-900'
-              }`}>EWMA Walker (1D)</h2>
-              <p className={`mt-1 text-[11px] ${
-                isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-              }`}>
-                Baseline volatility-only forecast using EWMA (λ = 0.94)
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {isLoadingEwma && (
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  Loading…
-                </span>
-              )}
-              <button
-                type="button"
-                className={`rounded-full border px-2 py-[3px] text-[11px] transition-colors ${
-                  isDarkMode 
-                    ? 'border-gray-600 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
-                    : 'border-gray-300 text-muted-foreground hover:bg-muted'
-                }`}
-                onClick={loadEwmaWalker}
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-
-          {ewmaError && (
-            <p className="text-[11px] text-red-500">
-              {ewmaError}
-            </p>
-          )}
-
-          {ewmaSummary ? (
-            <div className={`grid grid-cols-2 md:grid-cols-3 gap-y-2 gap-x-6 text-xs ${
-              isDarkMode ? 'text-gray-300' : ''
-            }`}>
-              <div className="flex flex-col">
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  Coverage
-                </span>
-                <span className="font-mono tabular-nums">
-                  {(ewmaSummary.coverage * 100).toFixed(1)}%{" "}
-                  <span className={`text-[10px] ${
-                    isDarkMode ? 'text-gray-500' : 'text-muted-foreground'
-                  }`}>
-                    (target {(ewmaSummary.targetCoverage * 100).toFixed(1)}%)
-                  </span>
-                </span>
-              </div>
-
-              <div className="flex flex-col">
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  Interval score
-                </span>
-                <span className="font-mono tabular-nums">
-                  {ewmaSummary.intervalScore.toFixed(3)}
-                </span>
-              </div>
-
-              <div className="flex flex-col">
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  Avg width
-                </span>
-                <span className="font-mono tabular-nums">
-                  {(ewmaSummary.avgWidth * 100).toFixed(2)}%
-                </span>
-              </div>
-
-              <div className="flex flex-col">
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  z-mean / z-std
-                </span>
-                <span className="font-mono tabular-nums">
-                  {ewmaSummary.zMean.toFixed(3)} /{" "}
-                  {ewmaSummary.zStd.toFixed(3)}
-                </span>
-              </div>
-
-              <div className="flex flex-col">
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  Direction hit-rate
-                </span>
-                <span className="font-mono tabular-nums">
-                  {(ewmaSummary.directionHitRate * 100).toFixed(1)}%
-                </span>
-              </div>
-
-              <div className="flex flex-col">
-                <span className={`text-[11px] ${
-                  isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-                }`}>
-                  Points
-                </span>
-                <span className="font-mono tabular-nums">
-                  {ewmaSummary.nPoints}
-                </span>
-              </div>
-            </div>
-          ) : !isLoadingEwma && !ewmaError ? (
-            <p className={`text-[11px] ${
-              isDarkMode ? 'text-gray-400' : 'text-muted-foreground'
-            }`}>
-              No EWMA results yet. Click Refresh to run the EWMA walker.
-            </p>
-          ) : null}
-        </div>
-      </div>
 
       {/* Data Preview Panel (A-2) */}
       {previewData && (

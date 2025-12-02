@@ -80,33 +80,33 @@ export function GarchForecastInspector({
 
   // Divider component for cleaner code
   const Divider = () => (
-    <div className={`w-px h-8 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+    <div className={`w-px h-10 ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
   );
 
   // Metric cell with value on top, label below
   const MetricCell = ({ value, label, valueColor }: { value: string; label: string; valueColor?: string }) => (
     <div className="flex flex-col items-center">
-      <span className={`font-mono text-xs ${valueColor || (isDarkMode ? 'text-gray-200' : 'text-gray-700')}`}>
+      <span className={`font-mono text-sm ${valueColor || (isDarkMode ? 'text-gray-200' : 'text-gray-700')}`}>
         {value}
       </span>
-      <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+      <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
         {label}
       </span>
     </div>
   );
 
   return (
-    <div className={`inline-flex items-center gap-3 px-4 py-2 rounded-full text-xs font-medium ${
+    <div className={`w-full flex items-center justify-evenly px-4 py-2 rounded-full text-sm font-medium ${
       isDarkMode 
         ? 'bg-gray-800/80 border border-gray-700' 
         : 'bg-gray-100 border border-gray-200'
     }`}>
       {/* Title - Distribution */}
       <div className="flex flex-col items-center">
-        <span className={`font-semibold ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
+        <span className={`font-semibold text-sm ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>
           {distLabel}
         </span>
-        <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+        <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
           GARCH
         </span>
       </div>
@@ -116,7 +116,7 @@ export function GarchForecastInspector({
       {/* Status */}
       <div className="flex flex-col items-center">
         <span className={statusColor}>●</span>
-        <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+        <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
           {statusText}
         </span>
       </div>
@@ -137,15 +137,15 @@ export function GarchForecastInspector({
           {/* Lower / Upper */}
           <div className="flex flex-col items-center">
             <div className="flex items-center gap-1">
-              <span className={`font-mono text-xs ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
+              <span className={`font-mono text-sm ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {lower != null ? `$${lower.toFixed(2)}` : '—'}
               </span>
               <span className={isDarkMode ? 'text-gray-500' : 'text-gray-400'}>/</span>
-              <span className={`font-mono text-xs ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
+              <span className={`font-mono text-sm ${isDarkMode ? 'text-cyan-400' : 'text-cyan-600'}`}>
                 {upper != null ? `$${upper.toFixed(2)}` : '—'}
               </span>
             </div>
-            <span className={`text-[10px] ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+            <span className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
               L / U
             </span>
           </div>

@@ -1,16 +1,22 @@
 /**
  * EWMA Walker - Exponentially Weighted Moving Average volatility forecaster
- * with 1-day ahead prediction intervals for backtesting diagnostics.
+ * with h-day ahead prediction intervals for backtesting diagnostics.
  * 
  * This implements a "walk-forward" approach:
- * - At each time t, use data up to t to estimate volatility σ_t
- * - Forecast for t+1: ŷ_{t+1} = S_t (random walk center)
- * - Prediction interval: [L_{t+1}, U_{t+1}] = S_t × exp(±z_{α/2} × σ_t × √1)
- * - Then observe S_{t+1} and evaluate coverage
+ * - At each time t, use data up to t to estimate daily volatility σ_t
+ * - Forecast for t+h: ŷ_{t+h} = S_t (random walk center)
+ * - H-day volatility is σ_h = σ_t × √h
+ * - Prediction interval: [L_{t+h}, U_{t+h}] = S_t × exp(±z_{α/2} × σ_t × √h)
+ * - Then observe S_{t+h} and evaluate coverage
+ * 
+ * Default horizon h=1 gives the classic 1-day forecast.
  */
 
 import { loadCanonicalData } from '../storage/canonical';
 import { getNormalCritical } from '../forecast/critical';
+import { generateFutureTradingDates } from '../chart/tradingDays';
+import type { EwmaTiltConfig, ZBucketId } from './ewmaReaction';
+import { bucketIdForZ, DEFAULT_Z_BUCKETS } from './ewmaReaction';
 
 /**
  * A single forecast point from the EWMA walker
@@ -18,11 +24,11 @@ import { getNormalCritical } from '../forecast/critical';
 export interface EwmaWalkerPoint {
   /** Date at forecast origin */
   date_t: string;
-  /** Date of target (t+1) */
+  /** Date of target (t+h, where h is the horizon) */
   date_tp1: string;
   /** Price at t */
   S_t: number;
-  /** Realized price at t+1 */
+  /** Realized price at t+h */
   S_tp1: number;
   /** Forecast center (= S_t for random walk) */
   y_hat_tp1: number;
@@ -32,12 +38,32 @@ export interface EwmaWalkerPoint {
   U_tp1: number;
   /** EWMA volatility at t (daily) */
   sigma_t: number;
-  /** Standardized error: (log(S_{t+1}/S_t)) / sigma_t */
+  /** Standardized error: (log(S_{t+h}/S_t)) / (sigma_t * sqrt(h)) */
   standardizedError: number;
   /** Whether realized price is inside PI */
   insidePi: boolean;
   /** Direction correct: forecast direction matches realized */
   directionCorrect: boolean;
+}
+
+/**
+ * Out-of-sample forecast point at horizon h beyond last historical date
+ */
+export interface EwmaOosForecastPoint {
+  /** Last historical date used as origin (T) */
+  originDate: string;
+  /** Future target date at horizon h (T+h trading days) */
+  targetDate: string;
+  /** Last historical price S_T */
+  S_t: number;
+  /** Random-walk forecast center at horizon h (= S_T) */
+  y_hat: number;
+  /** Lower bound of h-day PI */
+  L: number;
+  /** Upper bound of h-day PI */
+  U: number;
+  /** EWMA daily volatility at T */
+  sigma_t: number;
 }
 
 /**
@@ -82,20 +108,26 @@ export interface EwmaWalkerParams {
   initialWindow?: number;
   /** Desired coverage level (e.g., 0.95) */
   coverage?: number;
+  /** Forecast horizon in trading days (default 1) */
+  horizon?: number;
+  /** Optional tilt config for biased drift by z-bucket (log-return units) */
+  tiltConfig?: EwmaTiltConfig;
 }
 
 /**
  * Result of running the EWMA walker
  */
 export interface EwmaWalkerResult {
-  /** All forecast points */
+  /** All forecast points (in-sample only) */
   points: EwmaWalkerPoint[];
-  /** Per-point PI metrics */
+  /** Per-point PI metrics (in-sample only) */
   piMetrics: EwmaPiMetric[];
-  /** Aggregated performance metrics */
+  /** Aggregated performance metrics (in-sample only) */
   aggregatedMetrics: EwmaAggregatedMetrics;
-  /** Parameters used */
-  params: Required<Omit<EwmaWalkerParams, 'symbol'>>;
+  /** Parameters used (tiltConfig is optional) */
+  params: Required<Omit<EwmaWalkerParams, 'symbol' | 'tiltConfig'>> & { tiltConfig?: EwmaTiltConfig };
+  /** Optional out-of-sample tail forecast at horizon h (NOT included in diagnostics) */
+  oosForecast?: EwmaOosForecastPoint;
 }
 
 /**
@@ -130,8 +162,21 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
     startDate,
     endDate,
     initialWindow = 252,
-    coverage = 0.95
+    coverage = 0.95,
+    horizon = 1,
+    tiltConfig,
   } = params;
+
+  // Validate and normalize horizon
+  const h = Number.isFinite(horizon) && horizon >= 1 ? Math.floor(horizon) : 1;
+
+  // Check if we have a valid tilt config for this horizon
+  const tiltHorizon = tiltConfig?.horizon;
+  const hasTilt =
+    !!tiltConfig &&
+    tiltConfig.muByBucket &&
+    Object.keys(tiltConfig.muByBucket).length > 0 &&
+    (tiltHorizon === undefined || tiltHorizon === h);
 
   // Load canonical data
   const rawData = await loadCanonicalData(symbol);
@@ -152,9 +197,10 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
     data = data.filter(row => row.date <= endDate);
   }
 
-  if (data.length < initialWindow + 2) {
+  // Need enough data for initial window plus h steps for at least one forecast
+  if (data.length < initialWindow + h + 1) {
     throw new Error(
-      `Insufficient data: need ${initialWindow + 2} rows, have ${data.length}`
+      `Insufficient data: need ${initialWindow + h + 1} rows for h=${h}, have ${data.length}`
     );
   }
 
@@ -169,13 +215,17 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
   const alpha = 1 - coverage;
   const z = getNormalCritical(1 - alpha / 2);
 
+  // Precompute sqrt(h) for h-day volatility scaling
+  const sqrtH = Math.sqrt(h);
+
   const points: EwmaWalkerPoint[] = [];
   const piMetrics: EwmaPiMetric[] = [];
 
   // Walk forward starting after initial window
   // data index: 0, 1, ..., initialWindow-1, initialWindow, ...
-  // At index t (starting from initialWindow), we forecast for t+1
-  for (let t = initialWindow; t < data.length - 1; t++) {
+  // At index t (starting from initialWindow), we forecast for t+h
+  // Stop h steps before the end so that target index t+h is always valid
+  for (let t = initialWindow; t < data.length - h; t++) {
     // Compute EWMA variance up to time t
     // Use returns from index 0 to t-1 (since return[i] is from data[i] to data[i+1])
     const returnsUpToT = logReturns.slice(0, t);
@@ -191,45 +241,57 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
       variance = lambda * variance + (1 - lambda) * Math.pow(returnsUpToT[j], 2);
     }
 
+    // Daily volatility at time t
     const sigma_t = Math.sqrt(variance);
+    
+    // H-day horizon volatility
+    const sigma_h = sigma_t * sqrtH;
+    
     const S_t = data[t].adj_close!;
-    const S_tp1 = data[t + 1].adj_close!;
+    const S_target = data[t + h].adj_close!;  // t + h
     const date_t = data[t].date;
-    const date_tp1 = data[t + 1].date;
+    const date_target = data[t + h].date;
 
-    // Random walk forecast: center = S_t
-    const y_hat_tp1 = S_t;
+    // Compute standardized error for z-bucket classification (always relative to neutral)
+    const logReturnH = Math.log(S_target / S_t);
+    const standardizedError = logReturnH / sigma_h;
 
-    // Prediction interval in price space (lognormal)
-    // log(S_{t+1}) ~ N(log(S_t), σ_t²)
-    // => S_{t+1} ∈ [S_t × exp(-z × σ_t), S_t × exp(+z × σ_t)]
-    const L_tp1 = S_t * Math.exp(-z * sigma_t);
-    const U_tp1 = S_t * Math.exp(z * sigma_t);
+    // Baseline drift is 0 (neutral random walk)
+    let mu_t = 0;
 
-    // Evaluate
-    const insidePi = S_tp1 >= L_tp1 && S_tp1 <= U_tp1;
-    const realizedReturn = Math.log(S_tp1 / S_t);
-    const standardizedError = realizedReturn / sigma_t;
+    // If we have a tiltConfig for this horizon, get bucket-specific mu
+    if (hasTilt) {
+      const bucketId = bucketIdForZ(standardizedError, DEFAULT_Z_BUCKETS);
+      if (bucketId && tiltConfig!.muByBucket[bucketId] != null) {
+        mu_t = tiltConfig!.muByBucket[bucketId]!;
+      }
+    }
 
-    // Direction: did price move in the "expected" direction?
-    // For random walk, we just check if movement direction was captured by interval
-    // Alternatively: did we predict the sign of the return correctly?
-    // Since y_hat = S_t (no drift), we'll measure if small moves are captured
-    const predictedDirection = 0; // Random walk predicts no change
-    const actualDirection = realizedReturn > 0 ? 1 : realizedReturn < 0 ? -1 : 0;
-    // For direction hit rate, count if the realized is within reasonable bounds
-    // More meaningful: count if realized was above/below center in same direction as prior trend
-    // Simplified: just track if the realized was inside the PI
-    const directionCorrect = insidePi; // simplified
+    // Forecast center in log-space: log(S_t) + mu_t
+    const y_hat_target = S_t * Math.exp(mu_t);
+
+    // Prediction interval shifted by the same drift
+    // PI: S_t × exp(μ_t ± z × σ_h)
+    const L_target = S_t * Math.exp(mu_t - z * sigma_h);
+    const U_target = S_t * Math.exp(mu_t + z * sigma_h);
+
+    // Evaluate coverage relative to the (possibly tilted) band
+    const insidePi = S_target >= L_target && S_target <= U_target;
+
+    // Direction: for tilted, check if realized moved in same direction as predicted drift
+    // For neutral (mu_t=0), this is just whether price went up
+    const directionCorrect = mu_t === 0
+      ? logReturnH >= 0
+      : Math.sign(logReturnH) === Math.sign(mu_t);
 
     const point: EwmaWalkerPoint = {
       date_t,
-      date_tp1,
+      date_tp1: date_target,  // Keep field name for compatibility, but it's now t+h
       S_t,
-      S_tp1,
-      y_hat_tp1,
-      L_tp1,
-      U_tp1,
+      S_tp1: S_target,
+      y_hat_tp1: y_hat_target,
+      L_tp1: L_target,
+      U_tp1: U_target,
       sigma_t,
       standardizedError,
       insidePi,
@@ -239,17 +301,17 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
 
     // Compute interval score (in log space for comparability)
     const intervalScore = computeIntervalScore(
-      Math.log(L_tp1),
-      Math.log(U_tp1),
-      Math.log(S_tp1),
+      Math.log(L_target),
+      Math.log(U_target),
+      Math.log(S_target),
       alpha
     );
 
     piMetrics.push({
-      date: date_tp1,
-      lower: L_tp1,
-      upper: U_tp1,
-      realized: S_tp1,
+      date: date_target,
+      lower: L_target,
+      upper: U_target,
+      realized: S_target,
       inside: insidePi,
       intervalScore
     });
@@ -267,6 +329,67 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
     count: points.length
   };
 
+  // --- Compute OOS forecast at horizon h beyond last historical date ---
+  // We need σ at the very last date (index n-1), not just n-h-1
+  // Recompute EWMA variance up to the last available return
+  const n = data.length;
+  const lastDate = data[n - 1].date;
+  const S_T = data[n - 1].adj_close!;
+
+  // Initialize variance with the first initialWindow returns
+  const initialReturnsForOOS = logReturns.slice(0, initialWindow);
+  const meanRetOOS = initialReturnsForOOS.reduce((sum, r) => sum + r, 0) / initialReturnsForOOS.length;
+  let varianceOOS = initialReturnsForOOS.reduce((sum, r) => sum + Math.pow(r - meanRetOOS, 2), 0)
+                    / (initialReturnsForOOS.length - 1);
+
+  // Apply EWMA recursion all the way to the last available return (logReturns.length - 1)
+  // logReturns[i] is the return from data[i] to data[i+1], so logReturns has length n-1
+  for (let j = initialWindow; j < logReturns.length; j++) {
+    varianceOOS = lambda * varianceOOS + (1 - lambda) * Math.pow(logReturns[j], 2);
+  }
+
+  const sigmaAtLastDate = Math.sqrt(varianceOOS);
+
+  // Build OOS forecast point
+  let oosForecast: EwmaOosForecastPoint | undefined;
+
+  // Generate h future trading dates from lastDate
+  const futureDates = generateFutureTradingDates(lastDate, h);
+
+  if (futureDates && futureDates.length > 0) {
+    // Target date is the h-th future trading day
+    const targetDate = futureDates[futureDates.length - 1];
+
+    // H-day volatility for OOS
+    const sigma_h_oos = sigmaAtLastDate * sqrtH;
+
+    // For OOS, we need to determine what bucket the last observation falls into
+    // Use the last in-sample point's standardizedError if available
+    let mu_oos = 0;
+    if (hasTilt && points.length > 0) {
+      const lastZ = points[points.length - 1].standardizedError;
+      const bucketId = bucketIdForZ(lastZ, DEFAULT_Z_BUCKETS);
+      if (bucketId && tiltConfig!.muByBucket[bucketId] != null) {
+        mu_oos = tiltConfig!.muByBucket[bucketId]!;
+      }
+    }
+
+    // Forecast center with optional drift
+    const y_hat_oos = S_T * Math.exp(mu_oos);
+    const L_oos = S_T * Math.exp(mu_oos - z * sigma_h_oos);
+    const U_oos = S_T * Math.exp(mu_oos + z * sigma_h_oos);
+
+    oosForecast = {
+      originDate: lastDate,
+      targetDate,
+      S_t: S_T,
+      y_hat: y_hat_oos,
+      L: L_oos,
+      U: U_oos,
+      sigma_t: sigmaAtLastDate,
+    };
+  }
+
   return {
     points,
     piMetrics,
@@ -276,8 +399,11 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
       startDate: startDate || data[0].date,
       endDate: endDate || data[data.length - 1].date,
       initialWindow,
-      coverage
-    }
+      coverage,
+      horizon: h,
+      tiltConfig,
+    },
+    oosForecast,
   };
 }
 
