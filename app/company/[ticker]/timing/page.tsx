@@ -1086,6 +1086,13 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Track if biased EWMA was ever loaded (so we know to auto-refresh on horizon change)
   const biasedEverLoaded = useRef(false);
 
+  // Ref for scrolling to Reaction Map card
+  const reactionMapRef = useRef<HTMLDivElement>(null);
+
+  // Handler for EWMA settings button (⋯) - scrolls to Reaction Map card
+  const handleEwmaSettings = useCallback(() => {
+    reactionMapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
 
   // Load EWMA Biased Walker (uses Reaction Map tilt)
   const loadEwmaBiasedWalker = useCallback(async () => {
@@ -3535,6 +3542,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           ewmaBiasedSummary={ewmaBiasedSummary}
           onLoadEwmaBiased={handleLoadBiasedClick}
           isLoadingEwmaBiased={isLoadingEwmaBiased}
+          onEwmaSettings={handleEwmaSettings}
           horizonCoverage={{
             h,
             coverage,
@@ -3605,7 +3613,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       </div>
 
       {/* EWMA Reaction Map Card */}
-      <div className="mb-8">
+      <div className="mb-8" ref={reactionMapRef}>
         <div className={`p-6 border rounded-lg shadow-sm ${
           isDarkMode 
             ? 'bg-gray-800 border-gray-600' 

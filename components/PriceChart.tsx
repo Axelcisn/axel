@@ -180,6 +180,7 @@ interface PriceChartProps {
   ewmaBiasedSummary?: EwmaSummary | null;
   onLoadEwmaBiased?: () => void;
   isLoadingEwmaBiased?: boolean;
+  onEwmaSettings?: () => void;  // Callback for EWMA settings button (⋯)
   horizonCoverage?: HorizonCoverageProps;
 }
 
@@ -205,6 +206,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   ewmaBiasedSummary,
   onLoadEwmaBiased,
   isLoadingEwmaBiased,
+  onEwmaSettings,
   horizonCoverage,
 }) => {
   const isDarkMode = useDarkMode();
@@ -1279,6 +1281,23 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       </div>
                     )}
                   </div>
+                )}
+
+                {/* EWMA Settings Button (⋯) */}
+                {onEwmaSettings && (
+                  <button
+                    onClick={onEwmaSettings}
+                    className={`
+                      w-8 h-8 flex items-center justify-center text-lg rounded-full transition-colors
+                      ${isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
+                    `}
+                    title="EWMA Settings"
+                  >
+                    ⋯
+                  </button>
                 )}
               </div>
             </div>
