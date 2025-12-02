@@ -1248,6 +1248,19 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [params?.ticker, reactionLambda, coverage, h, reactionTrainFraction, reactionMinTrainObs]);
 
+  // Auto-load reaction map and biased EWMA when λ or Train% changes
+  useEffect(() => {
+    // Debounce to avoid too many calls while typing
+    const timeout = setTimeout(() => {
+      loadReactionMap();
+      // Also refresh biased if it was ever loaded
+      if (biasedEverLoaded.current) {
+        loadEwmaBiasedWalker();
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [reactionLambda, reactionTrainFraction, loadReactionMap, loadEwmaBiasedWalker]);
+
   // EWMA Optimization handler (Maximize button)
   const handleMaximizeReaction = useCallback(async () => {
     if (!params?.ticker) return;
@@ -3539,15 +3552,14 @@ export default function TimingPage({ params }: TimingPageProps) {
             setReactionLambda,
             reactionTrainFraction,
             setReactionTrainFraction,
-            onRun: loadReactionMap,
             onMaximize: handleMaximizeReaction,
             isLoadingReaction,
             isOptimizingReaction,
             summaryInfo: reactionMapSummary 
-              ? `Train: ${reactionMapSummary.trainStart} → ${reactionMapSummary.trainEnd} (${reactionMapSummary.nTrain} obs) · Test: ${reactionMapSummary.testStart} → ${reactionMapSummary.testEnd} (${reactionMapSummary.nTest} obs) · H(d): ${h} · Cov%: ${Math.round(coverage * 1000) / 10}%`
+              ? `H: ${h}D · Cov: ${Math.round(coverage * 1000) / 10}%\nTrain: ${reactionMapSummary.trainStart} → ${reactionMapSummary.trainEnd} (${reactionMapSummary.nTrain})\nTest: ${reactionMapSummary.testStart} → ${reactionMapSummary.testEnd} (${reactionMapSummary.nTest})`
               : null,
             optimizationResult: reactionOptimization
-              ? `Best hit-rate: ${(reactionOptimization.directionHitRate * 100).toFixed(1)}% · λ = ${reactionOptimization.lambda.toFixed(2)} · Train% = ${(reactionOptimization.trainFraction * 100).toFixed(0)}%`
+              ? `Best: ${(reactionOptimization.directionHitRate * 100).toFixed(1)}% · λ=${reactionOptimization.lambda.toFixed(2)} · Train=${(reactionOptimization.trainFraction * 100).toFixed(0)}%`
               : null,
           }}
           horizonCoverage={{

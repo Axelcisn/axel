@@ -175,7 +175,6 @@ export interface EwmaReactionMapDropdownProps {
   setReactionLambda: (v: number) => void;
   reactionTrainFraction: number;
   setReactionTrainFraction: (v: number) => void;
-  onRun: () => void;
   onMaximize: () => void;
   isLoadingReaction: boolean;
   isOptimizingReaction: boolean;
@@ -1334,7 +1333,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     {showEwmaSettingsDropdown && (
                       <div 
                         className={`
-                          absolute top-10 right-0 z-50 min-w-[200px] p-3 rounded-xl shadow-xl border
+                          absolute top-10 right-0 z-50 min-w-[180px] p-3 rounded-xl shadow-xl border
                           ${isDarkMode 
                             ? 'bg-gray-800 border-gray-600' 
                             : 'bg-white border-gray-200 shadow-lg'
@@ -1390,42 +1389,32 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                             />
                           </div>
 
-                          {/* Buttons Row */}
-                          <div className="flex items-center gap-2 mt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                ewmaReactionMapDropdown.onRun();
-                              }}
-                              disabled={ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction}
-                              className={`flex-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction
-                                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-                              }`}
-                            >
-                              {ewmaReactionMapDropdown.isLoadingReaction ? 'Running...' : 'Run'}
-                            </button>
+                          {/* Maximize Button Only */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              ewmaReactionMapDropdown.onMaximize();
+                            }}
+                            disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
+                            className={`w-full rounded-full px-3 py-1.5 text-xs font-medium transition-colors mt-1 ${
+                              ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
+                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                : 'bg-amber-500 hover:bg-amber-600 text-white'
+                            }`}
+                          >
+                            {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
+                          </button>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                ewmaReactionMapDropdown.onMaximize();
-                              }}
-                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                              className={`flex-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                                ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
-                                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                                  : 'bg-amber-500 hover:bg-amber-600 text-white'
-                              }`}
-                            >
-                              {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
-                            </button>
-                          </div>
+                          {/* Loading indicator */}
+                          {ewmaReactionMapDropdown.isLoadingReaction && (
+                            <div className={`text-[10px] text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                              Updating...
+                            </div>
+                          )}
 
-                          {/* Summary Info */}
+                          {/* Summary Info - multiline layout */}
                           {ewmaReactionMapDropdown.summaryInfo && (
-                            <div className={`mt-1 text-[10px] leading-tight ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            <div className={`mt-1 text-[10px] leading-relaxed whitespace-pre-line ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                               {ewmaReactionMapDropdown.summaryInfo}
                             </div>
                           )}
