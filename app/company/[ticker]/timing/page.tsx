@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart, EwmaSummary } from '@/components/PriceChart';
+import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps } from '@/components/PriceChart';
 
 // Badge component interface and implementation
 interface BadgeProps {
@@ -1085,14 +1085,6 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Track if biased EWMA was ever loaded (so we know to auto-refresh on horizon change)
   const biasedEverLoaded = useRef(false);
-
-  // Ref for scrolling to Reaction Map card
-  const reactionMapRef = useRef<HTMLDivElement>(null);
-
-  // Handler for EWMA settings button (⋯) - scrolls to Reaction Map card
-  const handleEwmaSettings = useCallback(() => {
-    reactionMapRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, []);
 
   // Load EWMA Biased Walker (uses Reaction Map tilt)
   const loadEwmaBiasedWalker = useCallback(async () => {
@@ -3542,7 +3534,26 @@ export default function TimingPage({ params }: TimingPageProps) {
           ewmaBiasedSummary={ewmaBiasedSummary}
           onLoadEwmaBiased={handleLoadBiasedClick}
           isLoadingEwmaBiased={isLoadingEwmaBiased}
-          onEwmaSettings={handleEwmaSettings}
+          ewmaReactionMapDropdown={{
+            reactionLambda,
+            setReactionLambda,
+            coverage,
+            horizon: h,
+            reactionTrainFraction,
+            setReactionTrainFraction,
+            reactionMinTrainObs,
+            setReactionMinTrainObs,
+            onRun: loadReactionMap,
+            onMaximize: handleMaximizeReaction,
+            isLoadingReaction,
+            isOptimizingReaction,
+            summaryInfo: reactionMapSummary 
+              ? `Train: ${reactionMapSummary.trainStart} → ${reactionMapSummary.trainEnd} (${reactionMapSummary.nTrain} obs) · Test: ${reactionMapSummary.testStart} → ${reactionMapSummary.testEnd} (${reactionMapSummary.nTest} obs) · H(d): ${h} · Cov%: ${Math.round(coverage * 1000) / 10}%`
+              : null,
+            optimizationResult: reactionOptimization
+              ? `Best hit-rate: ${(reactionOptimization.directionHitRate * 100).toFixed(1)}% · λ = ${reactionOptimization.lambda.toFixed(2)} · Train% = ${(reactionOptimization.trainFraction * 100).toFixed(0)}%`
+              : null,
+          }}
           horizonCoverage={{
             h,
             coverage,
@@ -3613,13 +3624,13 @@ export default function TimingPage({ params }: TimingPageProps) {
       </div>
 
       {/* EWMA Reaction Map Card */}
-      <div className="mb-8" ref={reactionMapRef}>
+      <div className="mb-8">
         <div className={`p-6 border rounded-lg shadow-sm ${
           isDarkMode 
             ? 'bg-gray-800 border-gray-600' 
             : 'bg-white border-gray-200'
         }`}>
-          {/* Header with controls */}
+          {/* Header */}
           <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
             <div>
               <h3 className={`text-lg font-semibold ${
@@ -3632,132 +3643,8 @@ export default function TimingPage({ params }: TimingPageProps) {
               </p>
             </div>
 
-            <div className="flex flex-col items-end gap-2 text-xs">
-              <div className="flex flex-wrap items-center gap-3 justify-end">
-                {/* Lambda */}
-                <div className="flex items-center gap-1">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ</span>
-                  <input
-                    type="number"
-                    min={0.01}
-                    max={0.999}
-                    step={0.01}
-                    value={reactionLambda}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val)) {
-                        setReactionLambda(Math.min(0.999, Math.max(0.01, val)));
-                      }
-                    }}
-                    className={`w-16 rounded-full border px-2 py-[2px] text-right text-xs ${
-                      isDarkMode 
-                        ? 'bg-gray-700 border-gray-600 text-white' 
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  />
-                </div>
-
-                {/* Coverage (from main coverage - read-only) */}
-                <div className="flex items-center gap-1">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Cov%</span>
-                  <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
-                    isDarkMode 
-                      ? 'bg-gray-800 border-gray-700 text-gray-300' 
-                      : 'bg-gray-100 border-gray-300 text-gray-600'
-                  }`}>
-                    {Math.round(coverage * 1000) / 10}%
-                  </div>
-                </div>
-
-                {/* Horizon (from main h - read-only) */}
-                <div className="flex items-center gap-1">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>H(d)</span>
-                  <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
-                    isDarkMode 
-                      ? 'bg-gray-800 border-gray-700 text-gray-300' 
-                      : 'bg-gray-100 border-gray-300 text-gray-600'
-                  }`}>
-                    {h}D
-                  </div>
-                </div>
-
-                {/* Train % */}
-                <div className="flex items-center gap-1">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Train%</span>
-                  <input
-                    type="number"
-                    min={10}
-                    max={90}
-                    step={5}
-                    value={Math.round(reactionTrainFraction * 100)}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val)) {
-                        const frac = Math.min(0.9, Math.max(0.1, val / 100));
-                        setReactionTrainFraction(frac);
-                      }
-                    }}
-                    className={`w-14 rounded-full border px-2 py-[2px] text-right text-xs ${
-                      isDarkMode 
-                        ? 'bg-gray-700 border-gray-600 text-white' 
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  />
-                </div>
-
-                {/* Min train obs */}
-                <div className="flex items-center gap-1">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Min n</span>
-                  <input
-                    type="number"
-                    min={100}
-                    max={20000}
-                    step={100}
-                    value={reactionMinTrainObs}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val)) {
-                        setReactionMinTrainObs(Math.max(100, Math.floor(val)));
-                      }
-                    }}
-                    className={`w-20 rounded-full border px-2 py-[2px] text-right text-xs ${
-                      isDarkMode 
-                        ? 'bg-gray-700 border-gray-600 text-white' 
-                        : 'bg-white border-gray-300 text-gray-900'
-                    }`}
-                  />
-                </div>
-
-                {/* Run and Maximize buttons */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={loadReactionMap}
-                    disabled={isLoadingReaction || isOptimizingReaction}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                      isLoadingReaction || isOptimizingReaction
-                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                        : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  >
-                    {isLoadingReaction ? 'Running...' : 'Run'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleMaximizeReaction}
-                    disabled={isOptimizingReaction || isLoadingReaction}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                      isOptimizingReaction || isLoadingReaction
-                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                        : 'bg-amber-500 hover:bg-amber-600 text-white'
-                    }`}
-                  >
-                    {isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
-                  </button>
-                </div>
-              </div>
-
+            {/* Summary info and results (controls are now in dropdown above) */}
+            <div className="flex flex-col items-end gap-1 text-xs">
               {/* Summary info row */}
               {reactionMapSummary && (
                 <div className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>

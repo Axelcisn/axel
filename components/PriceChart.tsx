@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -169,6 +169,24 @@ export interface EwmaSummary {
   nPoints: number;
 }
 
+/** Props for EWMA Reaction Map dropdown controls */
+export interface EwmaReactionMapDropdownProps {
+  reactionLambda: number;
+  setReactionLambda: (v: number) => void;
+  coverage: number;  // read-only from main controls
+  horizon: number;   // read-only from main controls
+  reactionTrainFraction: number;
+  setReactionTrainFraction: (v: number) => void;
+  reactionMinTrainObs: number;
+  setReactionMinTrainObs: (v: number) => void;
+  onRun: () => void;
+  onMaximize: () => void;
+  isLoadingReaction: boolean;
+  isOptimizingReaction: boolean;
+  summaryInfo?: string | null;  // e.g. "Train: ... · Test: ..."
+  optimizationResult?: string | null;  // e.g. "Best hit-rate: 54.1% · λ = 0.94 · Train% = 70%"
+}
+
 interface PriceChartProps {
   symbol: string;
   className?: string;
@@ -180,7 +198,7 @@ interface PriceChartProps {
   ewmaBiasedSummary?: EwmaSummary | null;
   onLoadEwmaBiased?: () => void;
   isLoadingEwmaBiased?: boolean;
-  onEwmaSettings?: () => void;  // Callback for EWMA settings button (⋯)
+  ewmaReactionMapDropdown?: EwmaReactionMapDropdownProps;  // Dropdown controls for (⋯) button
   horizonCoverage?: HorizonCoverageProps;
 }
 
@@ -206,7 +224,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   ewmaBiasedSummary,
   onLoadEwmaBiased,
   isLoadingEwmaBiased,
-  onEwmaSettings,
+  ewmaReactionMapDropdown,
   horizonCoverage,
 }) => {
   const isDarkMode = useDarkMode();
@@ -219,6 +237,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
+  
+  // EWMA Settings dropdown state
+  const [showEwmaSettingsDropdown, setShowEwmaSettingsDropdown] = useState(false);
+  const ewmaSettingsDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Click outside to close EWMA settings dropdown
+  useEffect(() => {
+    if (!showEwmaSettingsDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ewmaSettingsDropdownRef.current && !ewmaSettingsDropdownRef.current.contains(e.target as Node)) {
+        setShowEwmaSettingsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEwmaSettingsDropdown]);
   
   // Determine whether the current overlay is in log domain
   const isLogDomain =
@@ -1283,21 +1317,179 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                   </div>
                 )}
 
-                {/* EWMA Settings Button (⋯) */}
-                {onEwmaSettings && (
-                  <button
-                    onClick={onEwmaSettings}
-                    className={`
-                      w-8 h-8 flex items-center justify-center text-lg rounded-full transition-colors
-                      ${isDarkMode 
-                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }
-                    `}
-                    title="EWMA Settings"
-                  >
-                    ⋯
-                  </button>
+                {/* EWMA Settings Button (⋯) with Dropdown */}
+                {ewmaReactionMapDropdown && (
+                  <div className="relative" ref={ewmaSettingsDropdownRef}>
+                    <button
+                      onClick={() => setShowEwmaSettingsDropdown(!showEwmaSettingsDropdown)}
+                      className={`
+                        w-8 h-8 flex items-center justify-center text-lg rounded-full transition-colors
+                        ${showEwmaSettingsDropdown
+                          ? (isDarkMode ? 'bg-gray-600 text-white' : 'bg-gray-300 text-gray-900')
+                          : (isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')
+                        }
+                      `}
+                      title="EWMA Reaction Map Settings"
+                    >
+                      ⋯
+                    </button>
+
+                    {/* Apple-style Dropdown Menu */}
+                    {showEwmaSettingsDropdown && (
+                      <div 
+                        className={`
+                          absolute top-10 right-0 z-50 min-w-[420px] p-4 rounded-xl shadow-xl border
+                          ${isDarkMode 
+                            ? 'bg-gray-800 border-gray-600' 
+                            : 'bg-white border-gray-200 shadow-lg'
+                          }
+                        `}
+                      >
+                        {/* Controls Row */}
+                        <div className="flex flex-wrap items-center gap-3 text-xs">
+                          {/* Lambda */}
+                          <div className="flex items-center gap-1">
+                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ</span>
+                            <input
+                              type="number"
+                              min={0.01}
+                              max={0.999}
+                              step={0.01}
+                              value={ewmaReactionMapDropdown.reactionLambda}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                if (Number.isFinite(val)) {
+                                  ewmaReactionMapDropdown.setReactionLambda(Math.min(0.999, Math.max(0.01, val)));
+                                }
+                              }}
+                              className={`w-16 rounded-full border px-2 py-[2px] text-right text-xs ${
+                                isDarkMode 
+                                  ? 'bg-gray-700 border-gray-600 text-white' 
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+
+                          {/* Coverage (read-only) */}
+                          <div className="flex items-center gap-1">
+                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Cov%</span>
+                            <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
+                              isDarkMode 
+                                ? 'bg-gray-700 border-gray-600 text-gray-300' 
+                                : 'bg-gray-100 border-gray-300 text-gray-600'
+                            }`}>
+                              {Math.round(ewmaReactionMapDropdown.coverage * 1000) / 10}%
+                            </div>
+                          </div>
+
+                          {/* Horizon (read-only) */}
+                          <div className="flex items-center gap-1">
+                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>H(d)</span>
+                            <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
+                              isDarkMode 
+                                ? 'bg-gray-700 border-gray-600 text-gray-300' 
+                                : 'bg-gray-100 border-gray-300 text-gray-600'
+                            }`}>
+                              {ewmaReactionMapDropdown.horizon}D
+                            </div>
+                          </div>
+
+                          {/* Train % */}
+                          <div className="flex items-center gap-1">
+                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Train%</span>
+                            <input
+                              type="number"
+                              min={10}
+                              max={90}
+                              step={5}
+                              value={Math.round(ewmaReactionMapDropdown.reactionTrainFraction * 100)}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                if (Number.isFinite(val)) {
+                                  const frac = Math.min(0.9, Math.max(0.1, val / 100));
+                                  ewmaReactionMapDropdown.setReactionTrainFraction(frac);
+                                }
+                              }}
+                              className={`w-14 rounded-full border px-2 py-[2px] text-right text-xs ${
+                                isDarkMode 
+                                  ? 'bg-gray-700 border-gray-600 text-white' 
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+
+                          {/* Min n */}
+                          <div className="flex items-center gap-1">
+                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Min n</span>
+                            <input
+                              type="number"
+                              min={100}
+                              max={20000}
+                              step={100}
+                              value={ewmaReactionMapDropdown.reactionMinTrainObs}
+                              onChange={(e) => {
+                                const val = Number(e.target.value);
+                                if (Number.isFinite(val)) {
+                                  ewmaReactionMapDropdown.setReactionMinTrainObs(Math.max(100, Math.floor(val)));
+                                }
+                              }}
+                              className={`w-20 rounded-full border px-2 py-[2px] text-right text-xs ${
+                                isDarkMode 
+                                  ? 'bg-gray-700 border-gray-600 text-white' 
+                                  : 'bg-white border-gray-300 text-gray-900'
+                              }`}
+                            />
+                          </div>
+
+                          {/* Run Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              ewmaReactionMapDropdown.onRun();
+                            }}
+                            disabled={ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction}
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                              ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction
+                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                            }`}
+                          >
+                            {ewmaReactionMapDropdown.isLoadingReaction ? 'Running...' : 'Run'}
+                          </button>
+
+                          {/* Maximize Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              ewmaReactionMapDropdown.onMaximize();
+                            }}
+                            disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
+                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                              ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
+                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                : 'bg-amber-500 hover:bg-amber-600 text-white'
+                            }`}
+                          >
+                            {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
+                          </button>
+                        </div>
+
+                        {/* Summary Info */}
+                        {ewmaReactionMapDropdown.summaryInfo && (
+                          <div className={`mt-3 text-[11px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            {ewmaReactionMapDropdown.summaryInfo}
+                          </div>
+                        )}
+
+                        {/* Optimization Result */}
+                        {ewmaReactionMapDropdown.optimizationResult && (
+                          <div className="mt-1 text-[11px] text-amber-400">
+                            {ewmaReactionMapDropdown.optimizationResult}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
