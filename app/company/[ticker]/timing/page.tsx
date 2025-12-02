@@ -3555,9 +3555,6 @@ export default function TimingPage({ params }: TimingPageProps) {
             onMaximize: handleMaximizeReaction,
             isLoadingReaction,
             isOptimizingReaction,
-            optimizationResult: reactionOptimization
-              ? `Best: ${(reactionOptimization.directionHitRate * 100).toFixed(1)}% · λ=${reactionOptimization.lambda.toFixed(2)} · Train=${(reactionOptimization.trainFraction * 100).toFixed(0)}%`
-              : null,
           }}
           horizonCoverage={{
             h,

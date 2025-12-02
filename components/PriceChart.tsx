@@ -178,7 +178,6 @@ export interface EwmaReactionMapDropdownProps {
   onMaximize: () => void;
   isLoadingReaction: boolean;
   isOptimizingReaction: boolean;
-  optimizationResult?: string | null;  // e.g. "Best: 54.1% · λ=0.94 · Train=70%"
 }
 
 interface PriceChartProps {
@@ -1328,21 +1327,20 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       ⋯
                     </button>
 
-                    {/* Apple-style Dropdown Menu */}
+                    {/* Tooltip-style Dropdown Menu */}
                     {showEwmaSettingsDropdown && (
                       <div 
                         className={`
-                          absolute top-10 right-0 z-50 min-w-[180px] p-3 rounded-xl shadow-xl border
+                          absolute top-10 right-0 z-50 min-w-[140px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
                           ${isDarkMode 
-                            ? 'bg-gray-800 border-gray-600' 
-                            : 'bg-white border-gray-200 shadow-lg'
+                            ? 'bg-gray-900/80 border-gray-500/30' 
+                            : 'bg-white/80 border-gray-400/30'
                           }
                         `}
                       >
-                        {/* Single column layout */}
-                        <div className="flex flex-col gap-2 text-xs">
+                        <div className="space-y-2 text-xs">
                           {/* Lambda Row */}
-                          <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center justify-between gap-4">
                             <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ</span>
                             <input
                               type="number"
@@ -1356,16 +1354,16 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                                   ewmaReactionMapDropdown.setReactionLambda(Math.min(0.999, Math.max(0.01, val)));
                                 }
                               }}
-                              className={`w-20 rounded-full border px-3 py-1 text-right text-xs ${
+                              className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
                                 isDarkMode 
-                                  ? 'bg-gray-700 border-gray-600 text-white' 
-                                  : 'bg-white border-gray-300 text-gray-900'
+                                  ? 'border-gray-600 text-white focus:border-amber-500' 
+                                  : 'border-gray-300 text-gray-900 focus:border-amber-500'
                               }`}
                             />
                           </div>
 
                           {/* Train % Row */}
-                          <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center justify-between gap-4">
                             <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Train%</span>
                             <input
                               type="number"
@@ -1380,25 +1378,25 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                                   ewmaReactionMapDropdown.setReactionTrainFraction(frac);
                                 }
                               }}
-                              className={`w-20 rounded-full border px-3 py-1 text-right text-xs ${
+                              className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
                                 isDarkMode 
-                                  ? 'bg-gray-700 border-gray-600 text-white' 
-                                  : 'bg-white border-gray-300 text-gray-900'
+                                  ? 'border-gray-600 text-white focus:border-amber-500' 
+                                  : 'border-gray-300 text-gray-900 focus:border-amber-500'
                               }`}
                             />
                           </div>
 
-                          {/* Maximize Button Only */}
+                          {/* Maximize Button */}
                           <button
                             type="button"
                             onClick={() => {
                               ewmaReactionMapDropdown.onMaximize();
                             }}
                             disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                            className={`w-full rounded-full px-3 py-1.5 text-xs font-medium transition-colors mt-1 ${
+                            className={`w-full rounded-lg px-3 py-1.5 text-xs font-medium transition-colors mt-1 ${
                               ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
-                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                                : 'bg-amber-500 hover:bg-amber-600 text-white'
+                                ? 'bg-gray-500/50 text-gray-400 cursor-not-allowed'
+                                : 'bg-amber-500/90 hover:bg-amber-500 text-white'
                             }`}
                           >
                             {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
@@ -1406,15 +1404,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
                           {/* Loading indicator */}
                           {ewmaReactionMapDropdown.isLoadingReaction && (
-                            <div className={`text-[10px] text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            <div className={`text-[10px] text-center ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
                               Updating...
-                            </div>
-                          )}
-
-                          {/* Optimization Result */}
-                          {ewmaReactionMapDropdown.optimizationResult && (
-                            <div className="text-[10px] text-amber-400 leading-tight">
-                              {ewmaReactionMapDropdown.optimizationResult}
                             </div>
                           )}
                         </div>
