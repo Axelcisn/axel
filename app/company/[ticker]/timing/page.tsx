@@ -320,6 +320,20 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [reactionTrainFraction, setReactionTrainFraction] = useState(0.7);
   const [reactionMinTrainObs, setReactionMinTrainObs] = useState(500);
 
+  // EWMA Optimization state (Maximize button)
+  type EwmaOptimizationSummary = {
+    lambda: number;
+    trainFraction: number;
+    directionHitRate: number;
+    coverage: number;
+    intervalScore: number;
+    avgWidth: number;
+  };
+
+  const [reactionOptimization, setReactionOptimization] = useState<EwmaOptimizationSummary | null>(null);
+  const [isOptimizingReaction, setIsOptimizingReaction] = useState(false);
+  const [reactionOptimizeError, setReactionOptimizeError] = useState<string | null>(null);
+
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
     if (volWindowAutoSync) {
@@ -1234,6 +1248,62 @@ export default function TimingPage({ params }: TimingPageProps) {
       setIsLoadingReaction(false);
     }
   }, [params?.ticker, reactionLambda, coverage, h, reactionTrainFraction, reactionMinTrainObs]);
+
+  // EWMA Optimization handler (Maximize button)
+  const handleMaximizeReaction = useCallback(async () => {
+    if (!params?.ticker) return;
+
+    try {
+      setIsOptimizingReaction(true);
+      setReactionOptimizeError(null);
+
+      const query = new URLSearchParams({
+        h: String(h),
+        coverage: coverage.toString(),
+        shrinkFactor: "0.5",
+        minTrainObs: reactionMinTrainObs.toString(),
+        // Coarse grid for speed: λ step 0.05, train step 0.05
+        lambdaMin: "0.50",
+        lambdaMax: "0.99",
+        lambdaStep: "0.05",
+        trainMin: "0.50",
+        trainMax: "0.90",
+        trainStep: "0.05",
+      });
+
+      const res = await fetch(
+        `/api/volatility/ewma-optimize/${encodeURIComponent(params.ticker)}?${query.toString()}`
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Optimize failed: ${res.status} ${text}`);
+      }
+
+      const json = await res.json();
+
+      if (!json.success) {
+        throw new Error(json.error || "Unknown optimization error");
+      }
+
+      const best = json.best as EwmaOptimizationSummary;
+
+      // Store summary for display
+      setReactionOptimization(best);
+
+      // Update controls to best λ and Train%
+      setReactionLambda(best.lambda);
+      setReactionTrainFraction(best.trainFraction);
+
+      // Mark biased as loaded so it auto-refreshes
+      biasedEverLoaded.current = true;
+    } catch (err: any) {
+      console.error("[EWMA Optimize] error:", err);
+      setReactionOptimizeError(err?.message ?? "Failed to optimize EWMA");
+    } finally {
+      setIsOptimizingReaction(false);
+    }
+  }, [params?.ticker, h, coverage, reactionMinTrainObs]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -3650,19 +3720,34 @@ export default function TimingPage({ params }: TimingPageProps) {
                   />
                 </div>
 
-                {/* Run button */}
-                <button
-                  type="button"
-                  onClick={loadReactionMap}
-                  disabled={isLoadingReaction}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                    isLoadingReaction
-                      ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
-                  }`}
-                >
-                  {isLoadingReaction ? 'Running...' : 'Run'}
-                </button>
+                {/* Run and Maximize buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={loadReactionMap}
+                    disabled={isLoadingReaction || isOptimizingReaction}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                      isLoadingReaction || isOptimizingReaction
+                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
+                  >
+                    {isLoadingReaction ? 'Running...' : 'Run'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleMaximizeReaction}
+                    disabled={isOptimizingReaction || isLoadingReaction}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                      isOptimizingReaction || isLoadingReaction
+                        ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                        : 'bg-amber-500 hover:bg-amber-600 text-white'
+                    }`}
+                  >
+                    {isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
+                  </button>
+                </div>
               </div>
 
               {/* Summary info row */}
@@ -3671,6 +3756,22 @@ export default function TimingPage({ params }: TimingPageProps) {
                   Train: {reactionMapSummary.trainStart} → {reactionMapSummary.trainEnd} ({reactionMapSummary.nTrain} obs) · 
                   Test: {reactionMapSummary.testStart} → {reactionMapSummary.testEnd} ({reactionMapSummary.nTest} obs) ·
                   H(d): {h} · Cov%: {Math.round(coverage * 1000) / 10}%
+                </div>
+              )}
+
+              {/* Optimization result */}
+              {reactionOptimization && (
+                <div className="text-[11px] text-amber-400">
+                  Best hit-rate: {(reactionOptimization.directionHitRate * 100).toFixed(1)}%
+                  {" · "}λ = {reactionOptimization.lambda.toFixed(2)}
+                  {" · "}Train% = {(reactionOptimization.trainFraction * 100).toFixed(0)}%
+                </div>
+              )}
+
+              {/* Optimization error */}
+              {reactionOptimizeError && (
+                <div className="text-[11px] text-red-400">
+                  {reactionOptimizeError}
                 </div>
               )}
             </div>
