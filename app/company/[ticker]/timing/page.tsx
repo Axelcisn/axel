@@ -3738,7 +3738,7 @@ export default function TimingPage({ params }: TimingPageProps) {
             </div>
           ) : !isLoadingReaction && !reactionError && (
             <div className={`text-center py-8 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              Click "Run" to compute the EWMA Reaction Map
+              Click &ldquo;Run&rdquo; to compute the EWMA Reaction Map
             </div>
           )}
         </div>
