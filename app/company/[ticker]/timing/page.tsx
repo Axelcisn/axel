@@ -3644,11 +3644,6 @@ export default function TimingPage({ params }: TimingPageProps) {
               <h3 className={`text-lg font-semibold ${
                 isDarkMode ? 'text-white' : 'text-gray-900'
               }`}>EWMA Reaction Map</h3>
-              <p className={`mt-1 text-xs ${
-                isDarkMode ? 'text-gray-400' : 'text-gray-500'
-              }`}>
-                Forward returns conditional on standardized shock (EWMA volatility).
-              </p>
             </div>
 
             {/* Summary info and results (controls are now in dropdown above) */}
