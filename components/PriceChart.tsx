@@ -173,12 +173,8 @@ export interface EwmaSummary {
 export interface EwmaReactionMapDropdownProps {
   reactionLambda: number;
   setReactionLambda: (v: number) => void;
-  coverage: number;  // read-only from main controls
-  horizon: number;   // read-only from main controls
   reactionTrainFraction: number;
   setReactionTrainFraction: (v: number) => void;
-  reactionMinTrainObs: number;
-  setReactionMinTrainObs: (v: number) => void;
   onRun: () => void;
   onMaximize: () => void;
   isLoadingReaction: boolean;
@@ -1338,17 +1334,17 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     {showEwmaSettingsDropdown && (
                       <div 
                         className={`
-                          absolute top-10 right-0 z-50 min-w-[420px] p-4 rounded-xl shadow-xl border
+                          absolute top-10 right-0 z-50 min-w-[200px] p-3 rounded-xl shadow-xl border
                           ${isDarkMode 
                             ? 'bg-gray-800 border-gray-600' 
                             : 'bg-white border-gray-200 shadow-lg'
                           }
                         `}
                       >
-                        {/* Controls Row */}
-                        <div className="flex flex-wrap items-center gap-3 text-xs">
-                          {/* Lambda */}
-                          <div className="flex items-center gap-1">
+                        {/* Single column layout */}
+                        <div className="flex flex-col gap-2 text-xs">
+                          {/* Lambda Row */}
+                          <div className="flex items-center justify-between gap-3">
                             <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ</span>
                             <input
                               type="number"
@@ -1362,7 +1358,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                                   ewmaReactionMapDropdown.setReactionLambda(Math.min(0.999, Math.max(0.01, val)));
                                 }
                               }}
-                              className={`w-16 rounded-full border px-2 py-[2px] text-right text-xs ${
+                              className={`w-20 rounded-full border px-3 py-1 text-right text-xs ${
                                 isDarkMode 
                                   ? 'bg-gray-700 border-gray-600 text-white' 
                                   : 'bg-white border-gray-300 text-gray-900'
@@ -1370,32 +1366,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                             />
                           </div>
 
-                          {/* Coverage (read-only) */}
-                          <div className="flex items-center gap-1">
-                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Cov%</span>
-                            <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
-                              isDarkMode 
-                                ? 'bg-gray-700 border-gray-600 text-gray-300' 
-                                : 'bg-gray-100 border-gray-300 text-gray-600'
-                            }`}>
-                              {Math.round(ewmaReactionMapDropdown.coverage * 1000) / 10}%
-                            </div>
-                          </div>
-
-                          {/* Horizon (read-only) */}
-                          <div className="flex items-center gap-1">
-                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>H(d)</span>
-                            <div className={`px-3 py-[2px] rounded-full border text-xs text-center ${
-                              isDarkMode 
-                                ? 'bg-gray-700 border-gray-600 text-gray-300' 
-                                : 'bg-gray-100 border-gray-300 text-gray-600'
-                            }`}>
-                              {ewmaReactionMapDropdown.horizon}D
-                            </div>
-                          </div>
-
-                          {/* Train % */}
-                          <div className="flex items-center gap-1">
+                          {/* Train % Row */}
+                          <div className="flex items-center justify-between gap-3">
                             <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Train%</span>
                             <input
                               type="number"
@@ -1410,7 +1382,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                                   ewmaReactionMapDropdown.setReactionTrainFraction(frac);
                                 }
                               }}
-                              className={`w-14 rounded-full border px-2 py-[2px] text-right text-xs ${
+                              className={`w-20 rounded-full border px-3 py-1 text-right text-xs ${
                                 isDarkMode 
                                   ? 'bg-gray-700 border-gray-600 text-white' 
                                   : 'bg-white border-gray-300 text-gray-900'
@@ -1418,75 +1390,53 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                             />
                           </div>
 
-                          {/* Min n */}
-                          <div className="flex items-center gap-1">
-                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Min n</span>
-                            <input
-                              type="number"
-                              min={100}
-                              max={20000}
-                              step={100}
-                              value={ewmaReactionMapDropdown.reactionMinTrainObs}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                if (Number.isFinite(val)) {
-                                  ewmaReactionMapDropdown.setReactionMinTrainObs(Math.max(100, Math.floor(val)));
-                                }
+                          {/* Buttons Row */}
+                          <div className="flex items-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                ewmaReactionMapDropdown.onRun();
                               }}
-                              className={`w-20 rounded-full border px-2 py-[2px] text-right text-xs ${
-                                isDarkMode 
-                                  ? 'bg-gray-700 border-gray-600 text-white' 
-                                  : 'bg-white border-gray-300 text-gray-900'
+                              disabled={ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction}
+                              className={`flex-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                                ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction
+                                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                  : 'bg-blue-600 hover:bg-blue-700 text-white'
                               }`}
-                            />
+                            >
+                              {ewmaReactionMapDropdown.isLoadingReaction ? 'Running...' : 'Run'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                ewmaReactionMapDropdown.onMaximize();
+                              }}
+                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
+                              className={`flex-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                                ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
+                                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                                  : 'bg-amber-500 hover:bg-amber-600 text-white'
+                              }`}
+                            >
+                              {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
+                            </button>
                           </div>
 
-                          {/* Run Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              ewmaReactionMapDropdown.onRun();
-                            }}
-                            disabled={ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction}
-                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                              ewmaReactionMapDropdown.isLoadingReaction || ewmaReactionMapDropdown.isOptimizingReaction
-                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                                : 'bg-blue-600 hover:bg-blue-700 text-white'
-                            }`}
-                          >
-                            {ewmaReactionMapDropdown.isLoadingReaction ? 'Running...' : 'Run'}
-                          </button>
+                          {/* Summary Info */}
+                          {ewmaReactionMapDropdown.summaryInfo && (
+                            <div className={`mt-1 text-[10px] leading-tight ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                              {ewmaReactionMapDropdown.summaryInfo}
+                            </div>
+                          )}
 
-                          {/* Maximize Button */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              ewmaReactionMapDropdown.onMaximize();
-                            }}
-                            disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                              ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
-                                ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
-                                : 'bg-amber-500 hover:bg-amber-600 text-white'
-                            }`}
-                          >
-                            {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
-                          </button>
+                          {/* Optimization Result */}
+                          {ewmaReactionMapDropdown.optimizationResult && (
+                            <div className="text-[10px] text-amber-400 leading-tight">
+                              {ewmaReactionMapDropdown.optimizationResult}
+                            </div>
+                          )}
                         </div>
-
-                        {/* Summary Info */}
-                        {ewmaReactionMapDropdown.summaryInfo && (
-                          <div className={`mt-3 text-[11px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                            {ewmaReactionMapDropdown.summaryInfo}
-                          </div>
-                        )}
-
-                        {/* Optimization Result */}
-                        {ewmaReactionMapDropdown.optimizationResult && (
-                          <div className="mt-1 text-[11px] text-amber-400">
-                            {ewmaReactionMapDropdown.optimizationResult}
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>

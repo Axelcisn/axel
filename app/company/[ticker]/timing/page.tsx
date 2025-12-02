@@ -3537,12 +3537,8 @@ export default function TimingPage({ params }: TimingPageProps) {
           ewmaReactionMapDropdown={{
             reactionLambda,
             setReactionLambda,
-            coverage,
-            horizon: h,
             reactionTrainFraction,
             setReactionTrainFraction,
-            reactionMinTrainObs,
-            setReactionMinTrainObs,
             onRun: loadReactionMap,
             onMaximize: handleMaximizeReaction,
             isLoadingReaction,
