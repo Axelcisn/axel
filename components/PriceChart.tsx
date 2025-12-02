@@ -178,8 +178,7 @@ export interface EwmaReactionMapDropdownProps {
   onMaximize: () => void;
   isLoadingReaction: boolean;
   isOptimizingReaction: boolean;
-  summaryInfo?: string | null;  // e.g. "Train: ... · Test: ..."
-  optimizationResult?: string | null;  // e.g. "Best hit-rate: 54.1% · λ = 0.94 · Train% = 70%"
+  optimizationResult?: string | null;  // e.g. "Best: 54.1% · λ=0.94 · Train=70%"
 }
 
 interface PriceChartProps {
@@ -1409,13 +1408,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                           {ewmaReactionMapDropdown.isLoadingReaction && (
                             <div className={`text-[10px] text-center ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
                               Updating...
-                            </div>
-                          )}
-
-                          {/* Summary Info - multiline layout */}
-                          {ewmaReactionMapDropdown.summaryInfo && (
-                            <div className={`mt-1 text-[10px] leading-relaxed whitespace-pre-line ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              {ewmaReactionMapDropdown.summaryInfo}
                             </div>
                           )}
 
