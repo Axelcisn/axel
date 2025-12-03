@@ -37,14 +37,30 @@ export async function GET(
     console.log(`  Lambda: [${lambdaMin}, ${lambdaMax}] step ${lambdaStep}`);
     console.log(`  Train%: [${trainMin}, ${trainMax}] step ${trainStep}`);
 
-    let best = {
-      lambda: 0,
-      trainFraction: 0,
-      directionHitRate: -Infinity,
-      coverage: 0,
-      intervalScore: Infinity,
-      avgWidth: 0,
+    // Candidate type for storing all valid combos (includes neutral metrics for comparison)
+    type Candidate = {
+      lambda: number;
+      trainFraction: number;
+      directionHitRate: number;       // biased
+      coverage: number;               // biased
+      intervalScore: number;          // biased
+      avgWidth: number;               // biased
+      neutralDirectionHitRate: number;
+      neutralIntervalScore: number;
     };
+
+    const candidates: Candidate[] = [];
+
+    // Cache neutral EWMA metrics per λ (computed once per λ, reused across train fractions)
+    const neutralByLambda = new Map<
+      number,
+      {
+        directionHitRate: number;
+        intervalScore: number;
+        coverage: number;
+        avgWidth: number;
+      }
+    >();
 
     let testedCombos = 0;
     let skippedCombos = 0;
@@ -52,6 +68,27 @@ export async function GET(
     // Brute force grid search
     for (let l = lambdaMin; l <= lambdaMax + 1e-9; l += lambdaStep) {
       const lambda = Math.round(Math.min(Math.max(l, 0.01), 0.99) * 100) / 100;
+
+      // Compute neutral EWMA metrics once per λ (no tilt config)
+      let neutralMetrics = neutralByLambda.get(lambda);
+      if (!neutralMetrics) {
+        const neutralWalker = await runEwmaWalker({
+          symbol,
+          lambda,
+          coverage,
+          horizon,
+        });
+        const neutralSummary = summarizeEwmaWalkerResults(neutralWalker);
+
+        neutralMetrics = {
+          directionHitRate: neutralSummary.directionHitRate,
+          intervalScore: neutralSummary.intervalScore,
+          coverage: neutralSummary.coverage,
+          avgWidth: neutralSummary.avgWidth,
+        };
+        neutralByLambda.set(lambda, neutralMetrics);
+        console.log(`  Neutral λ=${lambda.toFixed(2)}: hit=${(neutralMetrics.directionHitRate * 100).toFixed(2)}%, score=${neutralMetrics.intervalScore.toFixed(4)}`);
+      }
 
       for (let t = trainMin; t <= trainMax + 1e-9; t += trainStep) {
         const trainFraction = Math.round(Math.min(Math.max(t, 0.01), 0.99) * 100) / 100;
@@ -91,23 +128,30 @@ export async function GET(
 
         testedCombos++;
 
-        if (hit > best.directionHitRate) {
-          best = {
-            lambda,
-            trainFraction,
-            directionHitRate: hit,
-            coverage: summary.coverage,
-            intervalScore: summary.intervalScore,
-            avgWidth: summary.avgWidth,
-          };
-          console.log(`  New best: λ=${lambda.toFixed(2)}, train=${(trainFraction * 100).toFixed(0)}%, hit=${(hit * 100).toFixed(2)}%`);
+        // Grab neutral metrics for this λ (already computed above)
+        const neutral = neutralByLambda.get(lambda)!;
+
+        // Push every valid combo into candidates array
+        candidates.push({
+          lambda,
+          trainFraction,
+          directionHitRate: hit,
+          coverage: summary.coverage,
+          intervalScore: summary.intervalScore,
+          avgWidth: summary.avgWidth,
+          neutralDirectionHitRate: neutral.directionHitRate,
+          neutralIntervalScore: neutral.intervalScore,
+        });
+
+        if (testedCombos % 10 === 0) {
+          console.log(`  Tested ${testedCombos} combos, latest: λ=${lambda.toFixed(2)}, train=${(trainFraction * 100).toFixed(0)}%, hit=${(hit * 100).toFixed(2)}%`);
         }
       }
     }
 
     console.log(`[EWMA Optimize] Done. Tested ${testedCombos} combos, skipped ${skippedCombos}.`);
 
-    if (best.directionHitRate === -Infinity) {
+    if (candidates.length === 0) {
       return NextResponse.json(
         {
           success: false,
@@ -117,6 +161,27 @@ export async function GET(
       );
     }
 
+    // Sort descending by hit-rate
+    candidates.sort((a, b) => b.directionHitRate - a.directionHitRate);
+
+    // Keep top N (e.g. 10)
+    const topCandidates = candidates.slice(0, 10);
+    const best = topCandidates[0];
+
+    // Neutral baseline for the best λ (so UI can show a "Rank 0" row)
+    const neutralMetricsForBest = neutralByLambda.get(best.lambda);
+    const neutralBaseline = neutralMetricsForBest
+      ? {
+          lambda: best.lambda,
+          directionHitRate: neutralMetricsForBest.directionHitRate,
+          intervalScore: neutralMetricsForBest.intervalScore,
+          coverage: neutralMetricsForBest.coverage,
+          avgWidth: neutralMetricsForBest.avgWidth,
+        }
+      : null;
+
+    console.log(`  Best: λ=${best.lambda.toFixed(2)}, train=${(best.trainFraction * 100).toFixed(0)}%, hit=${(best.directionHitRate * 100).toFixed(2)}%`);
+
     return NextResponse.json({
       success: true,
       symbol,
@@ -125,6 +190,8 @@ export async function GET(
       testedCombos,
       skippedCombos,
       best,
+      candidates: topCandidates,
+      neutralBaseline,
     });
   } catch (err: unknown) {
     console.error("[EWMA Optimize API] error:", err);

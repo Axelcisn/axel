@@ -17,8 +17,8 @@ export default function Navigation() {
 
   return (
     <nav className={`shadow-sm border-b ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
-      <div className="max-w-6xl mx-auto px-4">
-        <div className="flex justify-between items-center h-16">
+      <div className="w-full px-[5%]">
+        <div className="flex justify-between items-center h-12">
           <Link href="/" className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
             Axel
           </Link>

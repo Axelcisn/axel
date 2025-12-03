@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -14,7 +14,6 @@ import {
   ComposedChart,
   ReferenceLine,
   ReferenceDot,
-  CartesianGrid,
   Line,
 } from "recharts";
 import { useDarkMode } from "@/lib/hooks/useDarkMode";
@@ -79,14 +78,49 @@ interface ChartPoint {
   forecastLower?: number | null;
   forecastUpper?: number | null;
   forecastModelName?: string | null;
-  // EWMA Walker overlay values (neutral)
+
+  // === EWMA Unbiased ===
+  // Past H-day forecast: made at t-H, targeting t (the hovered date)
+  ewma_past_forecast?: number | null;
+  ewma_past_lower?: number | null;
+  ewma_past_upper?: number | null;
+  ewma_past_origin_date?: string | null;  // t-H
+  ewma_past_target_date?: string | null;  // t
+  ewma_past_realized?: number | null;     // close(t) for error
+
+  // Current H-day forecast: made at t, targeting t+H
+  ewma_future_forecast?: number | null;
+  ewma_future_lower?: number | null;
+  ewma_future_upper?: number | null;
+  ewma_future_origin_date?: string | null; // t
+  ewma_future_target_date?: string | null; // t+H
+
+  // Keep legacy fields for rendering lines/bands
   ewma_forecast?: number | null;
   ewma_lower?: number | null;
   ewma_upper?: number | null;
-  // EWMA Biased overlay values (tilted)
+  ewma_origin_date?: string | null;
+  ewma_realized?: number | null;
+
+  // === EWMA Biased ===
+  ewma_biased_past_forecast?: number | null;
+  ewma_biased_past_lower?: number | null;
+  ewma_biased_past_upper?: number | null;
+  ewma_biased_past_origin_date?: string | null;
+  ewma_biased_past_target_date?: string | null;
+  ewma_biased_past_realized?: number | null;
+
+  ewma_biased_future_forecast?: number | null;
+  ewma_biased_future_lower?: number | null;
+  ewma_biased_future_upper?: number | null;
+  ewma_biased_future_origin_date?: string | null;
+  ewma_biased_future_target_date?: string | null;
+
   ewma_biased_forecast?: number | null;
   ewma_biased_lower?: number | null;
   ewma_biased_upper?: number | null;
+  ewma_biased_origin_date?: string | null;
+  ewma_biased_realized?: number | null;
 };
 
 /**
@@ -155,6 +189,9 @@ interface HorizonCoverageProps {
   onEwmaLambdaChange?: (lambda: number) => void;
   degreesOfFreedom?: number;
   onDegreesOfFreedomChange?: (df: number) => void;
+  // GBM parameters
+  gbmLambda?: number;
+  onGbmLambdaChange?: (lambda: number) => void;
 }
 
 /** EWMA Walker summary statistics for hover card */
@@ -176,8 +213,30 @@ export interface EwmaReactionMapDropdownProps {
   reactionTrainFraction: number;
   setReactionTrainFraction: (v: number) => void;
   onMaximize: () => void;
+  onReset: () => void;  // Reset callback to clear maximized state
   isLoadingReaction: boolean;
   isOptimizingReaction: boolean;
+  isMaximized: boolean;  // Whether the biased EWMA has been optimized
+  hasOptimizationResults: boolean;  // Whether optimization results are available to apply
+}
+
+/** Trade information from Trading212 simulation */
+export interface Trading212TradeInfo {
+  entryDate: string;
+  exitDate: string;
+  side: "long" | "short";
+  entryPrice: number;
+  exitPrice: number;
+  netPnl: number;
+  quantity: number;
+}
+
+/** Trade overlay for chart visualization */
+export interface Trading212TradeOverlay {
+  runId: string;
+  label: string;
+  color: string;  // hex color for this run
+  trades: Trading212TradeInfo[];
 }
 
 interface PriceChartProps {
@@ -189,10 +248,12 @@ interface PriceChartProps {
   ewmaSummary?: EwmaSummary | null;
   ewmaBiasedPath?: EwmaWalkerPathPoint[] | null;
   ewmaBiasedSummary?: EwmaSummary | null;
+  onLoadEwmaUnbiased?: () => void;
   onLoadEwmaBiased?: () => void;
   isLoadingEwmaBiased?: boolean;
   ewmaReactionMapDropdown?: EwmaReactionMapDropdownProps;  // Dropdown controls for (⋯) button
   horizonCoverage?: HorizonCoverageProps;
+  tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
@@ -215,10 +276,12 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   ewmaSummary,
   ewmaBiasedPath,
   ewmaBiasedSummary,
+  onLoadEwmaUnbiased,
   onLoadEwmaBiased,
   isLoadingEwmaBiased,
   ewmaReactionMapDropdown,
   horizonCoverage,
+  tradeOverlays,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
@@ -235,6 +298,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   const [showEwmaSettingsDropdown, setShowEwmaSettingsDropdown] = useState(false);
   const ewmaSettingsDropdownRef = useRef<HTMLDivElement>(null);
   
+  // Model Settings dropdown state (⋯ button next to Model)
+  const [showModelSettingsDropdown, setShowModelSettingsDropdown] = useState(false);
+  const modelSettingsDropdownRef = useRef<HTMLDivElement>(null);
+  
   // Click outside to close EWMA settings dropdown
   useEffect(() => {
     if (!showEwmaSettingsDropdown) return;
@@ -246,6 +313,18 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showEwmaSettingsDropdown]);
+  
+  // Click outside to close Model settings dropdown
+  useEffect(() => {
+    if (!showModelSettingsDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (modelSettingsDropdownRef.current && !modelSettingsDropdownRef.current.contains(e.target as Node)) {
+        setShowModelSettingsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showModelSettingsDropdown]);
   
   // Determine whether the current overlay is in log domain
   const isLogDomain =
@@ -472,51 +551,196 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     // The EWMA walker forecasts FOR date_tp1 (target date, t+h) using data available at date_t
     // So we plot y_hat_tp1 at date_tp1 (the h-step target date)
     
-    // Neutral EWMA map
-    const ewmaMap = new Map<string, { forecast: number; lower: number; upper: number }>();
+    // Past map: key = target date (t), value = forecast made at t-H
+    const ewmaPastMap = new Map<
+      string,
+      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string; realized: number }
+    >();
+
+    // Future map: key = origin date (t), value = forecast made at t for t+H
+    const ewmaFutureMap = new Map<
+      string,
+      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string }
+    >();
+
     if (showNeutral && ewmaPath) {
       ewmaPath.forEach(point => {
-        const normalizedDate = normalizeDateString(point.date_tp1);
-        ewmaMap.set(normalizedDate, {
+        const targetDate = normalizeDateString(point.date_tp1);
+        const originDate = normalizeDateString(point.date_t);
+
+        // Past: we view this as the H-day forecast *for* targetDate
+        ewmaPastMap.set(targetDate, {
           forecast: point.y_hat_tp1,
           lower: point.L_tp1,
           upper: point.U_tp1,
+          originDate: originDate,
+          targetDate,
+          realized: point.S_tp1,
+        });
+
+        // Future: we can also see this as "from originDate to targetDate"
+        // keying by originDate gives us the forecast t -> t+H
+        ewmaFutureMap.set(originDate, {
+          forecast: point.y_hat_tp1,
+          lower: point.L_tp1,
+          upper: point.U_tp1,
+          originDate,
+          targetDate,
         });
       });
     }
 
-    // Biased EWMA map
-    const ewmaBiasedMap = new Map<string, { forecast: number; lower: number; upper: number }>();
+    // Biased EWMA maps
+    const ewmaBiasedPastMap = new Map<
+      string,
+      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string; realized: number }
+    >();
+    const ewmaBiasedFutureMap = new Map<
+      string,
+      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string }
+    >();
+
     if (showBiased && ewmaBiasedPath) {
       ewmaBiasedPath.forEach(point => {
-        const normalizedDate = normalizeDateString(point.date_tp1);
-        ewmaBiasedMap.set(normalizedDate, {
+        const targetDate = normalizeDateString(point.date_tp1);
+        const originDate = normalizeDateString(point.date_t);
+
+        ewmaBiasedPastMap.set(targetDate, {
           forecast: point.y_hat_tp1,
           lower: point.L_tp1,
           upper: point.U_tp1,
+          originDate,
+          targetDate,
+          realized: point.S_tp1,
+        });
+
+        ewmaBiasedFutureMap.set(originDate, {
+          forecast: point.y_hat_tp1,
+          lower: point.L_tp1,
+          upper: point.U_tp1,
+          originDate,
+          targetDate,
         });
       });
     }
+
+    // Build a sorted list of all forecasts by origin date for finding "latest unrealized" forecast
+    const allEwmaForecasts = showNeutral && ewmaPath 
+      ? ewmaPath.map(point => ({
+          originDate: normalizeDateString(point.date_t),
+          targetDate: normalizeDateString(point.date_tp1),
+          forecast: point.y_hat_tp1,
+          lower: point.L_tp1,
+          upper: point.U_tp1,
+        })).sort((a, b) => a.originDate.localeCompare(b.originDate))
+      : [];
+
+    const allEwmaBiasedForecasts = showBiased && ewmaBiasedPath
+      ? ewmaBiasedPath.map(point => ({
+          originDate: normalizeDateString(point.date_t),
+          targetDate: normalizeDateString(point.date_tp1),
+          forecast: point.y_hat_tp1,
+          lower: point.L_tp1,
+          upper: point.U_tp1,
+        })).sort((a, b) => a.originDate.localeCompare(b.originDate))
+      : [];
+
+    // Helper to find the most recent forecast made ON or BEFORE currentDate whose target is > currentDate
+    const findCurrentUnrealizedForecast = (
+      forecasts: typeof allEwmaForecasts,
+      currentDate: string
+    ) => {
+      // Find forecasts where:
+      // 1. originDate <= currentDate (made on or before the hovered date)
+      // 2. targetDate > currentDate (not yet realized)
+      // Return the one with the latest originDate (most recent forecast made up to this date)
+      let best: typeof forecasts[0] | null = null;
+      for (const f of forecasts) {
+        if (f.originDate <= currentDate && f.targetDate > currentDate) {
+          if (!best || f.originDate > best.originDate) {
+            best = f;
+          }
+        }
+      }
+      return best;
+    };
 
     // Add EWMA fields to chartData points
     const result: ChartPoint[] = chartData.map(point => {
       const chartDate = normalizeDateString(point.date);
       
-      // Neutral EWMA
-      const ewmaData = ewmaMap.get(chartDate);
-      // Biased EWMA
-      const ewmaBiasedData = ewmaBiasedMap.get(chartDate);
-      
+      const past = ewmaPastMap.get(chartDate);
+      const future = ewmaFutureMap.get(chartDate);
+      const biasedPast = ewmaBiasedPastMap.get(chartDate);
+      const biasedFuture = ewmaBiasedFutureMap.get(chartDate);
+
+      // For the "future" column, if no forecast was made ON this date,
+      // find the most recent forecast made on or before this date whose target is still unrealized
+      const unrealizedEwma = !future ? findCurrentUnrealizedForecast(allEwmaForecasts, chartDate) : null;
+      const unrealizedBiased = !biasedFuture ? findCurrentUnrealizedForecast(allEwmaBiasedForecasts, chartDate) : null;
+
+      const effectiveFuture = future || (unrealizedEwma ? {
+        forecast: unrealizedEwma.forecast,
+        lower: unrealizedEwma.lower,
+        upper: unrealizedEwma.upper,
+        originDate: unrealizedEwma.originDate,
+        targetDate: unrealizedEwma.targetDate,
+      } : null);
+
+      const effectiveBiasedFuture = biasedFuture || (unrealizedBiased ? {
+        forecast: unrealizedBiased.forecast,
+        lower: unrealizedBiased.lower,
+        upper: unrealizedBiased.upper,
+        originDate: unrealizedBiased.originDate,
+        targetDate: unrealizedBiased.targetDate,
+      } : null);
+
       return {
         ...point,
-        // Neutral EWMA
-        ewma_forecast: ewmaData?.forecast ?? null,
-        ewma_lower: ewmaData?.lower ?? null,
-        ewma_upper: ewmaData?.upper ?? null,
-        // Biased EWMA
-        ewma_biased_forecast: ewmaBiasedData?.forecast ?? null,
-        ewma_biased_lower: ewmaBiasedData?.lower ?? null,
-        ewma_biased_upper: ewmaBiasedData?.upper ?? null,
+
+        // Unbiased EWMA - past H-day forecast (t-H -> t)
+        ewma_past_forecast: past?.forecast ?? null,
+        ewma_past_lower: past?.lower ?? null,
+        ewma_past_upper: past?.upper ?? null,
+        ewma_past_origin_date: past?.originDate ?? null,
+        ewma_past_target_date: past?.targetDate ?? null,
+        ewma_past_realized: past?.realized ?? null,
+
+        // Unbiased EWMA - current H-day forecast (t -> t+H, or latest unrealized)
+        ewma_future_forecast: effectiveFuture?.forecast ?? null,
+        ewma_future_lower: effectiveFuture?.lower ?? null,
+        ewma_future_upper: effectiveFuture?.upper ?? null,
+        ewma_future_origin_date: effectiveFuture?.originDate ?? null,
+        ewma_future_target_date: effectiveFuture?.targetDate ?? null,
+
+        // Keep legacy fields pointing to "past" so existing lines/bands keep working
+        ewma_forecast: past?.forecast ?? null,
+        ewma_lower: past?.lower ?? null,
+        ewma_upper: past?.upper ?? null,
+        ewma_origin_date: past?.originDate ?? null,
+        ewma_realized: past?.realized ?? null,
+
+        // Biased EWMA - past
+        ewma_biased_past_forecast: biasedPast?.forecast ?? null,
+        ewma_biased_past_lower: biasedPast?.lower ?? null,
+        ewma_biased_past_upper: biasedPast?.upper ?? null,
+        ewma_biased_past_origin_date: biasedPast?.originDate ?? null,
+        ewma_biased_past_target_date: biasedPast?.targetDate ?? null,
+        ewma_biased_past_realized: biasedPast?.realized ?? null,
+
+        // Biased EWMA - future (or latest unrealized)
+        ewma_biased_future_forecast: effectiveBiasedFuture?.forecast ?? null,
+        ewma_biased_future_lower: effectiveBiasedFuture?.lower ?? null,
+        ewma_biased_future_upper: effectiveBiasedFuture?.upper ?? null,
+        ewma_biased_future_origin_date: effectiveBiasedFuture?.originDate ?? null,
+        ewma_biased_future_target_date: effectiveBiasedFuture?.targetDate ?? null,
+
+        // Legacy biased fields
+        ewma_biased_forecast: biasedPast?.forecast ?? null,
+        ewma_biased_lower: biasedPast?.lower ?? null,
+        ewma_biased_upper: biasedPast?.upper ?? null,
+        ewma_biased_origin_date: biasedPast?.originDate ?? null,
+        ewma_biased_realized: biasedPast?.realized ?? null,
       };
     });
 
@@ -800,13 +1024,721 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return [min - padding, max + padding];
   }, [chartDataWithForecastBand, showEwmaOverlay]);
 
+  // Stable reference for ewma maximized state
+  const ewmaIsMaximized = ewmaReactionMapDropdown?.isMaximized ?? false;
+
+  // === Trade Marker Types and Data ===
+  type TradeMarkerType = 'entry' | 'exit';
+
+  interface TradeMarker {
+    date: string;
+    type: TradeMarkerType;
+    side: 'long' | 'short';
+    runId: string;
+    label: string;
+    color: string;
+    netPnl?: number;
+    margin?: number;
+  }
+
+  // Build flat array of trade markers from overlays
+  const tradeMarkers = useMemo<TradeMarker[]>(() => {
+    if (!tradeOverlays || tradeOverlays.length === 0) return [];
+
+    const markers: TradeMarker[] = [];
+
+    for (const overlay of tradeOverlays) {
+      const color = overlay.color ?? '#A855F7'; // default purple
+      
+      for (const trade of overlay.trades) {
+        const entryDate = normalizeDateString(trade.entryDate);
+        const exitDate = normalizeDateString(trade.exitDate);
+        const margin = (trade.entryPrice * trade.quantity) / 5; // approx 5x leverage
+
+        markers.push({
+          date: entryDate,
+          type: 'entry',
+          side: trade.side,
+          runId: overlay.runId,
+          label: overlay.label,
+          color,
+          margin,
+        });
+
+        markers.push({
+          date: exitDate,
+          type: 'exit',
+          side: trade.side,
+          runId: overlay.runId,
+          label: overlay.label,
+          color,
+          netPnl: trade.netPnl,
+          margin,
+        });
+      }
+    }
+
+    console.log('[PriceChart] tradeMarkers:', markers.length, 'markers');
+    return markers;
+  }, [tradeOverlays]);
+
+  // Map from date -> close price for ReferenceDot Y positioning
+  const dateToClose = useMemo(() => {
+    const map = new Map<string, number>();
+    chartDataWithForecastBand.forEach((pt) => {
+      if (pt.date && pt.close != null) {
+        map.set(pt.date, pt.close);
+      }
+    });
+    return map;
+  }, [chartDataWithForecastBand]);
+
+  // Helper to get Y coordinate for a trade marker (uses close price for alignment)
+  const getMarkerY = useCallback((marker: TradeMarker): number | undefined => {
+    return dateToClose.get(marker.date);
+  }, [dateToClose]);
+
   // Determine line color from current range performance
   const latestRangePerf = perfByRange[selectedRange];
   const isPositive = latestRangePerf != null ? latestRangePerf >= 0 : undefined;
-  const lineColor = isPositive === false ? "#F97373" : "#00E5A0";
+  const lineColor = isPositive === false ? "#F97373" : "#22D3EE"; // Glowing cyan-blue
 
   const chartBg = "w-full";
   const containerClasses = (className ?? "") + " w-full";
+
+  // Memoized chart element to prevent re-renders when dropdown states change
+  const memoizedChartElement = useMemo(() => {
+    if (loading || error || chartDataWithEwma.length === 0) return null;
+    
+    // Debug logging for trade markers
+    console.log('[PriceChart] Render - chartDataWithForecastBand:', chartDataWithForecastBand.length, 'points');
+    console.log('[PriceChart] Render - tradeMarkers:', tradeMarkers.length, 'markers');
+    
+    return (
+      <div className="relative">
+        {/* Enhanced CSS Animations for forecast band */}
+        <style>{`
+          /* Smooth dot entrance with scale and glow */
+          @keyframes dotPopIn {
+            0% {
+              opacity: 0;
+              transform: scale(0);
+            }
+            50% {
+              opacity: 1;
+              transform: scale(1.3);
+            }
+            70% {
+              transform: scale(0.9);
+            }
+            100% {
+              opacity: 1;
+              transform: scale(1);
+            }
+          }
+          
+          /* Subtle breathing glow for dots */
+          @keyframes dotGlow {
+            0%, 100% {
+              filter: drop-shadow(0 0 2px rgba(59, 130, 246, 0.5));
+            }
+            50% {
+              filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.8));
+            }
+          }
+          
+          /* Shimmer effect for area fill */
+          @keyframes areaShimmer {
+            0% {
+              opacity: 0;
+              clip-path: inset(0 100% 0 0);
+            }
+            100% {
+              opacity: 1;
+              clip-path: inset(0 0 0 0);
+            }
+          }
+          
+          /* Reference line fade in */
+          @keyframes refLineFade {
+            0% {
+              opacity: 0;
+              stroke-dashoffset: 100;
+            }
+            100% {
+              opacity: 1;
+              stroke-dashoffset: 0;
+            }
+          }
+          
+          .forecast-dot-animated {
+            transform-origin: center;
+            animation: dotPopIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+                       dotGlow 3s ease-in-out infinite 0.5s;
+          }
+          
+          .forecast-dot-center {
+            animation-delay: 0.2s, 0.7s;
+          }
+          
+          .forecast-dot-upper {
+            animation-delay: 0.35s, 0.85s;
+          }
+          
+          .forecast-dot-lower {
+            animation-delay: 0.5s, 1s;
+          }
+          
+          .recharts-area-area {
+            animation: areaShimmer 0.8s ease-out forwards;
+          }
+          
+          .forecast-ref-line {
+            stroke-dasharray: 100;
+            animation: refLineFade 0.6s ease-out forwards;
+          }
+        `}</style>
+        {/* Combined Price and Volume Chart */}
+        <ResponsiveContainer width="100%" height={500}>
+          <ComposedChart
+            data={chartDataWithForecastBand}
+            margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
+          >
+            <defs>
+              <linearGradient
+                id="priceFill"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stopColor={lineColor}
+                  stopOpacity={0.5}
+                />
+                <stop
+                  offset="100%"
+                  stopColor={lineColor}
+                  stopOpacity={0}
+                />
+              </linearGradient>
+              {/* Forecast band gradient fill - smooth horizontal gradient */}
+              <linearGradient
+                id="forecastBandFill"
+                x1="0"
+                y1="0"
+                x2="1"
+                y2="0"
+              >
+                <stop
+                  offset="0%"
+                  stopColor="#3B82F6"
+                  stopOpacity={0.08}
+                />
+                <stop
+                  offset="40%"
+                  stopColor="#60A5FA"
+                  stopOpacity={0.25}
+                />
+                <stop
+                  offset="100%"
+                  stopColor="#93C5FD"
+                  stopOpacity={0.4}
+                />
+              </linearGradient>
+              {/* Subtle glow filter for forecast lines */}
+              <filter id="forecastGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2" result="blur"/>
+                <feFlood floodColor="#3B82F6" floodOpacity="0.3" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* Gradient for forecast center line */}
+              <linearGradient id="forecastCenterGradient" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.8}/>
+                <stop offset="100%" stopColor="#60A5FA" stopOpacity={1}/>
+              </linearGradient>
+              {/* Gradient for forecast bound lines */}
+              <linearGradient id="forecastBoundGradient" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.4}/>
+                <stop offset="100%" stopColor="#93C5FD" stopOpacity={0.8}/>
+              </linearGradient>
+              {/* EWMA line glow filter */}
+              <filter id="ewmaGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2" result="blur"/>
+                <feFlood floodColor="#A855F7" floodOpacity="0.4" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* EWMA band gradient fill - soft purple */}
+              <linearGradient
+                id="ewmaBandFill"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stopColor="#A855F7"
+                  stopOpacity={0.25}
+                />
+                <stop
+                  offset="50%"
+                  stopColor="#A855F7"
+                  stopOpacity={0.15}
+                />
+                <stop
+                  offset="100%"
+                  stopColor="#A855F7"
+                  stopOpacity={0.25}
+                />
+              </linearGradient>
+              {/* EWMA Biased band gradient fill - amber/orange for contrast */}
+              <linearGradient
+                id="ewmaBiasedBandFill"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stopColor="#F59E0B"
+                  stopOpacity={0.25}
+                />
+                <stop
+                  offset="50%"
+                  stopColor="#F59E0B"
+                  stopOpacity={0.15}
+                />
+                <stop
+                  offset="100%"
+                  stopColor="#F59E0B"
+                  stopOpacity={0.25}
+                />
+              </linearGradient>
+              {/* Glow filter for biased EWMA line */}
+              <filter id="ewmaBiasedGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feFlood floodColor="#F59E0B" floodOpacity="0.4" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* Glowing blue filter for price line */}
+              <filter id="priceLineGlow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="2.5" result="blur"/>
+                <feFlood floodColor="#22D3EE" floodOpacity="0.5" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+
+            <XAxis
+              dataKey="date"
+              axisLine={false}
+              tickLine={false}
+              tickMargin={8}
+              minTickGap={24}
+              tick={{
+                fontSize: 10,
+                fill: isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)",
+              }}
+              tickFormatter={formatXAxisDate}
+              domain={['dataMin', 'dataMax']}
+            />
+            
+            {/* Price Y-Axis */}
+            <YAxis
+              yAxisId="price"
+              orientation="right"
+              axisLine={false}
+              tickLine={false}
+              tickMargin={8}
+              width={45}
+              tick={{
+                fontSize: 10,
+                fill: isDarkMode ? "rgba(148, 163, 184, 0.9)" : "rgba(75, 85, 99, 0.9)",
+              }}
+              domain={priceYDomain}
+              tickFormatter={(v: number) => v.toFixed(0)}
+            />
+            
+            {/* Volume Y-Axis (positioned at bottom) */}
+            <YAxis
+              yAxisId="volume"
+              orientation="right"
+              axisLine={false}
+              tickLine={false}
+              tick={false}
+              width={0}
+              domain={[0, (dataMax: number) => dataMax * 15]}
+            />
+
+            <Tooltip
+              content={<PriceTooltip isDarkMode={isDarkMode} horizon={h} />}
+              animationDuration={0}
+              cursor={{
+                stroke: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)",
+                strokeWidth: 1,
+              }}
+            />
+            
+            {/* TEMP: Test dot at last historical point */}
+            {lastHistoricalPoint && lastHistoricalPoint.close != null && (
+              <ReferenceDot
+                x={lastHistoricalPoint.date}
+                y={lastHistoricalPoint.close}
+                yAxisId="price"
+                r={4}
+                fill="orange"
+                stroke="#0F172A"
+                strokeWidth={1}
+              />
+            )}
+            
+            {/* Future boundary line */}
+            {futureDates.length > 0 && (
+              <ReferenceLine
+                x={futureDates[0]}
+                stroke={isDarkMode ? "rgba(148, 163, 184, 0.6)" : "rgba(107, 114, 128, 0.6)"}
+                strokeDasharray="4 2"
+                strokeWidth={1.5}
+              />
+            )}
+            
+            {/* Forecast band overlay at t+h */}
+            {overlayDate && overlayCenter != null && (
+              <>
+                {/* Vertical line at forecast date */}
+                <ReferenceLine
+                  x={overlayDate}
+                  stroke={isDarkMode ? "rgba(59, 130, 246, 0.5)" : "rgba(59, 130, 246, 0.4)"}
+                  strokeDasharray="6 4"
+                  strokeWidth={1.5}
+                  className="forecast-ref-line"
+                />
+
+                {/* Center forecast dot - larger and more prominent */}
+                <ReferenceDot
+                  x={overlayDate}
+                  y={overlayCenter}
+                  yAxisId="price"
+                  r={6}
+                  fill={isDarkMode ? "#3B82F6" : "#2563EB"}
+                  stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
+                  strokeWidth={2.5}
+                  className="forecast-dot-animated forecast-dot-center"
+                />
+
+                {/* Lower / Upper band markers as glowing dots */}
+                {overlayLower != null && (
+                  <ReferenceDot
+                    x={overlayDate}
+                    y={overlayLower}
+                    yAxisId="price"
+                    r={5}
+                    fill={isDarkMode ? "#22D3EE" : "#06B6D4"}
+                    stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
+                    strokeWidth={2}
+                    className="forecast-dot-animated forecast-dot-lower"
+                  />
+                )}
+                {overlayUpper != null && (
+                  <ReferenceDot
+                    x={overlayDate}
+                    y={overlayUpper}
+                    yAxisId="price"
+                    r={5}
+                    fill={isDarkMode ? "#22D3EE" : "#06B6D4"}
+                    stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
+                    strokeWidth={2}
+                    className="forecast-dot-animated forecast-dot-upper"
+                  />
+                )}
+              </>
+            )}
+            
+            {/* Forecast Band - Upper boundary filled to bottom, then Lower boundary masks it */}
+            {overlayLower != null && overlayUpper != null && (
+              <>
+                {/* Upper band - fills from upper to lower using stacking */}
+                <Area
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastUpper"
+                  stroke="transparent"
+                  fill="url(#forecastBandFill)"
+                  fillOpacity={1}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                {/* Lower band - masks out the area below lower */}
+                <Area
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastLower"
+                  stroke="transparent"
+                  fill={isDarkMode ? "#0F172A" : "#FFFFFF"}
+                  fillOpacity={1}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              </>
+            )}
+            
+            {/* Forecast Lower Line - with glow effect */}
+            {overlayLower != null && (
+              <Line
+                yAxisId="price"
+                type="linear"
+                dataKey="forecastLower"
+                stroke="#60A5FA"
+                strokeWidth={2}
+                strokeOpacity={0.85}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+                filter="url(#forecastGlow)"
+              />
+            )}
+            
+            {/* Forecast Center Line - primary with stronger glow */}
+            {overlayCenter != null && (
+              <Line
+                yAxisId="price"
+                type="linear"
+                dataKey="forecastCenter"
+                stroke="#3B82F6"
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+                filter="url(#forecastGlow)"
+              />
+            )}
+            
+            {/* Forecast Upper Line - with glow effect */}
+            {overlayUpper != null && (
+              <Line
+                yAxisId="price"
+                type="linear"
+                dataKey="forecastUpper"
+                stroke="#60A5FA"
+                strokeWidth={2}
+                strokeOpacity={0.85}
+                dot={false}
+                activeDot={false}
+                isAnimationActive={false}
+                connectNulls={false}
+                filter="url(#forecastGlow)"
+              />
+            )}
+            
+            {/* Price Line - based on Close price */}
+            <Line
+              yAxisId="price"
+              type="monotone"
+              dataKey="close"
+              stroke={lineColor}
+              strokeWidth={2}
+              dot={false}
+              activeDot={<AnimatedPriceDot />}
+              connectNulls={true}
+              filter="url(#priceLineGlow)"
+            />
+            
+            {/* Volume Bars - bottom 25% */}
+            <Bar
+              yAxisId="volume"
+              dataKey="volume"
+              fill="#666"
+            >
+              {chartDataWithForecastBand.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.volumeColor || "#666"} />
+              ))}
+            </Bar>
+            
+            {/* EWMA Band - Upper boundary area */}
+            {showEwmaOverlay && (
+              <Area
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_upper"
+                stroke="rgba(168, 85, 247, 0.3)"
+                strokeWidth={1}
+                fill="url(#ewmaBandFill)"
+                fillOpacity={1}
+                dot={false}
+                activeDot={false}
+                connectNulls={true}
+                isAnimationActive={false}
+              />
+            )}
+            
+            {/* EWMA Band - Lower boundary masks the upper area */}
+            {showEwmaOverlay && (
+              <Area
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_lower"
+                stroke="rgba(168, 85, 247, 0.3)"
+                strokeWidth={1}
+                fill={isDarkMode ? "#0f172a" : "#ffffff"}
+                fillOpacity={1}
+                dot={false}
+                activeDot={false}
+                connectNulls={true}
+                isAnimationActive={false}
+              />
+            )}
+            
+            {/* EWMA Forecast Path Overlay - Center Line */}
+            {showEwmaOverlay && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_forecast"
+                stroke="#A855F7"
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={<AnimatedEwmaDot />}
+                connectNulls={true}
+                isAnimationActive={false}
+                filter="url(#ewmaGlow)"
+              />
+            )}
+            
+            {/* EWMA Biased Band - Upper boundary area */}
+            {showEwmaBiasedOverlay && (
+              <Area
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_biased_upper"
+                stroke={ewmaIsMaximized ? "rgba(249, 115, 22, 0.4)" : "rgba(245, 158, 11, 0.3)"}
+                strokeWidth={1}
+                fill="url(#ewmaBiasedBandFill)"
+                fillOpacity={1}
+                dot={false}
+                activeDot={false}
+                connectNulls={true}
+                isAnimationActive={false}
+              />
+            )}
+            
+            {/* EWMA Biased Band - Lower boundary masks the upper area */}
+            {showEwmaBiasedOverlay && (
+              <Area
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_biased_lower"
+                stroke={ewmaIsMaximized ? "rgba(249, 115, 22, 0.4)" : "rgba(245, 158, 11, 0.3)"}
+                strokeWidth={1}
+                fill={isDarkMode ? "#0f172a" : "#ffffff"}
+                fillOpacity={1}
+                dot={false}
+                activeDot={false}
+                connectNulls={true}
+                isAnimationActive={false}
+              />
+            )}
+            
+            {/* EWMA Biased Forecast Path Overlay - Center Line */}
+            {showEwmaBiasedOverlay && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_biased_forecast"
+                stroke={ewmaIsMaximized ? "#F97316" : "#F59E0B"}
+                strokeWidth={2.5}
+                dot={false}
+                activeDot={createAnimatedEwmaBiasedDot({ isMaximized: ewmaIsMaximized })}
+                connectNulls={true}
+                isAnimationActive={false}
+                filter="url(#ewmaBiasedGlow)"
+              />
+            )}
+            
+            {/* Trading212 Trade Markers using ReferenceDot for perfect alignment */}
+            {tradeMarkers.map((m, idx) => {
+              const y = getMarkerY(m);
+              if (y == null) return null;
+
+              const isEntry = m.type === 'entry';
+              const isLong = m.side === 'long';
+
+              // Entry: filled dot (green for long, red for short)
+              // Exit: black core with colored border
+              const fill =
+                isEntry && isLong
+                  ? 'rgba(16, 185, 129, 0.8)'   // green for long entry
+                  : isEntry && !isLong
+                  ? 'rgba(239, 68, 68, 0.8)'    // red for short entry
+                  : 'rgba(15, 23, 42, 1)';      // black core for exits
+
+              const stroke =
+                !isEntry && isLong
+                  ? 'rgba(16, 185, 129, 0.9)'   // green border for long exit
+                  : !isEntry && !isLong
+                  ? 'rgba(239, 68, 68, 0.9)'    // red border for short exit
+                  : 'transparent';
+
+              const r = isEntry ? 4 : 5;
+
+              return (
+                <ReferenceDot
+                  key={`trade-${m.runId}-${m.type}-${m.date}-${idx}`}
+                  x={m.date}
+                  y={y}
+                  yAxisId="price"
+                  r={r}
+                  fill={fill}
+                  stroke={stroke}
+                  strokeWidth={1.5}
+                />
+              );
+            })}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }, [
+    chartDataWithForecastBand,
+    lineColor,
+    isDarkMode,
+    priceYDomain,
+    h,
+    lastHistoricalPoint,
+    futureDates,
+    overlayDate,
+    overlayCenter,
+    overlayLower,
+    overlayUpper,
+    showEwmaOverlay,
+    showEwmaBiasedOverlay,
+    ewmaIsMaximized,
+    tradeMarkers,
+    getMarkerY,
+  ]);
 
   return (
     <div className={containerClasses}>
@@ -814,17 +1746,17 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       <div className="flex justify-between items-center mb-2">
         {/* Left side: Horizon and Coverage */}
         {horizonCoverage && (
-          <div className="flex items-start gap-6">
+          <div className="flex items-start gap-4">
             {/* Horizon */}
-            <div className="flex flex-col gap-1">
-              <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Horizon</span>
+            <div className="flex flex-col gap-0.5">
+              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Horizon</span>
               <div className="flex items-center gap-1">
                 {[1, 2, 3, 5].map((days) => (
                   <button
                     key={days}
                     onClick={() => horizonCoverage.onHorizonChange(days)}
                     disabled={horizonCoverage.isLoading}
-                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                    className={`px-2.5 py-0.5 text-xs rounded-full transition-colors ${
                       horizonCoverage.h === days 
                         ? 'bg-blue-600 text-white' 
                         : horizonCoverage.isLoading
@@ -844,15 +1776,15 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
             
             {/* Coverage */}
-            <div className="flex flex-col gap-1">
-              <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Coverage</span>
+            <div className="flex flex-col gap-0.5">
+              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Coverage</span>
               <div className="flex items-center gap-1">
                 {[0.90, 0.95, 0.99].map((cov) => (
                   <button
                     key={cov}
                     onClick={() => horizonCoverage.onCoverageChange(cov)}
                     disabled={horizonCoverage.isLoading}
-                    className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                    className={`px-2.5 py-0.5 text-xs rounded-full transition-colors ${
                       horizonCoverage.coverage === cov 
                         ? 'bg-blue-600 text-white' 
                         : horizonCoverage.isLoading
@@ -873,10 +1805,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
             )}
             
-            {/* Model */}
+            {/* Volatility Model */}
             {horizonCoverage.volModel && horizonCoverage.onModelChange && (
-              <div className="flex flex-col gap-1">
-                <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Model</span>
+              <div className="flex flex-col gap-0.5">
+                <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Volatility Model</span>
                 <div className="flex items-center gap-1">
                   {/* GBM Button */}
                   {(() => {
@@ -886,7 +1818,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       <button
                         onClick={() => horizonCoverage.onModelChange!('GBM')}
                         disabled={horizonCoverage.isLoading}
-                        className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                        className={`px-2.5 py-0.5 text-xs rounded-full transition-colors ${
                           isSelected 
                             ? isBest
                               ? 'bg-emerald-600 text-white'
@@ -925,7 +1857,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                             }
                           }}
                           disabled={horizonCoverage.isLoading}
-                          className={`px-3 py-1 text-sm rounded-full transition-colors flex items-center gap-1 ${
+                          className={`px-2 py-0.5 text-xs rounded-full transition-colors flex items-center gap-1 ${
                             isSelected 
                               ? isBest
                                 ? 'bg-emerald-600 text-white'
@@ -1008,7 +1940,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                           setShowRangeDropdown(false);
                         }}
                         disabled={horizonCoverage.isLoading}
-                        className={`px-3 py-1 text-sm rounded-full transition-colors ${
+                        className={`px-2 py-0.5 text-xs rounded-full transition-colors ${
                           isSelected 
                             ? isBest
                               ? 'bg-emerald-600 text-white'
@@ -1047,7 +1979,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                             }
                           }}
                           disabled={horizonCoverage.isLoading}
-                          className={`px-3 py-1 text-sm rounded-full transition-colors flex items-center gap-1 ${
+                          className={`px-2 py-0.5 text-xs rounded-full transition-colors flex items-center gap-1 ${
                             isSelected 
                               ? isBest
                                 ? 'bg-emerald-600 text-white'
@@ -1122,6 +2054,122 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       </div>
                     );
                   })()}
+                  
+                  {/* Model Settings Button (⋯) */}
+                  <div className="relative" ref={modelSettingsDropdownRef}>
+                    <button
+                      onClick={() => setShowModelSettingsDropdown(!showModelSettingsDropdown)}
+                      className={`
+                        w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
+                        ${showModelSettingsDropdown
+                          ? (isDarkMode ? 'border-gray-400 text-white' : 'border-gray-500 text-gray-900')
+                          : (isDarkMode ? 'border-gray-500 text-gray-300 hover:border-gray-400' : 'border-gray-300 text-gray-700 hover:border-gray-400')
+                        }
+                      `}
+                      title="Model Settings"
+                    >
+                      ⋯
+                    </button>
+
+                    {/* Model Settings Dropdown */}
+                    {showModelSettingsDropdown && (
+                      <div 
+                        className={`
+                          absolute top-10 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
+                          ${isDarkMode 
+                            ? 'bg-gray-900/80 border-gray-500/30' 
+                            : 'bg-white/80 border-gray-400/30'
+                          }
+                        `}
+                      >
+                        <div className="space-y-2 text-xs">
+                          {/* Window - always shown */}
+                          {horizonCoverage.onWindowSizeChange && (
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Window</span>
+                              <input
+                                type="number"
+                                min={50}
+                                max={5000}
+                                step={50}
+                                value={horizonCoverage.windowSize ?? 1000}
+                                onChange={(e) => horizonCoverage.onWindowSizeChange!(parseInt(e.target.value) || 1000)}
+                                disabled={horizonCoverage.isLoading}
+                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-blue-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                }`}
+                              />
+                            </div>
+                          )}
+
+                          {/* GBM Lambda - only for GBM */}
+                          {horizonCoverage.volModel === 'GBM' && horizonCoverage.onGbmLambdaChange && (
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ Drift</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={1}
+                                step={0.01}
+                                value={horizonCoverage.gbmLambda ?? 0}
+                                onChange={(e) => horizonCoverage.onGbmLambdaChange!(parseFloat(e.target.value) || 0)}
+                                disabled={horizonCoverage.isLoading}
+                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-blue-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                }`}
+                              />
+                            </div>
+                          )}
+
+                          {/* DoF - only for GARCH Student-t */}
+                          {horizonCoverage.volModel === 'GARCH' && horizonCoverage.garchEstimator === 'Student-t' && horizonCoverage.onDegreesOfFreedomChange && (
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>DoF</span>
+                              <input
+                                type="number"
+                                min={3}
+                                max={30}
+                                step={0.5}
+                                value={horizonCoverage.degreesOfFreedom ?? 5}
+                                onChange={(e) => horizonCoverage.onDegreesOfFreedomChange!(parseFloat(e.target.value) || 5)}
+                                disabled={horizonCoverage.isLoading}
+                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-blue-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                }`}
+                              />
+                            </div>
+                          )}
+
+                          {/* EWMA Lambda - only for Range */}
+                          {horizonCoverage.volModel === 'Range' && horizonCoverage.onEwmaLambdaChange && (
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>EWMA λ</span>
+                              <input
+                                type="number"
+                                min={0.5}
+                                max={0.99}
+                                step={0.01}
+                                value={horizonCoverage.ewmaLambda ?? 0.94}
+                                onChange={(e) => horizonCoverage.onEwmaLambdaChange!(parseFloat(e.target.value) || 0.94)}
+                                disabled={horizonCoverage.isLoading}
+                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-blue-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                }`}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1130,16 +2178,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
             
             {/* EWMA Section */}
-            <div className="flex flex-col gap-1">
-              <span className={`text-sm font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>EWMA</span>
+            <div className="flex flex-col gap-0.5">
+              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>EWMA</span>
               <div className="flex items-center gap-1">
                 {/* EWMA Button */}
                 <div className="relative group">
                   <button
-                    onClick={() => setShowEwmaOverlay(!showEwmaOverlay)}
+                    onClick={() => {
+                      // Ensure unbiased EWMA is loaded if needed
+                      if (onLoadEwmaUnbiased) {
+                        onLoadEwmaUnbiased();
+                      }
+                      setShowEwmaOverlay(!showEwmaOverlay);
+                    }}
                     disabled={!ewmaPath || ewmaPath.length === 0}
                     className={`
-                      px-3 py-1 text-sm rounded-full transition-colors
+                      px-2 py-0.5 text-xs rounded-full transition-colors
                       ${showEwmaOverlay && ewmaPath && ewmaPath.length > 0
                         ? isDarkMode
                           ? 'bg-purple-600 text-white'
@@ -1222,16 +2276,20 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                   <div className="relative group">
                     <button
                       onClick={() => {
+                        // Ensure biased EWMA path is loaded if needed
+                        if (onLoadEwmaBiased) {
+                          onLoadEwmaBiased();
+                        }
+
                         if (ewmaBiasedPath && ewmaBiasedPath.length > 0) {
                           setShowEwmaBiasedOverlay(!showEwmaBiasedOverlay);
                         } else {
-                          onLoadEwmaBiased();
                           setShowEwmaBiasedOverlay(true);
                         }
                       }}
                       disabled={isLoadingEwmaBiased}
                       className={`
-                        px-3 py-1 text-sm rounded-full transition-colors
+                        px-2 py-0.5 text-xs rounded-full transition-colors
                         ${showEwmaBiasedOverlay && ewmaBiasedPath && ewmaBiasedPath.length > 0
                           ? isDarkMode
                             ? 'bg-amber-600 text-white'
@@ -1316,10 +2374,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     <button
                       onClick={() => setShowEwmaSettingsDropdown(!showEwmaSettingsDropdown)}
                       className={`
-                        w-8 h-8 flex items-center justify-center text-lg rounded-full transition-colors
+                        w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
                         ${showEwmaSettingsDropdown
-                          ? (isDarkMode ? 'bg-gray-600 text-white' : 'bg-gray-300 text-gray-900')
-                          : (isDarkMode ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')
+                          ? (isDarkMode ? 'border-gray-400 text-white' : 'border-gray-500 text-gray-900')
+                          : (isDarkMode ? 'border-gray-500 text-gray-300 hover:border-gray-400' : 'border-gray-300 text-gray-700 hover:border-gray-400')
                         }
                       `}
                       title="EWMA Reaction Map Settings"
@@ -1387,16 +2445,15 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                           </div>
 
                           {/* Buttons Row */}
-                          <div className="flex gap-2 mt-1">
+                          <div className="flex gap-1.5 mt-1">
                             {/* Reset Button */}
                             <button
                               type="button"
                               onClick={() => {
-                                ewmaReactionMapDropdown.setReactionLambda(0.94);
-                                ewmaReactionMapDropdown.setReactionTrainFraction(0.7);
+                                ewmaReactionMapDropdown.onReset();
                               }}
                               disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+                              className={`flex-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors ${
                                 ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
                                   ? 'bg-gray-500/30 text-gray-500 cursor-not-allowed'
                                   : isDarkMode
@@ -1407,20 +2464,30 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                               Reset
                             </button>
 
-                            {/* Maximize Button */}
+                            {/* Maximize Button - applies best optimization config */}
                             <button
                               type="button"
                               onClick={() => {
                                 ewmaReactionMapDropdown.onMaximize();
                               }}
-                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                              className={`flex-1 rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
-                                ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
+                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction || !ewmaReactionMapDropdown.hasOptimizationResults}
+                              className={`flex-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors ${
+                                ewmaReactionMapDropdown.isOptimizingReaction
                                   ? 'bg-gray-500/50 text-gray-400 cursor-not-allowed'
-                                  : 'bg-amber-500/90 hover:bg-amber-500 text-white'
+                                  : ewmaReactionMapDropdown.isMaximized
+                                    ? 'bg-amber-600 text-white cursor-default'
+                                    : ewmaReactionMapDropdown.hasOptimizationResults
+                                      ? 'bg-amber-500/90 hover:bg-amber-500 text-white'
+                                      : 'bg-gray-500/50 text-gray-400 cursor-wait'
                               }`}
                             >
-                              {ewmaReactionMapDropdown.isOptimizingReaction ? 'Maximizing...' : 'Maximize'}
+                              {ewmaReactionMapDropdown.isOptimizingReaction 
+                                ? 'Optimizing...' 
+                                : ewmaReactionMapDropdown.isMaximized
+                                  ? 'Maximized ✓'
+                                  : ewmaReactionMapDropdown.hasOptimizationResults
+                                    ? 'Maximize'
+                                    : 'Loading...'}
                             </button>
                           </div>
 
@@ -1442,14 +2509,19 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         
         {/* Spacer if no horizonCoverage */}
         {!horizonCoverage && <div />}
-        
-        {/* Right side: Zoom only */}
-        <div className="flex items-center gap-1">
+      </div>
+      
+      {/* Zoom Controls Row */}
+      <div className="flex items-center gap-4 mb-2 mt-6">
+        <div className="flex items-center gap-2">
+          <label className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            Zoom
+          </label>
           <button
             onClick={zoomIn}
             disabled={loading || fullData.length === 0}
             className={`
-              w-10 h-10 rounded-full text-sm font-medium transition-all
+              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
               ${isDarkMode 
                 ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500'
                 : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400'
@@ -1464,7 +2536,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             onClick={zoomOut}
             disabled={loading || fullData.length === 0}
             className={`
-              w-10 h-10 rounded-full text-sm font-medium transition-all
+              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
               ${isDarkMode 
                 ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500'
                 : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400'
@@ -1477,78 +2549,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           </button>
         </div>
       </div>
-      
-      {/* Secondary Controls Row: Window Size, EWMA λ, Degrees of Freedom */}
-      {horizonCoverage && horizonCoverage.volModel && (
-        <div className="flex items-center gap-4 mb-2 mt-6">
-          {/* Window Size - always visible */}
-          {horizonCoverage.onWindowSizeChange && (
-            <div className="flex items-center gap-2">
-              <label className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                Window
-              </label>
-              <input
-                type="number"
-                value={horizonCoverage.windowSize ?? 1000}
-                onChange={(e) => horizonCoverage.onWindowSizeChange!(parseInt(e.target.value) || 1000)}
-                disabled={horizonCoverage.isLoading}
-                className={`w-20 px-3 py-1 text-sm rounded-full border ${
-                  isDarkMode 
-                    ? 'bg-gray-800 border-gray-600 text-white focus:border-blue-500' 
-                    : 'bg-white border-gray-300 text-gray-900 focus:border-blue-500'
-                } focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50`}
-                min={50}
-                max={5000}
-              />
-            </div>
-          )}
-          
-          {/* EWMA λ - only for Range model */}
-          {horizonCoverage.volModel === 'Range' && horizonCoverage.onEwmaLambdaChange && (
-            <div className="flex items-center gap-2">
-              <label className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                EWMA λ
-              </label>
-              <input
-                type="number"
-                value={horizonCoverage.ewmaLambda ?? 0.94}
-                onChange={(e) => horizonCoverage.onEwmaLambdaChange!(parseFloat(e.target.value) || 0.94)}
-                disabled={horizonCoverage.isLoading}
-                step={0.01}
-                className={`w-20 px-3 py-1 text-sm rounded-full border ${
-                  isDarkMode 
-                    ? 'bg-gray-800 border-gray-600 text-white focus:border-blue-500' 
-                    : 'bg-white border-gray-300 text-gray-900 focus:border-blue-500'
-                } focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50`}
-                min={0.5}
-                max={0.99}
-              />
-            </div>
-          )}
-          
-          {/* Degrees of Freedom - only for GARCH Student-t */}
-          {horizonCoverage.volModel === 'GARCH' && horizonCoverage.garchEstimator === 'Student-t' && horizonCoverage.onDegreesOfFreedomChange && (
-            <div className="flex items-center gap-2">
-              <label className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                DoF
-              </label>
-              <input
-                type="number"
-                value={horizonCoverage.degreesOfFreedom ?? 8}
-                onChange={(e) => horizonCoverage.onDegreesOfFreedomChange!(parseInt(e.target.value) || 8)}
-                disabled={horizonCoverage.isLoading}
-                className={`w-16 px-3 py-1 text-sm rounded-full border ${
-                  isDarkMode 
-                    ? 'bg-gray-800 border-gray-600 text-white focus:border-blue-500' 
-                    : 'bg-white border-gray-300 text-gray-900 focus:border-blue-500'
-                } focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50`}
-                min={3}
-                max={30}
-              />
-            </div>
-          )}
-        </div>
-      )}
       
       {/* Chart Area */}
       <div className={chartBg}>
@@ -1568,587 +2568,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             No historical data available.
           </div>
         ) : (
-          <div className="relative">
-            {/* Enhanced CSS Animations for forecast band */}
-            <style>{`
-              /* Smooth dot entrance with scale and glow */
-              @keyframes dotPopIn {
-                0% {
-                  opacity: 0;
-                  transform: scale(0);
-                }
-                50% {
-                  opacity: 1;
-                  transform: scale(1.3);
-                }
-                70% {
-                  transform: scale(0.9);
-                }
-                100% {
-                  opacity: 1;
-                  transform: scale(1);
-                }
-              }
-              
-              /* Subtle breathing glow for dots */
-              @keyframes dotGlow {
-                0%, 100% {
-                  filter: drop-shadow(0 0 2px rgba(59, 130, 246, 0.5));
-                }
-                50% {
-                  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.8));
-                }
-              }
-              
-              /* Shimmer effect for area fill */
-              @keyframes areaShimmer {
-                0% {
-                  opacity: 0;
-                  clip-path: inset(0 100% 0 0);
-                }
-                100% {
-                  opacity: 1;
-                  clip-path: inset(0 0 0 0);
-                }
-              }
-              
-              /* Vertical reference line fade */
-              @keyframes refLineFade {
-                0% {
-                  opacity: 0;
-                  stroke-dashoffset: 100;
-                }
-                100% {
-                  opacity: 1;
-                  stroke-dashoffset: 0;
-                }
-              }
-              
-              .forecast-dot-animated {
-                transform-origin: center;
-                animation: dotPopIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-                           dotGlow 3s ease-in-out infinite 0.5s;
-              }
-              
-              .forecast-dot-center {
-                animation-delay: 0.2s, 0.7s;
-              }
-              
-              .forecast-dot-upper {
-                animation-delay: 0.35s, 0.85s;
-              }
-              
-              .forecast-dot-lower {
-                animation-delay: 0.5s, 1s;
-              }
-              
-              .recharts-area-area {
-                animation: areaShimmer 0.8s ease-out forwards;
-              }
-              
-              .forecast-ref-line {
-                stroke-dasharray: 100;
-                animation: refLineFade 0.6s ease-out forwards;
-              }
-            `}</style>
-            {/* Combined Price and Volume Chart */}
-            <ResponsiveContainer width="100%" height={500}>
-              <ComposedChart
-                data={chartDataWithForecastBand}
-                margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
-              >
-                <defs>
-                  <linearGradient
-                    id="priceFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor={lineColor}
-                      stopOpacity={0.5}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor={lineColor}
-                      stopOpacity={0}
-                    />
-                  </linearGradient>
-                  {/* Forecast band gradient fill - smooth horizontal gradient */}
-                  <linearGradient
-                    id="forecastBandFill"
-                    x1="0"
-                    y1="0"
-                    x2="1"
-                    y2="0"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor="#3B82F6"
-                      stopOpacity={0.08}
-                    />
-                    <stop
-                      offset="40%"
-                      stopColor="#60A5FA"
-                      stopOpacity={0.25}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="#93C5FD"
-                      stopOpacity={0.4}
-                    />
-                  </linearGradient>
-                  {/* Subtle glow filter for forecast lines */}
-                  <filter id="forecastGlow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="2" result="blur"/>
-                    <feFlood floodColor="#3B82F6" floodOpacity="0.3" result="color"/>
-                    <feComposite in="color" in2="blur" operator="in" result="shadow"/>
-                    <feMerge>
-                      <feMergeNode in="shadow"/>
-                      <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                  </filter>
-                  {/* Gradient for forecast center line */}
-                  <linearGradient id="forecastCenterGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.8}/>
-                    <stop offset="100%" stopColor="#60A5FA" stopOpacity={1}/>
-                  </linearGradient>
-                  {/* Gradient for forecast bound lines */}
-                  <linearGradient id="forecastBoundGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.4}/>
-                    <stop offset="100%" stopColor="#93C5FD" stopOpacity={0.8}/>
-                  </linearGradient>
-                  {/* EWMA line glow filter */}
-                  <filter id="ewmaGlow" x="-20%" y="-20%" width="140%" height="140%">
-                    <feGaussianBlur stdDeviation="2" result="blur"/>
-                    <feFlood floodColor="#A855F7" floodOpacity="0.4" result="color"/>
-                    <feComposite in="color" in2="blur" operator="in" result="shadow"/>
-                    <feMerge>
-                      <feMergeNode in="shadow"/>
-                      <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                  </filter>
-                  {/* EWMA band gradient fill - soft purple */}
-                  <linearGradient
-                    id="ewmaBandFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor="#A855F7"
-                      stopOpacity={0.25}
-                    />
-                    <stop
-                      offset="50%"
-                      stopColor="#A855F7"
-                      stopOpacity={0.15}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="#A855F7"
-                      stopOpacity={0.25}
-                    />
-                  </linearGradient>
-                  {/* EWMA Biased band gradient fill - amber/orange for contrast */}
-                  <linearGradient
-                    id="ewmaBiasedBandFill"
-                    x1="0"
-                    y1="0"
-                    x2="0"
-                    y2="1"
-                  >
-                    <stop
-                      offset="0%"
-                      stopColor="#F59E0B"
-                      stopOpacity={0.25}
-                    />
-                    <stop
-                      offset="50%"
-                      stopColor="#F59E0B"
-                      stopOpacity={0.15}
-                    />
-                    <stop
-                      offset="100%"
-                      stopColor="#F59E0B"
-                      stopOpacity={0.25}
-                    />
-                  </linearGradient>
-                  {/* Glow filter for biased EWMA line */}
-                  <filter id="ewmaBiasedGlow" x="-50%" y="-50%" width="200%" height="200%">
-                    <feGaussianBlur stdDeviation="3" result="blur"/>
-                    <feFlood floodColor="#F59E0B" floodOpacity="0.4" result="color"/>
-                    <feComposite in="color" in2="blur" operator="in" result="shadow"/>
-                    <feMerge>
-                      <feMergeNode in="shadow"/>
-                      <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                  </filter>
-                </defs>
-
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={8}
-                  minTickGap={24}
-                  tick={{
-                    fontSize: 10,
-                    fill: isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)",
-                  }}
-                  tickFormatter={formatXAxisDate}
-                  domain={['dataMin', 'dataMax']}
-                />
-                
-                {/* Price Y-Axis */}
-                <YAxis
-                  yAxisId="price"
-                  orientation="right"
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={8}
-                  width={45}
-                  tick={{
-                    fontSize: 10,
-                    fill: isDarkMode ? "rgba(148, 163, 184, 0.9)" : "rgba(75, 85, 99, 0.9)",
-                  }}
-                  domain={priceYDomain}
-                  tickFormatter={(v: number) => v.toFixed(0)}
-                />
-                
-                {/* Volume Y-Axis (positioned at bottom) */}
-                <YAxis
-                  yAxisId="volume"
-                  orientation="right"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={false}
-                  width={0}
-                  domain={[0, (dataMax: number) => dataMax * 15]}
-                />
-
-                <Tooltip
-                  content={<PriceTooltip isDarkMode={isDarkMode} />}
-                  animationDuration={0}
-                  cursor={{
-                    stroke: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)",
-                    strokeWidth: 1,
-                  }}
-                />
-                
-                {/* TEMP: Test dot at last historical point */}
-                {lastHistoricalPoint && lastHistoricalPoint.close != null && (
-                  <ReferenceDot
-                    x={lastHistoricalPoint.date}
-                    y={lastHistoricalPoint.close}
-                    yAxisId="price"
-                    r={4}
-                    fill="orange"
-                    stroke="#0F172A"
-                    strokeWidth={1}
-                  />
-                )}
-                
-                {/* Future boundary line */}
-                {futureDates.length > 0 && (
-                  <ReferenceLine
-                    x={futureDates[0]}
-                    stroke={isDarkMode ? "rgba(148, 163, 184, 0.6)" : "rgba(107, 114, 128, 0.6)"}
-                    strokeDasharray="4 2"
-                    strokeWidth={1.5}
-                  />
-                )}
-                
-                {/* Forecast band overlay at t+h */}
-                {overlayDate && overlayCenter != null && (
-                  <>
-                    {/* Vertical line at forecast date */}
-                    <ReferenceLine
-                      x={overlayDate}
-                      stroke={isDarkMode ? "rgba(59, 130, 246, 0.5)" : "rgba(59, 130, 246, 0.4)"}
-                      strokeDasharray="6 4"
-                      strokeWidth={1.5}
-                      className="forecast-ref-line"
-                    />
-
-                    {/* Center forecast dot - larger and more prominent */}
-                    <ReferenceDot
-                      x={overlayDate}
-                      y={overlayCenter}
-                      yAxisId="price"
-                      r={6}
-                      fill={isDarkMode ? "#3B82F6" : "#2563EB"}
-                      stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
-                      strokeWidth={2.5}
-                      className="forecast-dot-animated forecast-dot-center"
-                    />
-
-                    {/* Lower / Upper band markers as glowing dots */}
-                    {overlayLower != null && (
-                      <ReferenceDot
-                        x={overlayDate}
-                        y={overlayLower}
-                        yAxisId="price"
-                        r={5}
-                        fill={isDarkMode ? "#22D3EE" : "#06B6D4"}
-                        stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
-                        strokeWidth={2}
-                        className="forecast-dot-animated forecast-dot-lower"
-                      />
-                    )}
-                    {overlayUpper != null && (
-                      <ReferenceDot
-                        x={overlayDate}
-                        y={overlayUpper}
-                        yAxisId="price"
-                        r={5}
-                        fill={isDarkMode ? "#22D3EE" : "#06B6D4"}
-                        stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
-                        strokeWidth={2}
-                        className="forecast-dot-animated forecast-dot-upper"
-                      />
-                    )}
-                  </>
-                )}
-                
-                {/* Forecast Band - Upper boundary filled to bottom, then Lower boundary masks it */}
-                {overlayLower != null && overlayUpper != null && (
-                  <>
-                    {/* Upper band - fills from upper to lower using stacking */}
-                    <Area
-                      yAxisId="price"
-                      type="linear"
-                      dataKey="forecastUpper"
-                      stroke="transparent"
-                      fill="url(#forecastBandFill)"
-                      fillOpacity={1}
-                      dot={false}
-                      activeDot={false}
-                      isAnimationActive={true}
-                      animationDuration={800}
-                      animationEasing="ease-out"
-                      animationBegin={100}
-                      connectNulls={false}
-                    />
-                    {/* Lower band - masks out the area below lower */}
-                    <Area
-                      yAxisId="price"
-                      type="linear"
-                      dataKey="forecastLower"
-                      stroke="transparent"
-                      fill={isDarkMode ? "#0F172A" : "#FFFFFF"}
-                      fillOpacity={1}
-                      dot={false}
-                      activeDot={false}
-                      isAnimationActive={true}
-                      animationDuration={800}
-                      animationEasing="ease-out"
-                      animationBegin={100}
-                      connectNulls={false}
-                    />
-                  </>
-                )}
-                
-                {/* Forecast Lower Line - with glow effect */}
-                {overlayLower != null && (
-                  <Line
-                    yAxisId="price"
-                    type="linear"
-                    dataKey="forecastLower"
-                    stroke="#60A5FA"
-                    strokeWidth={2}
-                    strokeOpacity={0.85}
-                    dot={false}
-                    activeDot={false}
-                    isAnimationActive={true}
-                    animationDuration={600}
-                    animationEasing="ease-out"
-                    animationBegin={50}
-                    connectNulls={false}
-                    filter="url(#forecastGlow)"
-                  />
-                )}
-                
-                {/* Forecast Center Line - primary with stronger glow */}
-                {overlayCenter != null && (
-                  <Line
-                    yAxisId="price"
-                    type="linear"
-                    dataKey="forecastCenter"
-                    stroke="#3B82F6"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={false}
-                    isAnimationActive={true}
-                    animationDuration={600}
-                    animationEasing="ease-out"
-                    animationBegin={0}
-                    connectNulls={false}
-                    filter="url(#forecastGlow)"
-                  />
-                )}
-                
-                {/* Forecast Upper Line - with glow effect */}
-                {overlayUpper != null && (
-                  <Line
-                    yAxisId="price"
-                    type="linear"
-                    dataKey="forecastUpper"
-                    stroke="#60A5FA"
-                    strokeWidth={2}
-                    strokeOpacity={0.85}
-                    dot={false}
-                    activeDot={false}
-                    isAnimationActive={true}
-                    animationDuration={600}
-                    animationEasing="ease-out"
-                    animationBegin={0}
-                    connectNulls={false}
-                    filter="url(#forecastGlow)"
-                  />
-                )}
-                
-                {/* Price Line - based on Close price */}
-                <Line
-                  yAxisId="price"
-                  type="monotone"
-                  dataKey="close"
-                  stroke={lineColor}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={<AnimatedPriceDot />}
-                  connectNulls={true}
-                />
-                
-                {/* Volume Bars - bottom 25% */}
-                <Bar
-                  yAxisId="volume"
-                  dataKey="volume"
-                  fill="#666"
-                >
-                  {chartDataWithForecastBand.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.volumeColor || "#666"} />
-                  ))}
-                </Bar>
-                
-                {/* EWMA Band - Upper boundary area */}
-                {showEwmaOverlay && (
-                  <Area
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ewma_upper"
-                    stroke="rgba(168, 85, 247, 0.3)"
-                    strokeWidth={1}
-                    fill="url(#ewmaBandFill)"
-                    fillOpacity={1}
-                    dot={false}
-                    activeDot={false}
-                    connectNulls={true}
-                    isAnimationActive={true}
-                    animationDuration={800}
-                    animationEasing="ease-out"
-                  />
-                )}
-                
-                {/* EWMA Band - Lower boundary masks the upper area */}
-                {showEwmaOverlay && (
-                  <Area
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ewma_lower"
-                    stroke="rgba(168, 85, 247, 0.3)"
-                    strokeWidth={1}
-                    fill={isDarkMode ? "#0f172a" : "#ffffff"}
-                    fillOpacity={1}
-                    dot={false}
-                    activeDot={false}
-                    connectNulls={true}
-                    isAnimationActive={true}
-                    animationDuration={800}
-                    animationEasing="ease-out"
-                  />
-                )}
-                
-                {/* EWMA Forecast Path Overlay - Center Line */}
-                {showEwmaOverlay && (
-                  <Line
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ewma_forecast"
-                    stroke="#A855F7"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={<AnimatedEwmaDot />}
-                    connectNulls={true}
-                    isAnimationActive={true}
-                    animationDuration={800}
-                    animationEasing="ease-out"
-                    filter="url(#ewmaGlow)"
-                  />
-                )}
-                
-                {/* EWMA Biased Band - Upper boundary area */}
-                {showEwmaBiasedOverlay && (
-                  <Area
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ewma_biased_upper"
-                    stroke="rgba(245, 158, 11, 0.3)"
-                    strokeWidth={1}
-                    fill="url(#ewmaBiasedBandFill)"
-                    fillOpacity={1}
-                    dot={false}
-                    activeDot={false}
-                    connectNulls={true}
-                    isAnimationActive={true}
-                    animationDuration={800}
-                    animationEasing="ease-out"
-                  />
-                )}
-                
-                {/* EWMA Biased Band - Lower boundary masks the upper area */}
-                {showEwmaBiasedOverlay && (
-                  <Area
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ewma_biased_lower"
-                    stroke="rgba(245, 158, 11, 0.3)"
-                    strokeWidth={1}
-                    fill={isDarkMode ? "#0f172a" : "#ffffff"}
-                    fillOpacity={1}
-                    dot={false}
-                    activeDot={false}
-                    connectNulls={true}
-                    isAnimationActive={true}
-                    animationDuration={800}
-                    animationEasing="ease-out"
-                  />
-                )}
-                
-                {/* EWMA Biased Forecast Path Overlay - Center Line */}
-                {showEwmaBiasedOverlay && (
-                  <Line
-                    yAxisId="price"
-                    type="monotone"
-                    dataKey="ewma_biased_forecast"
-                    stroke="#F59E0B"
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={<AnimatedEwmaDot />}
-                    connectNulls={true}
-                    isAnimationActive={true}
-                    animationDuration={800}
-                    animationEasing="ease-out"
-                    filter="url(#ewmaBiasedGlow)"
-                  />
-                )}
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+          memoizedChartElement
         )}
       </div>
       
@@ -2224,22 +2644,52 @@ const RangeSelector: React.FC<RangeSelectorProps> = ({
 interface PriceTooltipProps {
   active?: boolean;
   label?: string;
-  payload?: { 
+  payload?: Array<{ 
     value: number;
-    payload: ChartPoint;
-  }[];
+    payload: any; // Can be ChartPoint or scatter marker data
+  }>;
   isDarkMode?: boolean;
+  horizon?: number;
 }
+
+// Type for trade marker in tooltip (matching the scatter data structure)
+type TradeMarkerPointForTooltip = {
+  index: number;
+  price: number;
+  type: 'entry' | 'exit';
+  side: 'long' | 'short';
+  runId: string;
+  label: string;
+  color: string;
+  netPnl?: number;
+  margin?: number;
+  quantity?: number;
+};
+
+/** Format a date string as short format (e.g., "Jun 3") */
+const formatDateShort = (dateStr: string | null | undefined): string | null => {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(dateStr + 'T00:00:00');
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
 
 const PriceTooltip: React.FC<PriceTooltipProps> = ({
   active,
   label,
   payload,
   isDarkMode = true,
+  horizon = 1,
 }) => {
   if (!active || !payload || !payload.length || !label) return null;
   
-  const data = payload[0].payload;
+  // Find the main chart data (first payload that has 'date' field - not scatter data)
+  const chartPayload = payload.find(p => p.payload && 'date' in p.payload);
+  const data = chartPayload?.payload ?? payload[0].payload;
+  const h = horizon;
   // Use close price directly from data, not from payload value (which could be EWMA)
   const price = data.close;
   
@@ -2252,179 +2702,353 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   // Get model name for forecast display
   const modelName = data.forecastModelName || 'Model';
   
+  // Extract trade markers from scatter payload (look for 'marker' field)
+  const tradeMarkers: TradeMarkerPointForTooltip[] = (payload ?? [])
+    .map((p) => p.payload?.marker as TradeMarkerPointForTooltip | undefined)
+    .filter((m): m is TradeMarkerPointForTooltip => m != null);
+  
   return (
-    <div className={`rounded-xl border px-3 py-2 text-xs shadow-xl backdrop-blur-sm ${
+    <div className={`rounded-xl border shadow-2xl backdrop-blur-xl ${
       isDarkMode 
-        ? 'bg-transparent border-gray-500/30 text-slate-100'
-        : 'bg-transparent border-gray-400/30 text-gray-900'
+        ? 'bg-slate-800/40 border-slate-600/30 text-slate-100'
+        : 'bg-white/60 border-gray-200/50 text-gray-900'
     }`}>
-      {/* Date Header - spans full width */}
-      <div className={`text-[11px] font-medium mb-2 ${
-        isDarkMode ? 'text-slate-300' : 'text-gray-600'
+      {/* Date Header */}
+      <div className={`px-3 py-1.5 border-b ${
+        isDarkMode ? 'border-slate-600/30' : 'border-gray-200/50'
       }`}>
-        {formatTooltipDate(label)}
+        <div className={`text-[11px] font-semibold tracking-wide ${
+          isDarkMode ? 'text-slate-200' : 'text-gray-700'
+        }`}>
+          {formatTooltipDate(label)}
+        </div>
       </div>
       
-      <div className="flex gap-4">
-        {/* Model Forecast Column - Blue themed (only for future forecast points) */}
+      <div className={`flex ${isDarkMode ? 'divide-x divide-slate-600/30' : 'divide-x divide-gray-200/50'}`}>
+        {/* Model Forecast Section - Blue themed (only for future forecast points) */}
         {hasForecastData && (
-          <>
-            <div className="space-y-1 min-w-[100px]">
-              {/* Model Name Header */}
-              <div className={`text-[10px] font-medium uppercase tracking-wide ${
+          <div className="px-4 py-3">
+            {/* Section Header */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-blue-500'}`} />
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-blue-400' : 'text-blue-600'
               }`}>
                 {modelName}
-              </div>
-              
+              </span>
+            </div>
+            
+            <div className="space-y-0.5 text-[10px]">
               {/* Model Forecast (center) */}
               {data.forecastCenter != null && (
-                <div className={`text-sm font-mono tabular-nums font-semibold ${
-                  isDarkMode ? 'text-blue-300' : 'text-blue-700'
-                }`}>
-                  ${data.forecastCenter.toFixed(2)}
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Forecast</span>
+                  <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>
+                    ${data.forecastCenter.toFixed(2)}
+                  </span>
                 </div>
               )}
-              
-              {/* Model Bounds */}
-              <div className="space-y-0.5 pt-1">
-                {data.forecastUpper != null && (
-                  <div className="flex justify-between gap-3">
-                    <span className={isDarkMode ? 'text-blue-400/70' : 'text-blue-600'}>Upper:</span>
-                    <span className={`font-mono ${isDarkMode ? 'text-blue-300/80' : 'text-blue-700'}`}>${data.forecastUpper.toFixed(2)}</span>
-                  </div>
-                )}
-                {data.forecastLower != null && (
-                  <div className="flex justify-between gap-3">
-                    <span className={isDarkMode ? 'text-blue-400/70' : 'text-blue-600'}>Lower:</span>
-                    <span className={`font-mono ${isDarkMode ? 'text-blue-300/80' : 'text-blue-700'}`}>${data.forecastLower.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
+              {data.forecastUpper != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Upper</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
+                    ${data.forecastUpper.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {data.forecastLower != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Lower</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
+                    ${data.forecastLower.toFixed(2)}
+                  </span>
+                </div>
+              )}
             </div>
-          </>
+          </div>
         )}
         
         {/* OHLCV Data - only show for historical points */}
         {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
-          <div className="space-y-0.5 min-w-[100px]">
-            {data.open && (
-              <div className="flex justify-between">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Open:</span>
-                <span className="font-mono">${data.open.toFixed(2)}</span>
-              </div>
-            )}
-            {data.high && (
-              <div className="flex justify-between">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>High:</span>
-                <span className="font-mono">${data.high.toFixed(2)}</span>
-              </div>
-            )}
-            {data.low && (
-              <div className="flex justify-between">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Low:</span>
-                <span className="font-mono">${data.low.toFixed(2)}</span>
-              </div>
-            )}
-            {data.close && (
-              <div className="flex justify-between">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Close:</span>
-                <span className={`font-mono ${
-                  data.open && data.close > data.open
-                    ? 'text-green-400'
-                    : data.open && data.close < data.open
-                      ? 'text-red-400'
-                      : 'text-yellow-400'
-                }`}>${data.close.toFixed(2)}</span>
-              </div>
-            )}
-            {data.volume && (
-              <div className="flex justify-between">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Volume:</span>
-                <span className="font-mono">{formatVolumeAbbreviated(data.volume)}</span>
-              </div>
-            )}
+          <div className="px-4 py-3">
+            <div className={`text-[9px] font-semibold uppercase tracking-wider mb-2 ${
+              isDarkMode ? 'text-slate-400' : 'text-gray-500'
+            }`}>
+              OHLCV
+            </div>
+            <div className="space-y-0.5 text-[10px]">
+              {data.open && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Open</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.open.toFixed(2)}</span>
+                </div>
+              )}
+              {data.high && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>High</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.high.toFixed(2)}</span>
+                </div>
+              )}
+              {data.low && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Low</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.low.toFixed(2)}</span>
+                </div>
+              )}
+              {data.close && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Close</span>
+                  <span className={`font-mono tabular-nums font-medium ${
+                    data.open && data.close > data.open
+                      ? 'text-emerald-400'
+                      : data.open && data.close < data.open
+                        ? 'text-rose-400'
+                        : isDarkMode ? 'text-slate-400' : 'text-gray-500'
+                  }`}>${data.close.toFixed(2)}</span>
+                </div>
+              )}
+              {data.volume && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Vol</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>{formatVolumeAbbreviated(data.volume)}</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
         
-        {/* EWMA Column - Purple themed */}
-        {hasEwmaData && (
-          <>
-            {/* Vertical Divider */}
-            <div className={`w-px ${isDarkMode ? 'bg-purple-500/30' : 'bg-purple-300'}`} />
-            
-            <div className="space-y-1 min-w-[100px]">
-              {/* EWMA Header */}
-              <div className={`text-[10px] font-medium uppercase tracking-wide ${
+        {/* EWMA Unbiased Section */}
+        {(data.ewma_past_forecast != null || data.ewma_future_forecast != null) && (
+          <div className="px-4 py-3">
+            {/* Section Header */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-purple-400' : 'bg-purple-500'}`} />
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-purple-400' : 'text-purple-600'
               }`}>
                 EWMA Unbiased
-              </div>
-              
-              {/* EWMA Forecast (ŷ) */}
-              <div className={`text-sm font-mono tabular-nums font-semibold ${
-                isDarkMode ? 'text-purple-300' : 'text-purple-700'
-              }`}>
-                ${data.ewma_forecast!.toFixed(2)}
-              </div>
-              
-              {/* EWMA Bounds */}
-              <div className="space-y-0.5 pt-1">
-                {data.ewma_upper != null && (
-                  <div className="flex justify-between gap-3">
-                    <span className={isDarkMode ? 'text-purple-400/70' : 'text-purple-600'}>Upper:</span>
-                    <span className={`font-mono ${isDarkMode ? 'text-purple-300/80' : 'text-purple-700'}`}>${data.ewma_upper.toFixed(2)}</span>
-                  </div>
-                )}
-                {data.ewma_lower != null && (
-                  <div className="flex justify-between gap-3">
-                    <span className={isDarkMode ? 'text-purple-400/70' : 'text-purple-600'}>Lower:</span>
-                    <span className={`font-mono ${isDarkMode ? 'text-purple-300/80' : 'text-purple-700'}`}>${data.ewma_lower.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
+              </span>
             </div>
-          </>
+            
+            {/* Two-column table */}
+            <table className="w-full text-[9px]">
+              <tbody className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>
+                {/* Made on (origin date) */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Made on</td>
+                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_past_origin_date ? formatDateShort(data.ewma_past_origin_date) : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_future_origin_date ? formatDateShort(data.ewma_future_origin_date) : '—'}
+                  </td>
+                </tr>
+                {/* Target (target date) */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Target</td>
+                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_past_target_date ? formatDateShort(data.ewma_past_target_date) : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_future_target_date ? formatDateShort(data.ewma_future_target_date) : '—'}
+                  </td>
+                </tr>
+                {/* Forecast Price */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Forecast</td>
+                  <td className={`text-right px-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>
+                    {data.ewma_past_forecast != null ? `$${data.ewma_past_forecast.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>
+                    {data.ewma_future_forecast != null ? `$${data.ewma_future_forecast.toFixed(2)}` : '—'}
+                  </td>
+                </tr>
+                {/* Upper Band */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Upper</td>
+                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_past_upper != null ? `$${data.ewma_past_upper.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_future_upper != null ? `$${data.ewma_future_upper.toFixed(2)}` : '—'}
+                  </td>
+                </tr>
+                {/* Lower Band */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Lower</td>
+                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_past_lower != null ? `$${data.ewma_past_lower.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_future_lower != null ? `$${data.ewma_future_lower.toFixed(2)}` : '—'}
+                  </td>
+                </tr>
+                {/* Error row */}
+                {!data.isFuture && data.close != null && (
+                  <tr>
+                    <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Error</td>
+                    <td className="text-right px-1 font-mono tabular-nums">
+                      {data.ewma_past_forecast != null ? (
+                        <span className={(data.ewma_past_forecast - data.close) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                          {(data.ewma_past_forecast - data.close) >= 0 ? '+' : ''}{(data.ewma_past_forecast - data.close).toFixed(2)}
+                        </span>
+                      ) : <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>—</span>}
+                    </td>
+                    <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                      —
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
         
-        {/* EWMA Biased Column - Amber themed */}
-        {hasEwmaBiasedData && (
-          <>
-            {/* Vertical Divider */}
-            <div className={`w-px ${isDarkMode ? 'bg-amber-500/30' : 'bg-amber-300'}`} />
-            
-            <div className="space-y-1 min-w-[100px]">
-              {/* EWMA Biased Header */}
-              <div className={`text-[10px] font-medium uppercase tracking-wide ${
+        {/* EWMA Biased Section */}
+        {(data.ewma_biased_past_forecast != null || data.ewma_biased_future_forecast != null) && (
+          <div className="px-4 py-3">
+            {/* Section Header */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-amber-400' : 'bg-amber-500'}`} />
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-amber-400' : 'text-amber-600'
               }`}>
                 EWMA Biased
-              </div>
-              
-              {/* EWMA Biased Forecast (ŷ) */}
-              <div className={`text-sm font-mono tabular-nums font-semibold ${
-                isDarkMode ? 'text-amber-300' : 'text-amber-700'
-              }`}>
-                ${data.ewma_biased_forecast!.toFixed(2)}
-              </div>
-              
-              {/* EWMA Biased Bounds */}
-              <div className="space-y-0.5 pt-1">
-                {data.ewma_biased_upper != null && (
-                  <div className="flex justify-between gap-3">
-                    <span className={isDarkMode ? 'text-amber-400/70' : 'text-amber-600'}>Upper:</span>
-                    <span className={`font-mono ${isDarkMode ? 'text-amber-300/80' : 'text-amber-700'}`}>${data.ewma_biased_upper.toFixed(2)}</span>
-                  </div>
-                )}
-                {data.ewma_biased_lower != null && (
-                  <div className="flex justify-between gap-3">
-                    <span className={isDarkMode ? 'text-amber-400/70' : 'text-amber-600'}>Lower:</span>
-                    <span className={`font-mono ${isDarkMode ? 'text-amber-300/80' : 'text-amber-700'}`}>${data.ewma_biased_lower.toFixed(2)}</span>
-                  </div>
-                )}
-              </div>
+              </span>
             </div>
-          </>
+            
+            {/* Two-column table */}
+            <table className="w-full text-[9px]">
+              <tbody className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>
+                {/* Made on (origin date) */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Made on</td>
+                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_past_origin_date ? formatDateShort(data.ewma_biased_past_origin_date) : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_future_origin_date ? formatDateShort(data.ewma_biased_future_origin_date) : '—'}
+                  </td>
+                </tr>
+                {/* Target (target date) */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Target</td>
+                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_past_target_date ? formatDateShort(data.ewma_biased_past_target_date) : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_future_target_date ? formatDateShort(data.ewma_biased_future_target_date) : '—'}
+                  </td>
+                </tr>
+                {/* Forecast Price */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Forecast</td>
+                  <td className={`text-right px-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                    {data.ewma_biased_past_forecast != null ? `$${data.ewma_biased_past_forecast.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                    {data.ewma_biased_future_forecast != null ? `$${data.ewma_biased_future_forecast.toFixed(2)}` : '—'}
+                  </td>
+                </tr>
+                {/* Upper Band */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Upper</td>
+                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_past_upper != null ? `$${data.ewma_biased_past_upper.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_future_upper != null ? `$${data.ewma_biased_future_upper.toFixed(2)}` : '—'}
+                  </td>
+                </tr>
+                {/* Lower Band */}
+                <tr>
+                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Lower</td>
+                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_past_lower != null ? `$${data.ewma_biased_past_lower.toFixed(2)}` : '—'}
+                  </td>
+                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.ewma_biased_future_lower != null ? `$${data.ewma_biased_future_lower.toFixed(2)}` : '—'}
+                  </td>
+                </tr>
+                {/* Error row */}
+                {!data.isFuture && data.close != null && (
+                  <tr>
+                    <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Error</td>
+                    <td className="text-right px-1 font-mono tabular-nums">
+                      {data.ewma_biased_past_forecast != null ? (
+                        <span className={(data.ewma_biased_past_forecast - data.close) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                          {(data.ewma_biased_past_forecast - data.close) >= 0 ? '+' : ''}{(data.ewma_biased_past_forecast - data.close).toFixed(2)}
+                        </span>
+                      ) : <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>—</span>}
+                    </td>
+                    <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                      —
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+        
+        {/* Trading212 Trade Markers Section */}
+        {tradeMarkers.length > 0 && (
+          <div className="px-4 py-3">
+            {/* Section Header */}
+            <div className="flex items-center gap-1.5 mb-2">
+              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-cyan-400' : 'bg-cyan-500'}`} />
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
+                isDarkMode ? 'text-cyan-400' : 'text-cyan-600'
+              }`}>
+                Trading212 Trades
+              </span>
+            </div>
+            
+            <div className="space-y-1.5">
+              {tradeMarkers.map((marker, idx) => {
+                const isEntry = marker.type === 'entry';
+                const isLong = marker.side === 'long';
+                
+                return (
+                  <div key={idx} className="text-[10px]">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      {/* Entry/Exit indicator dot */}
+                      {isEntry ? (
+                        <div className={`w-2 h-2 rounded-full ${isLong ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      ) : (
+                        <div className={`w-2 h-2 rounded-full border-2 bg-black ${isLong ? 'border-emerald-500' : 'border-rose-500'}`} />
+                      )}
+                      <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
+                        {isEntry ? 'Entry' : 'Exit'} {isLong ? 'Long' : 'Short'}
+                      </span>
+                      <span className={`ml-auto font-mono tabular-nums ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
+                        ${marker.price.toFixed(2)}
+                      </span>
+                    </div>
+                    
+                    {/* Show P&L for exit markers */}
+                    {!isEntry && marker.netPnl != null && (
+                      <div className="flex justify-between gap-2 ml-3.5">
+                        <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>P&L</span>
+                        <span className={`font-mono tabular-nums font-medium ${
+                          marker.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                        }`}>
+                          {marker.netPnl >= 0 ? '+' : ''}${marker.netPnl.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {/* Run label */}
+                    <div className="ml-3.5">
+                      <span className={`text-[8px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
+                        {marker.label}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -2549,4 +3173,34 @@ const AnimatedEwmaDot = (props: any) => {
       }}
     />
   );
+};
+
+// Custom animated dot for EWMA Biased line (amber) - Apple style refinement
+const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: boolean }) => {
+  const DotComponent = (props: any) => {
+    const { cx, cy, payload } = props;
+    
+    // Don't render dot for points without EWMA Biased data
+    if (!payload || payload.ewma_biased_forecast == null) return null;
+    if (cx === undefined || cy === undefined) return null;
+    
+    // Orange when maximized, amber when not
+    const fillColor = isMaximized ? "#F97316" : "#F59E0B";
+    
+    return (
+      <circle
+        cx={cx}
+        cy={cy}
+        r={4}
+        fill={fillColor}
+        stroke="#ffffff"
+        strokeWidth={1.5}
+        style={{
+          transition: 'all 0.15s ease-out',
+        }}
+      />
+    );
+  };
+  DotComponent.displayName = 'AnimatedEwmaBiasedDot';
+  return DotComponent;
 };
