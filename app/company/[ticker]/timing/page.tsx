@@ -393,15 +393,17 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
   const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
 
-  // Toggle visibility of a T212 run on the chart
+  // Toggle visibility of a T212 run on the chart (solo mode: only one run visible at a time)
   const toggleT212RunVisibility = useCallback((runId: T212RunId) => {
     setT212VisibleRunIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(runId)) {
-        next.delete(runId);
-      } else {
-        next.add(runId);
+      // If this run is already visible → turn it off (no overlays)
+      if (prev.has(runId)) {
+        return new Set<T212RunId>();
       }
+
+      // Otherwise: solo mode → only this run visible
+      const next = new Set<T212RunId>();
+      next.add(runId);
       return next;
     });
   }, []);

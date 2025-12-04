@@ -229,6 +229,7 @@ export interface Trading212TradeInfo {
   exitPrice: number;
   netPnl: number;
   quantity: number;
+  margin: number;  // exact margin used for this position (from engine)
 }
 
 /** Trade overlay for chart visualization */
@@ -1028,7 +1029,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   const ewmaIsMaximized = ewmaReactionMapDropdown?.isMaximized ?? false;
 
   // === Trade Marker Types and Data ===
-  type TradeMarkerType = 'entry' | 'exit';
+  type TradeMarkerType = 'entry' | 'exit' | 'pair';
 
   interface TradeMarker {
     date: string;
@@ -1041,45 +1042,225 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     margin?: number;
   }
 
+  // Custom shape for open/close trade marker (pair glyph: ●──●)
+  const PairTradeMarkerShape: React.FC<any> = (props) => {
+    const { cx, cy, marker, isDarkMode: isDark } = props as {
+      cx: number;
+      cy: number;
+      marker: TradeMarker;
+      isDarkMode: boolean;
+    };
+
+    if (!marker) return null;
+
+    const isLong = marker.side === 'long';
+
+    // Line color is theme-based (white in dark mode, black in light mode)
+    const lineColor = isDark
+      ? 'rgba(255, 255, 255, 0.9)'
+      : 'rgba(15, 23, 42, 0.9)';
+
+    const longFill = 'rgba(34, 197, 94, 1)';
+    const shortFill = 'rgba(248, 113, 113, 1)';
+    const sideColor = isLong ? longFill : shortFill;
+
+    const offset = 8; // wider glyph
+
+    return (
+      <g>
+        {/* Horizontal connector */}
+        <line
+          x1={cx - offset}
+          y1={cy}
+          x2={cx + offset}
+          y2={cy}
+          stroke={lineColor}
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
+        {/* Left dot: Open (solid) */}
+        <circle
+          cx={cx - offset}
+          cy={cy}
+          r={3.5}
+          fill={sideColor}
+        />
+        {/* Right dot: Exit (ring) */}
+        <circle
+          cx={cx + offset}
+          cy={cy}
+          r={4}
+          fill={isDark ? 'rgba(15, 23, 42, 1)' : 'rgba(248, 250, 252, 1)'}
+          stroke={sideColor}
+          strokeWidth={1.8}
+        />
+      </g>
+    );
+  };
+
+  // Type for tooltip events (opens AND closes)
+  type Trading212TooltipEventType = 'open' | 'close';
+
+  interface Trading212TooltipEvent {
+    type: Trading212TooltipEventType;
+    runLabel: string;
+    side: 'long' | 'short';
+    entryDate: string;
+    entryPrice: number;
+    exitDate?: string;
+    exitPrice?: number;
+    netPnl?: number;
+    margin?: number;
+  }
+
   // Build flat array of trade markers from overlays
+  // Uses event grouping to avoid duplicate dots when exit+entry happen on same day
   const tradeMarkers = useMemo<TradeMarker[]>(() => {
     if (!tradeOverlays || tradeOverlays.length === 0) return [];
 
-    const markers: TradeMarker[] = [];
+    type RawEvent = {
+      date: string;
+      type: 'entry' | 'exit';
+      side: 'long' | 'short';
+      runId: string;
+      label: string;
+      color: string;
+      netPnl?: number;
+      margin?: number;
+    };
+
+    // date+runId -> events on that day for that run
+    const eventsByKey = new Map<string, RawEvent[]>();
 
     for (const overlay of tradeOverlays) {
-      const color = overlay.color ?? '#A855F7'; // default purple
-      
+      const color = overlay.color ?? '#A855F7';
+
       for (const trade of overlay.trades) {
         const entryDate = normalizeDateString(trade.entryDate);
         const exitDate = normalizeDateString(trade.exitDate);
-        const margin = (trade.entryPrice * trade.quantity) / 5; // approx 5x leverage
 
-        markers.push({
-          date: entryDate,
-          type: 'entry',
+        const base = {
           side: trade.side,
           runId: overlay.runId,
           label: overlay.label,
           color,
-          margin,
-        });
+          margin: trade.margin,
+        };
 
-        markers.push({
+        const entryKey = `${overlay.runId}|${entryDate}`;
+        const exitKey = `${overlay.runId}|${exitDate}`;
+
+        const entryEvents = eventsByKey.get(entryKey) ?? [];
+        entryEvents.push({ date: entryDate, type: 'entry', ...base });
+        eventsByKey.set(entryKey, entryEvents);
+
+        const exitEvents = eventsByKey.get(exitKey) ?? [];
+        exitEvents.push({
           date: exitDate,
           type: 'exit',
-          side: trade.side,
-          runId: overlay.runId,
-          label: overlay.label,
-          color,
           netPnl: trade.netPnl,
-          margin,
+          ...base,
         });
+        eventsByKey.set(exitKey, exitEvents);
       }
     }
 
+    const markers: TradeMarker[] = [];
+
+    // Turn events into actual markers
+    eventsByKey.forEach((events) => {
+      if (events.length === 1) {
+        // Single action on this day for this run
+        const e = events[0];
+        markers.push({
+          date: e.date,
+          type: e.type,
+          side: e.side,
+          runId: e.runId,
+          label: e.label,
+          color: e.color,
+          netPnl: e.netPnl,
+          margin: e.margin,
+        });
+      } else if (events.length === 2) {
+        // Two actions on same day (e.g. exit + new entry) → use a 'pair' glyph
+        const [e1, e2] = events;
+        const pairSide = e2.side;
+
+        markers.push({
+          date: e2.date,
+          type: 'pair',
+          side: pairSide,
+          runId: e2.runId,
+          label: e2.label,
+          color: e2.color,
+          netPnl: e1.netPnl ?? e2.netPnl,
+          margin: e2.margin,
+        });
+      } else {
+        // Fallback: more than 2 actions → render individually
+        events.forEach((e: RawEvent) => {
+          markers.push({
+            date: e.date,
+            type: e.type,
+            side: e.side,
+            runId: e.runId,
+            label: e.label,
+            color: e.color,
+            netPnl: e.netPnl,
+            margin: e.margin,
+          });
+        });
+      }
+    });
+
     console.log('[PriceChart] tradeMarkers:', markers.length, 'markers');
     return markers;
+  }, [tradeOverlays]);
+
+  // Map from date -> array of events (opens AND closes) for tooltip display
+  const trading212EventsByDate = useMemo(() => {
+    const map = new Map<string, Trading212TooltipEvent[]>();
+
+    if (!tradeOverlays || tradeOverlays.length === 0) return map;
+
+    for (const overlay of tradeOverlays) {
+      for (const trade of overlay.trades) {
+        const entryDate = normalizeDateString(trade.entryDate);
+        const exitDate = normalizeDateString(trade.exitDate);
+
+        const base = {
+          runLabel: overlay.label,
+          side: trade.side,
+        };
+
+        // Open event
+        const openEvents = map.get(entryDate) ?? [];
+        openEvents.push({
+          type: 'open',
+          entryDate,
+          entryPrice: trade.entryPrice,
+          ...base,
+        });
+        map.set(entryDate, openEvents);
+
+        // Close event
+        const closeEvents = map.get(exitDate) ?? [];
+        closeEvents.push({
+          type: 'close',
+          entryDate,
+          entryPrice: trade.entryPrice,
+          exitDate,
+          exitPrice: trade.exitPrice,
+          netPnl: trade.netPnl,
+          margin: trade.margin,
+          ...base,
+        });
+        map.set(exitDate, closeEvents);
+      }
+    }
+
+    return map;
   }, [tradeOverlays]);
 
   // Map from date -> close price for ReferenceDot Y positioning
@@ -1093,9 +1274,18 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return map;
   }, [chartDataWithForecastBand]);
 
-  // Helper to get Y coordinate for a trade marker (uses close price for alignment)
+  // Helper to get Y coordinate for a trade marker
+  // Entry markers get a small offset so they're visible even on same-day trades
   const getMarkerY = useCallback((marker: TradeMarker): number | undefined => {
-    return dateToClose.get(marker.date);
+    const close = dateToClose.get(marker.date);
+    if (close == null) return undefined;
+
+    // Small cosmetic offset for entries so they are visible even if exit is same-day
+    if (marker.type === 'entry') {
+      return close * 0.997; // ~0.3% below the line
+    }
+
+    return close; // exits sit exactly on the close price
   }, [dateToClose]);
 
   // Determine line color from current range performance
@@ -1389,7 +1579,14 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             />
 
             <Tooltip
-              content={<PriceTooltip isDarkMode={isDarkMode} horizon={h} />}
+              content={(tooltipProps) => (
+                <PriceTooltip
+                  {...tooltipProps}
+                  isDarkMode={isDarkMode}
+                  horizon={h}
+                  trading212EventsByDate={trading212EventsByDate}
+                />
+              )}
               animationDuration={0}
               cursor={{
                 stroke: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)",
@@ -1683,33 +1880,58 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               const y = getMarkerY(m);
               if (y == null) return null;
 
+              const commonProps = {
+                key: `trade-${m.runId}-${m.type}-${m.date}-${idx}`,
+                x: m.date,
+                y,
+                yAxisId: "price" as const,
+              };
+
+              // Special case: same-day pair glyph (●──●)
+              if (m.type === 'pair') {
+                return (
+                  <ReferenceDot
+                    {...commonProps}
+                    r={0}
+                    shape={(dotProps: any) => (
+                      <PairTradeMarkerShape {...dotProps} marker={m} />
+                    )}
+                  />
+                );
+              }
+
+              // Standard entry/exit dots
               const isEntry = m.type === 'entry';
               const isLong = m.side === 'long';
 
-              // Entry: filled dot (green for long, red for short)
-              // Exit: black core with colored border
-              const fill =
-                isEntry && isLong
-                  ? 'rgba(16, 185, 129, 0.8)'   // green for long entry
-                  : isEntry && !isLong
-                  ? 'rgba(239, 68, 68, 0.8)'    // red for short entry
-                  : 'rgba(15, 23, 42, 1)';      // black core for exits
+              // Color scheme:
+              // Entry long: solid green dot
+              // Entry short: solid red dot
+              // Exit long: black core with green border
+              // Exit short: black core with red border
+              let fill: string;
+              let stroke: string;
 
-              const stroke =
-                !isEntry && isLong
-                  ? 'rgba(16, 185, 129, 0.9)'   // green border for long exit
-                  : !isEntry && !isLong
-                  ? 'rgba(239, 68, 68, 0.9)'    // red border for short exit
-                  : 'transparent';
+              if (isEntry && isLong) {
+                fill = 'rgba(34, 197, 94, 1)';     // solid green
+                stroke = 'transparent';
+              } else if (isEntry && !isLong) {
+                fill = 'rgba(248, 113, 113, 1)';   // solid red
+                stroke = 'transparent';
+              } else if (!isEntry && isLong) {
+                fill = 'rgba(15, 23, 42, 1)';      // black core
+                stroke = 'rgba(34, 197, 94, 0.9)'; // green border
+              } else {
+                // exit & short
+                fill = 'rgba(15, 23, 42, 1)';       // black core
+                stroke = 'rgba(248, 113, 113, 0.9)'; // red border
+              }
 
               const r = isEntry ? 4 : 5;
 
               return (
                 <ReferenceDot
-                  key={`trade-${m.runId}-${m.type}-${m.date}-${idx}`}
-                  x={m.date}
-                  y={y}
-                  yAxisId="price"
+                  {...commonProps}
                   r={r}
                   fill={fill}
                   stroke={stroke}
@@ -1738,6 +1960,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     ewmaIsMaximized,
     tradeMarkers,
     getMarkerY,
+    trading212EventsByDate,
+    dateToClose,
   ]);
 
   return (
@@ -2643,16 +2867,27 @@ const RangeSelector: React.FC<RangeSelectorProps> = ({
 
 interface PriceTooltipProps {
   active?: boolean;
-  label?: string;
-  payload?: Array<{ 
+  label?: string | number;
+  payload?: readonly { 
     value: number;
     payload: any; // Can be ChartPoint or scatter marker data
-  }>;
+  }[];
   isDarkMode?: boolean;
   horizon?: number;
+  trading212EventsByDate?: Map<string, {
+    type: 'open' | 'close';
+    runLabel: string;
+    side: 'long' | 'short';
+    entryDate: string;
+    entryPrice: number;
+    exitDate?: string;
+    exitPrice?: number;
+    netPnl?: number;
+    margin?: number;
+  }[]>;
 }
 
-// Type for trade marker in tooltip (matching the scatter data structure)
+// Type for trade marker in tooltip (legacy - keeping for backwards compat)
 type TradeMarkerPointForTooltip = {
   index: number;
   price: number;
@@ -2683,8 +2918,12 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   payload,
   isDarkMode = true,
   horizon = 1,
+  trading212EventsByDate,
 }) => {
   if (!active || !payload || !payload.length || !label) return null;
+  
+  // Normalize label to string for date lookups
+  const labelStr = typeof label === 'string' ? label : String(label);
   
   // Find the main chart data (first payload that has 'date' field - not scatter data)
   const chartPayload = payload.find(p => p.payload && 'date' in p.payload);
@@ -2702,7 +2941,15 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   // Get model name for forecast display
   const modelName = data.forecastModelName || 'Model';
   
-  // Extract trade markers from scatter payload (look for 'marker' field)
+  // Get Trading212 events for this date from the map (opens AND closes)
+  const t212Events = trading212EventsByDate?.get(labelStr) ?? [];
+  
+  // Debug logging for T212 events
+  if (t212Events.length > 0) {
+    console.log('[Tooltip T212]', labelStr, t212Events);
+  }
+  
+  // Legacy: Extract trade markers from scatter payload (for backwards compat)
   const tradeMarkers: TradeMarkerPointForTooltip[] = (payload ?? [])
     .map((p) => p.payload?.marker as TradeMarkerPointForTooltip | undefined)
     .filter((m): m is TradeMarkerPointForTooltip => m != null);
@@ -2720,7 +2967,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         <div className={`text-[11px] font-semibold tracking-wide ${
           isDarkMode ? 'text-slate-200' : 'text-gray-700'
         }`}>
-          {formatTooltipDate(label)}
+          {formatTooltipDate(labelStr)}
         </div>
       </div>
       
@@ -2991,58 +3238,84 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
           </div>
         )}
         
-        {/* Trading212 Trade Markers Section */}
-        {tradeMarkers.length > 0 && (
+        {/* Trading212 Events Section (opens AND closes) */}
+        {t212Events.length > 0 && (
           <div className="px-4 py-3">
             {/* Section Header */}
             <div className="flex items-center gap-1.5 mb-2">
-              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-cyan-400' : 'bg-cyan-500'}`} />
+              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-sky-400' : 'bg-sky-500'}`} />
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                isDarkMode ? 'text-cyan-400' : 'text-cyan-600'
+                isDarkMode ? 'text-sky-400' : 'text-sky-600'
               }`}>
                 Trading212 Trades
               </span>
             </div>
             
-            <div className="space-y-1.5">
-              {tradeMarkers.map((marker, idx) => {
-                const isEntry = marker.type === 'entry';
-                const isLong = marker.side === 'long';
-                
-                return (
-                  <div key={idx} className="text-[10px]">
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      {/* Entry/Exit indicator dot */}
-                      {isEntry ? (
-                        <div className={`w-2 h-2 rounded-full ${isLong ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                      ) : (
-                        <div className={`w-2 h-2 rounded-full border-2 bg-black ${isLong ? 'border-emerald-500' : 'border-rose-500'}`} />
-                      )}
-                      <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
-                        {isEntry ? 'Entry' : 'Exit'} {isLong ? 'Long' : 'Short'}
+            <div className="space-y-2">
+              {t212Events.map((e, idx) => {
+                const isShort = e.side === 'short';
+                const openLabel = e.side === 'long' ? 'Open Long' : 'Open Short';
+                const exitLabel = e.side === 'long' ? 'Exit Long' : 'Exit Short';
+
+                if (e.type === 'open') {
+                  // Open event - just show the open line
+                  return (
+                    <div key={idx} className="flex justify-between text-[11px]">
+                      <span className="flex items-center gap-1 text-slate-300">
+                        <span
+                          className={
+                            'inline-flex h-2 w-2 rounded-full ' +
+                            (isShort ? 'bg-rose-400' : 'bg-emerald-400')
+                          }
+                        />
+                        {openLabel}
                       </span>
-                      <span className={`ml-auto font-mono tabular-nums ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
-                        ${marker.price.toFixed(2)}
+                      <span className="font-mono tabular-nums text-slate-200">
+                        ${e.entryPrice.toFixed(2)}
                       </span>
                     </div>
-                    
-                    {/* Show P&L for exit markers */}
-                    {!isEntry && marker.netPnl != null && (
-                      <div className="flex justify-between gap-2 ml-3.5">
-                        <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>P&L</span>
-                        <span className={`font-mono tabular-nums font-medium ${
-                          marker.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                        }`}>
-                          {marker.netPnl >= 0 ? '+' : ''}${marker.netPnl.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                    
-                    {/* Run label */}
-                    <div className="ml-3.5">
-                      <span className={`text-[8px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
-                        {marker.label}
+                  );
+                }
+
+                // Close event - show exit with P&L
+                const pnl = e.netPnl ?? 0;
+                const pct = e.margin ? (pnl / e.margin) * 100 : 0;
+                const isGain = pnl >= 0;
+
+                return (
+                  <div key={idx} className="flex flex-col text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="flex items-center gap-1 text-slate-300">
+                        <span
+                          className={
+                            'inline-flex h-2 w-2 rounded-full border-2 bg-slate-900 ' +
+                            (isShort ? 'border-rose-400' : 'border-emerald-400')
+                          }
+                        />
+                        {exitLabel}
                       </span>
+                      <span className="font-mono tabular-nums text-slate-200">
+                        ${e.exitPrice?.toFixed(2) ?? '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between ml-3">
+                      <span className="text-slate-400">P&amp;L</span>
+                      <span
+                        className={
+                          'font-mono tabular-nums font-medium ' +
+                          (isGain ? 'text-emerald-400' : 'text-rose-400')
+                        }
+                      >
+                        {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(2)}
+                        {e.margin != null && (
+                          <span className="text-[10px] ml-1 text-slate-400">
+                            ({pct >= 0 ? '+' : '-'}{Math.abs(pct).toFixed(1)}%)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 ml-3 mt-0.5">
+                      {e.runLabel}
                     </div>
                   </div>
                 );
