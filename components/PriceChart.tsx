@@ -344,6 +344,9 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   
   // Trade detail card state - when a trade marker is clicked
   const [selectedTrade, setSelectedTrade] = useState<TradeDetailData | null>(null);
+  
+  // Track currently hovered date for chart click handling
+  const [hoveredDate, setHoveredDate] = useState<string | null>(null);
 
   // Build canonical date list from fullData
   const allDates = React.useMemo(
@@ -1297,6 +1300,29 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return close; // exits sit exactly on the close price
   }, [dateToClose]);
 
+  // Handle chart click - opens trade detail card if there's a close event on hovered date
+  const handleChartClick = useCallback(() => {
+    if (!hoveredDate) return;
+    
+    const events = trading212EventsByDate?.get(hoveredDate) ?? [];
+    const closeEvent = events.find(e => e.type === 'close');
+    
+    if (closeEvent && closeEvent.exitDate && closeEvent.exitPrice != null) {
+      setSelectedTrade({
+        side: closeEvent.side,
+        entryDate: closeEvent.entryDate,
+        entryPrice: closeEvent.entryPrice,
+        exitDate: closeEvent.exitDate,
+        exitPrice: closeEvent.exitPrice,
+        netPnl: closeEvent.netPnl ?? 0,
+        margin: closeEvent.margin ?? 0,
+        runId: '',
+        runLabel: closeEvent.runLabel,
+        ticker: symbol,
+      });
+    }
+  }, [hoveredDate, trading212EventsByDate, symbol]);
+
   // Determine line color from current range performance
   const latestRangePerf = perfByRange[selectedRange];
   const isPositive = latestRangePerf != null ? latestRangePerf >= 0 : undefined;
@@ -1397,37 +1423,26 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             animation: refLineFade 0.6s ease-out forwards;
           }
         `}</style>
-        {/* Combined Price and Volume Chart */}
+        {/* Combined Price and Volume Chart - wrapped for click handling */}
+        <div 
+          onClick={handleChartClick}
+          onMouseLeave={() => setHoveredDate(null)}
+          style={{ cursor: hoveredDate && trading212EventsByDate?.get(hoveredDate)?.some(e => e.type === 'close') ? 'pointer' : 'default' }}
+        >
         <ResponsiveContainer width="100%" height={500}>
           <ComposedChart
             data={chartDataWithForecastBand}
             margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
-            onClick={(state: any) => {
-              // When clicking on the chart, check if there are trades on the hovered date
+            onMouseMove={(state: any) => {
+              // Track hovered date for click handling
               if (state && state.activePayload && state.activePayload.length > 0) {
-                const clickedDate = state.activePayload[0]?.payload?.date;
-                if (clickedDate) {
-                  // Check if there are any close events on this date (to show the trade card)
-                  const events = trading212EventsByDate?.get(clickedDate) ?? [];
-                  const closeEvent = events.find(e => e.type === 'close');
-                  if (closeEvent && closeEvent.exitDate && closeEvent.exitPrice != null) {
-                    // Open the trade detail card for this close event
-                    setSelectedTrade({
-                      side: closeEvent.side,
-                      entryDate: closeEvent.entryDate,
-                      entryPrice: closeEvent.entryPrice,
-                      exitDate: closeEvent.exitDate,
-                      exitPrice: closeEvent.exitPrice,
-                      netPnl: closeEvent.netPnl ?? 0,
-                      margin: closeEvent.margin ?? 0,
-                      runId: '',
-                      runLabel: closeEvent.runLabel,
-                      ticker: symbol,
-                    });
-                  }
+                const date = state.activePayload[0]?.payload?.date;
+                if (date && date !== hoveredDate) {
+                  setHoveredDate(date);
                 }
               }
             }}
+            onMouseLeave={() => setHoveredDate(null)}
           >
             <defs>
               <linearGradient
@@ -1981,6 +1996,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             })}
           </ComposedChart>
         </ResponsiveContainer>
+        </div>
       </div>
     );
   }, [
@@ -2002,6 +2018,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     getMarkerY,
     trading212EventsByDate,
     dateToClose,
+    handleChartClick,
+    hoveredDate,
   ]);
 
   return (
