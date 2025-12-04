@@ -1880,8 +1880,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               const y = getMarkerY(m);
               if (y == null) return null;
 
+              const markerKey = `trade-${m.runId}-${m.type}-${m.date}-${idx}`;
               const commonProps = {
-                key: `trade-${m.runId}-${m.type}-${m.date}-${idx}`,
                 x: m.date,
                 y,
                 yAxisId: "price" as const,
@@ -1891,6 +1891,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               if (m.type === 'pair') {
                 return (
                   <ReferenceDot
+                    key={markerKey}
                     {...commonProps}
                     r={0}
                     shape={(dotProps: any) => (
@@ -1931,6 +1932,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
               return (
                 <ReferenceDot
+                  key={markerKey}
                   {...commonProps}
                   r={r}
                   fill={fill}
