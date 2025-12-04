@@ -24,6 +24,7 @@ import {
   type PriceRange,
 } from "@/lib/chart/ranges";
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
+import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
 
 // Helper function to calculate target date (Date t+h) accounting for business days
 function calculateTargetDate(dateT: string | null, horizon: number): string | null {
@@ -340,6 +341,9 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   
   // Zoom state - tracks how many days to show from the end
   const [zoomDays, setZoomDays] = useState<number | null>(null);
+  
+  // Trade detail card state - when a trade marker is clicked
+  const [selectedTrade, setSelectedTrade] = useState<TradeDetailData | null>(null);
 
   // Build canonical date list from fullData
   const allDates = React.useMemo(
@@ -1040,15 +1044,21 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     color: string;
     netPnl?: number;
     margin?: number;
+    // Additional fields for detail card
+    entryDate?: string;
+    entryPrice?: number;
+    exitDate?: string;
+    exitPrice?: number;
   }
 
   // Custom shape for open/close trade marker (pair glyph: ●──●)
   const PairTradeMarkerShape: React.FC<any> = (props) => {
-    const { cx, cy, marker, isDarkMode: isDark } = props as {
+    const { cx, cy, marker, isDarkMode: isDark, onMarkerClick } = props as {
       cx: number;
       cy: number;
       marker: TradeMarker;
       isDarkMode: boolean;
+      onMarkerClick?: (marker: TradeMarker) => void;
     };
 
     if (!marker) return null;
@@ -1067,7 +1077,21 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     const offset = 8; // wider glyph
 
     return (
-      <g>
+      <g
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onMarkerClick?.(marker);
+        }}
+      >
+        {/* Invisible hit area for easier clicking */}
+        <rect
+          x={cx - offset - 6}
+          y={cy - 8}
+          width={(offset * 2) + 12}
+          height={16}
+          fill="transparent"
+        />
         {/* Horizontal connector */}
         <line
           x1={cx - offset}
@@ -1093,6 +1117,47 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           fill={isDark ? 'rgba(15, 23, 42, 1)' : 'rgba(248, 250, 252, 1)'}
           stroke={sideColor}
           strokeWidth={1.8}
+        />
+      </g>
+    );
+  };
+
+  // Custom clickable dot shape for single markers
+  const ClickableDotShape: React.FC<any> = (props) => {
+    const { cx, cy, r, fill, stroke, strokeWidth, marker, onMarkerClick } = props as {
+      cx: number;
+      cy: number;
+      r: number;
+      fill: string;
+      stroke: string;
+      strokeWidth: number;
+      marker: TradeMarker;
+      onMarkerClick?: (marker: TradeMarker) => void;
+    };
+
+    return (
+      <g
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onMarkerClick?.(marker);
+        }}
+      >
+        {/* Invisible hit area for easier clicking */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r + 6}
+          fill="transparent"
+        />
+        {/* Visible dot */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={r}
+          fill={fill}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
         />
       </g>
     );
@@ -1262,6 +1327,70 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
     return map;
   }, [tradeOverlays]);
+
+  // Lookup map for full trade data (for detail card when clicking markers)
+  // Key: `runId|entryDate|exitDate`
+  const tradeDataLookup = useMemo(() => {
+    const map = new Map<string, TradeDetailData>();
+    
+    if (!tradeOverlays || tradeOverlays.length === 0) return map;
+
+    for (const overlay of tradeOverlays) {
+      for (const trade of overlay.trades) {
+        const key = `${overlay.runId}|${trade.entryDate}|${trade.exitDate}`;
+        map.set(key, {
+          side: trade.side,
+          entryDate: trade.entryDate,
+          entryPrice: trade.entryPrice,
+          exitDate: trade.exitDate,
+          exitPrice: trade.exitPrice,
+          netPnl: trade.netPnl,
+          margin: trade.margin,
+          runId: overlay.runId,
+          runLabel: overlay.label,
+          ticker: symbol,
+        });
+      }
+    }
+
+    return map;
+  }, [tradeOverlays, symbol]);
+
+  // Handle click on trade marker
+  const handleTradeMarkerClick = useCallback((marker: TradeMarker) => {
+    // Find the full trade data for this marker
+    // For exit/pair markers, we can find by runId + date (exit date)
+    // For entry markers, we need to find the trade that starts on this date
+    
+    if (!tradeOverlays) return;
+
+    for (const overlay of tradeOverlays) {
+      if (overlay.runId !== marker.runId) continue;
+      
+      for (const trade of overlay.trades) {
+        // Match by date: entry markers match entryDate, exit/pair match exitDate
+        const isMatch = marker.type === 'entry'
+          ? normalizeDateString(trade.entryDate) === marker.date
+          : normalizeDateString(trade.exitDate) === marker.date;
+        
+        if (isMatch && trade.side === marker.side) {
+          setSelectedTrade({
+            side: trade.side,
+            entryDate: trade.entryDate,
+            entryPrice: trade.entryPrice,
+            exitDate: trade.exitDate,
+            exitPrice: trade.exitPrice,
+            netPnl: trade.netPnl,
+            margin: trade.margin,
+            runId: overlay.runId,
+            runLabel: overlay.label,
+            ticker: symbol,
+          });
+          return;
+        }
+      }
+    }
+  }, [tradeOverlays, symbol]);
 
   // Map from date -> close price for ReferenceDot Y positioning
   const dateToClose = useMemo(() => {
@@ -1895,7 +2024,11 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     {...commonProps}
                     r={0}
                     shape={(dotProps: any) => (
-                      <PairTradeMarkerShape {...dotProps} marker={m} />
+                      <PairTradeMarkerShape
+                        {...dotProps}
+                        marker={m}
+                        onMarkerClick={handleTradeMarkerClick}
+                      />
                     )}
                   />
                 );
@@ -1934,10 +2067,18 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 <ReferenceDot
                   key={markerKey}
                   {...commonProps}
-                  r={r}
-                  fill={fill}
-                  stroke={stroke}
-                  strokeWidth={1.5}
+                  r={0}
+                  shape={(dotProps: any) => (
+                    <ClickableDotShape
+                      {...dotProps}
+                      r={r}
+                      fill={fill}
+                      stroke={stroke}
+                      strokeWidth={1.5}
+                      marker={m}
+                      onMarkerClick={handleTradeMarkerClick}
+                    />
+                  )}
                 />
               );
             })}
@@ -1964,6 +2105,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     getMarkerY,
     trading212EventsByDate,
     dateToClose,
+    handleTradeMarkerClick,
   ]);
 
   return (
@@ -2805,6 +2947,15 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         onChange={handleRangeChange}
         isDarkMode={isDarkMode}
       />
+
+      {/* Trade Detail Card - shown when a trade marker is clicked */}
+      {selectedTrade && (
+        <TradeDetailCard
+          trade={selectedTrade}
+          isDarkMode={isDarkMode}
+          onClose={() => setSelectedTrade(null)}
+        />
+      )}
     </div>
   );
 };
@@ -3289,6 +3440,14 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 const pct = e.margin ? (pnl / e.margin) * 100 : 0;
                 const isGain = pnl >= 0;
 
+                // Format entry date as Day-Month (e.g. "07-Apr")
+                const formatDayMonth = (dateStr: string) => {
+                  const d = new Date(dateStr + 'T00:00:00Z');
+                  const day = d.getUTCDate().toString().padStart(2, '0');
+                  const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+                  return `${day}-${month}`;
+                };
+
                 return (
                   <div key={idx} className="flex flex-col text-[11px]">
                     {/* Open row for this CLOSED position */}
@@ -3304,7 +3463,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                         {/* show entryDate if different than the hovered date */}
                         {labelStr !== e.entryDate && (
                           <span className="ml-1 text-[9px] text-slate-500">
-                            {e.entryDate}
+                            {formatDayMonth(e.entryDate)}
                           </span>
                         )}
                       </span>
@@ -3329,7 +3488,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                       </span>
                     </div>
 
-                    {/* P&L row */}
+                    {/* P&L $ row */}
                     <div className="flex justify-between ml-3">
                       <span className="text-slate-400">P&amp;L</span>
                       <span
@@ -3339,13 +3498,23 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                         }
                       >
                         {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(2)}
-                        {e.margin != null && (
-                          <span className="text-[10px] ml-1 text-slate-400">
-                            ({pct >= 0 ? '+' : '-'}{Math.abs(pct).toFixed(1)}%)
-                          </span>
-                        )}
                       </span>
                     </div>
+
+                    {/* P&L % row (if margin available) */}
+                    {e.margin != null && (
+                      <div className="flex justify-between ml-3">
+                        <span className="text-slate-400"></span>
+                        <span
+                          className={
+                            'font-mono tabular-nums text-[10px] ' +
+                            (isGain ? 'text-emerald-400' : 'text-rose-400')
+                          }
+                        >
+                          ({pct >= 0 ? '+' : '-'}{Math.abs(pct).toFixed(1)}%)
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
