@@ -4304,7 +4304,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                 </div>
               ) : (
                 <div className={`text-center py-6 text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
-                  Click "Maximize" to find optimal λ / Train% combinations
+                  Click &quot;Maximize&quot; to find optimal λ / Train% combinations
                 </div>
               )}
 
@@ -4322,7 +4322,7 @@ export default function TimingPage({ params }: TimingPageProps) {
               ? 'bg-slate-900/40 text-slate-500' 
               : 'bg-gray-50 text-gray-400'
           }`}>
-            Click "Run" to compute the EWMA Reaction Map
+            Click &quot;Run&quot; to compute the EWMA Reaction Map
           </div>
         )}
       </div>
