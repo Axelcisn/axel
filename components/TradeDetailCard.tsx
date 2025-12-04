@@ -15,6 +15,21 @@ const XIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+// Event type for trade actions on a date
+type TradeCardEventType = 'open' | 'close';
+
+export interface TradeCardEvent {
+  type: TradeCardEventType;
+  runLabel: string;
+  side: 'long' | 'short';
+  entryDate: string;
+  entryPrice: number;
+  exitDate?: string;
+  exitPrice?: number;
+  netPnl?: number;
+  margin?: number;
+}
+
 // Trade data passed to the detail card
 export interface TradeDetailData {
   // Position info
@@ -34,6 +49,17 @@ export interface TradeDetailData {
   
   // Optional: ticker symbol
   ticker?: string;
+  
+  // NEW: Selected chart date and all events on that date
+  date?: string;
+  events?: TradeCardEvent[];
+
+  // NEW: engine-level fields from Trading212Trade
+  openingEquity?: number;
+  closingEquity?: number;
+  grossPnl?: number;
+  swapFees?: number;
+  fxFees?: number;
 }
 
 interface TradeDetailCardProps {
@@ -52,8 +78,53 @@ export const TradeDetailCard: React.FC<TradeDetailCardProps> = ({
   onClose,
 }) => {
   const isLong = trade.side === 'long';
-  const isGain = trade.netPnl >= 0;
-  const pnlPct = trade.margin ? (trade.netPnl / trade.margin) * 100 : 0;
+
+  // =========================================================================
+  // Derived metrics
+  // =========================================================================
+  
+  // Opening/closing equity (fallback to approximation if not provided)
+  const openingEquity = trade.openingEquity ?? (trade.margin + trade.netPnl);
+  const closingEquity = trade.closingEquity ?? (openingEquity + trade.netPnl);
+
+  // Gross P&L (fallback: estimate from price diff and assumed leverage)
+  const leverage = 5; // TODO: pipe config.leverage into TradeDetailData if desired
+  const grossPnl = trade.grossPnl ?? 
+    (trade.exitPrice - trade.entryPrice) * (trade.margin ? (trade.margin * leverage) / trade.entryPrice : 0) * (isLong ? 1 : -1);
+  
+  // Fees
+  const swapFees = trade.swapFees ?? 0;
+  const fxFees = trade.fxFees ?? 0;
+
+  // Net trade P&L including swap and FX
+  const netTradePnl = grossPnl + swapFees - fxFees;
+
+  // Return on margin (trade-level)
+  const returnOnMargin = trade.margin ? netTradePnl / trade.margin : 0;
+
+  // Return on equity (account-level)
+  const returnOnEquity = openingEquity ? (closingEquity - openingEquity) / openingEquity : 0;
+
+  // Position size as % of equity
+  const positionPct = openingEquity ? trade.margin / openingEquity : 0;
+
+  // Notional value (exposure)
+  const exposure = trade.margin * leverage;
+
+  // Units = exposure / entryPrice
+  const units = trade.entryPrice ? exposure / trade.entryPrice : 0;
+
+  // Holding period
+  const holdingDays = Math.max(
+    0,
+    Math.round(
+      (new Date(trade.exitDate).getTime() - new Date(trade.entryDate).getTime()) /
+      (1000 * 60 * 60 * 24)
+    )
+  );
+
+  // Result colors
+  const isGain = netTradePnl >= 0;
 
   // Format date as "07 Apr 2025"
   const formatDate = (dateStr: string) => {
@@ -64,15 +135,6 @@ export const TradeDetailCard: React.FC<TradeDetailCardProps> = ({
       year: 'numeric',
       timeZone: 'UTC',
     });
-  };
-
-  // Calculate holding period in days
-  const holdingDays = () => {
-    const entry = new Date(trade.entryDate);
-    const exit = new Date(trade.exitDate);
-    const diffTime = Math.abs(exit.getTime() - entry.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
   };
 
   return (
@@ -125,101 +187,100 @@ export const TradeDetailCard: React.FC<TradeDetailCardProps> = ({
           </button>
         </div>
 
-        {/* Result Banner */}
-        <div className={`px-4 py-3 border-b ${
-          isDarkMode ? 'border-slate-700' : 'border-gray-200'
-        }`}>
+        {/* Gross P&L Banner */}
+        <div className="px-4 py-3 border-b border-slate-800/60">
           <div className="flex items-center justify-between">
-            <span className={`text-xs font-medium uppercase tracking-wide ${
-              isDarkMode ? 'text-slate-400' : 'text-gray-500'
-            }`}>
-              Result
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Gross P&amp;L
             </span>
             <span
-              className={`text-xl font-bold font-mono tabular-nums ${
-                isGain ? 'text-emerald-400' : 'text-rose-400'
-              }`}
+              className={
+                "text-lg font-semibold font-mono tabular-nums " +
+                (netTradePnl >= 0 ? "text-emerald-400" : "text-rose-400")
+              }
             >
-              {trade.netPnl >= 0 ? '+' : '-'}${Math.abs(trade.netPnl).toFixed(2)}
+              {netTradePnl >= 0 ? "+" : "-"}${Math.abs(netTradePnl).toFixed(2)}
             </span>
           </div>
         </div>
 
-        {/* Details Section */}
-        <div className="px-4 py-3 space-y-2">
-          {/* P&L Breakdown */}
+        {/* Metrics Section */}
+        <div className="px-4 pt-3 pb-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Metrics
+          </div>
+        </div>
+        <div className="px-4 pb-2 space-y-1">
           <DetailRow
-            label="Profit/Loss"
-            value={`${trade.netPnl >= 0 ? '+' : '-'}$${Math.abs(trade.netPnl).toFixed(2)}`}
-            valueColor={isGain ? 'text-emerald-400' : 'text-rose-400'}
+            label="Return on margin"
+            value={`${(returnOnMargin * 100).toFixed(1)}%`}
+            valueColor={returnOnMargin >= 0 ? 'text-emerald-400' : 'text-rose-400'}
             isDarkMode={isDarkMode}
           />
-          
           <DetailRow
-            label="Return on Margin"
-            value={`${pnlPct >= 0 ? '+' : '-'}${Math.abs(pnlPct).toFixed(1)}%`}
-            valueColor={isGain ? 'text-emerald-400' : 'text-rose-400'}
-            isDarkMode={isDarkMode}
-          />
-
-          {/* Divider */}
-          <div className={`border-t my-2 ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`} />
-
-          {/* Entry/Exit Details */}
-          <DetailRow
-            label="Entry Price"
-            value={`$${trade.entryPrice.toFixed(2)}`}
-            isDarkMode={isDarkMode}
-          />
-          
-          <DetailRow
-            label="Exit Price"
-            value={`$${trade.exitPrice.toFixed(2)}`}
-            isDarkMode={isDarkMode}
-          />
-
-          <DetailRow
-            label="Entry Date"
-            value={formatDate(trade.entryDate)}
-            isDarkMode={isDarkMode}
-          />
-
-          <DetailRow
-            label="Exit Date"
-            value={formatDate(trade.exitDate)}
-            isDarkMode={isDarkMode}
-          />
-
-          {/* Divider */}
-          <div className={`border-t my-2 ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`} />
-
-          {/* Position Info */}
-          <DetailRow
-            label="Margin Used"
-            value={`$${trade.margin.toFixed(2)}`}
-            isDarkMode={isDarkMode}
-          />
-
-          <DetailRow
-            label="Holding Period"
-            value={`${holdingDays()} day${holdingDays() !== 1 ? 's' : ''}`}
-            isDarkMode={isDarkMode}
-          />
-
-          <DetailRow
-            label="Strategy"
-            value={trade.runLabel}
+            label="Return on equity"
+            value={`${(returnOnEquity * 100).toFixed(1)}%`}
+            valueColor={returnOnEquity >= 0 ? 'text-emerald-400' : 'text-rose-400'}
             isDarkMode={isDarkMode}
           />
         </div>
 
-        {/* Footer */}
-        <div className={`px-4 py-3 border-t ${
-          isDarkMode ? 'border-slate-700 bg-slate-800/50' : 'border-gray-200 bg-gray-50'
-        }`}>
-          <p className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
-            Simulated trade based on EWMA signal strategy. Does not include fees or slippage.
-          </p>
+        {/* Position Section */}
+        <div className="px-4 pt-3 pb-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Position
+          </div>
+        </div>
+        <div className="px-4 pb-2 space-y-1">
+          <DetailRow label="Opening balance" value={`$${openingEquity.toFixed(2)}`} isDarkMode={isDarkMode} />
+          <DetailRow label="Closing balance" value={`$${closingEquity.toFixed(2)}`} isDarkMode={isDarkMode} />
+          <DetailRow label="Position size" value={`${(positionPct * 100).toFixed(1)}%`} isDarkMode={isDarkMode} />
+          <DetailRow label="Margin used" value={`$${trade.margin.toFixed(2)}`} isDarkMode={isDarkMode} />
+          <DetailRow label="Leverage" value={`${leverage.toFixed(1)}x`} isDarkMode={isDarkMode} />
+          <DetailRow label="Notional value" value={`$${exposure.toFixed(2)}`} isDarkMode={isDarkMode} />
+        </div>
+
+        {/* Trade details Section */}
+        <div className="px-4 pt-3 pb-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Trade details
+          </div>
+        </div>
+        <div className="px-4 pb-2 space-y-1">
+          <DetailRow label="Entry price" value={`$${trade.entryPrice.toFixed(2)}`} isDarkMode={isDarkMode} />
+          <DetailRow label="Entry date" value={formatDate(trade.entryDate)} isDarkMode={isDarkMode} />
+          <DetailRow label="Units" value={units.toFixed(3)} isDarkMode={isDarkMode} />
+          <DetailRow label="Exit price" value={`$${trade.exitPrice.toFixed(2)}`} isDarkMode={isDarkMode} />
+          <DetailRow label="Exit date" value={formatDate(trade.exitDate)} isDarkMode={isDarkMode} />
+          <DetailRow label="Holding period" value={`${holdingDays} days`} isDarkMode={isDarkMode} />
+        </div>
+
+        {/* P&L & fees Section */}
+        <div className="px-4 pt-3 pb-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            P&amp;L &amp; fees
+          </div>
+        </div>
+        <div className="px-4 pb-3 space-y-1">
+          <DetailRow
+            label="Gross P&L"
+            value={`${grossPnl >= 0 ? '+' : '-'}$${Math.abs(grossPnl).toFixed(2)}`}
+            valueColor={grossPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+            isDarkMode={isDarkMode}
+          />
+          <DetailRow label="FX fee" value={`-$${Math.abs(fxFees).toFixed(2)}`} isDarkMode={isDarkMode} />
+          <DetailRow
+            label="Overnight interest"
+            value={`${swapFees >= 0 ? '+' : '-'}$${Math.abs(swapFees).toFixed(2)}`}
+            valueColor={swapFees >= 0 ? 'text-emerald-400' : 'text-rose-400'}
+            isDarkMode={isDarkMode}
+          />
+          <DetailRow
+            label="Net trade result"
+            value={`${netTradePnl >= 0 ? '+' : '-'}$${Math.abs(netTradePnl).toFixed(2)}`}
+            valueColor={isGain ? 'text-emerald-400' : 'text-rose-400'}
+            isDarkMode={isDarkMode}
+          />
         </div>
       </div>
     </div>
@@ -245,7 +306,7 @@ const DetailRow: React.FC<DetailRowProps> = ({
       {label}
     </span>
     <span
-      className={`text-sm font-mono tabular-nums ${
+      className={`text-xs font-mono tabular-nums ${
         valueColor ?? (isDarkMode ? 'text-slate-200' : 'text-gray-700')
       }`}
     >

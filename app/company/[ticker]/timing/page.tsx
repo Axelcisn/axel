@@ -4469,12 +4469,11 @@ export default function TimingPage({ params }: TimingPageProps) {
                       return (
                         <tr
                           key={run.id}
-                          className={`border-b cursor-pointer transition-colors ${
+                          className={`border-b transition-colors ${
                             isDarkMode 
                               ? `border-slate-800/60 hover:bg-slate-800/70 ${isCurrent ? 'bg-slate-800/60' : ''}`
                               : `border-gray-100 hover:bg-gray-50 ${isCurrent ? 'bg-gray-100' : ''}`
                           }`}
-                          onClick={() => setT212CurrentRunId(isCurrent ? null : run.id)}
                         >
                           <td className="py-1.5 pr-3 font-medium">{run.label}</td>
                           <td className="py-1.5 pr-3">

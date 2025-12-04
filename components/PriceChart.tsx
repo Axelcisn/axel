@@ -79,6 +79,16 @@ interface ChartPoint {
   forecastLower?: number | null;
   forecastUpper?: number | null;
   forecastModelName?: string | null;
+  // GBM parameters
+  forecastMuStar?: number | null;
+  forecastSigma?: number | null;
+  // GARCH parameters
+  forecastOmega?: number | null;
+  forecastAlpha?: number | null;
+  forecastBeta?: number | null;
+  forecastAlphaPlusBeta?: number | null;
+  forecastUncondVar?: number | null;
+  forecastGarchDistribution?: string | null;
 
   // === EWMA Unbiased ===
   // Past H-day forecast: made at t-H, targeting t (the hovered date)
@@ -341,12 +351,35 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   
   // Zoom state - tracks how many days to show from the end
   const [zoomDays, setZoomDays] = useState<number | null>(null);
+
+  // Index-based view window over fullData.
+  // When both are null, we fall back to the legacy range + zoomDays logic.
+  const [viewStartIdx, setViewStartIdx] = useState<number | null>(null);
+  const [viewEndIdx, setViewEndIdx] = useState<number | null>(null);
   
   // Trade detail card state - when a trade marker is clicked
   const [selectedTrade, setSelectedTrade] = useState<TradeDetailData | null>(null);
   
-  // Track currently hovered date for chart click handling
-  const [hoveredDate, setHoveredDate] = useState<string | null>(null);
+  // Ref to hold the latest chart click handler (avoids stale closure in useMemo)
+  const chartClickHandlerRef = useRef<((state: any) => void) | null>(null);
+
+  // Last hovered index in fullData (used as zoom anchor)
+  const hoveredIndexRef = useRef<number | null>(null);
+
+  // Accumulate wheel delta so zoom isn't too sensitive
+  const wheelAccumRef = useRef(0);
+
+  // Track whether the pointer is currently over the chart area
+  const isHoveringChartRef = useRef(false);
+
+  // Ref to the chart container div
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Drag-panning refs
+  const isDraggingRef = useRef(false);
+  const dragStartXRef = useRef<number | null>(null);
+  const dragStartWindowRef = useRef<{ start: number; end: number } | null>(null);
+
 
   // Build canonical date list from fullData
   const allDates = React.useMemo(
@@ -410,40 +443,350 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     };
   }, [symbol]);
 
-  // Zoom functions
-  const zoomIn = () => {
-    if (fullData.length === 0) return;
-    
-    // Get base range data first
-    const baseRangeData = sliceByRange(fullData, selectedRange);
-    const baseDays = baseRangeData.length;
-    
-    const currentDays = zoomDays || baseDays;
-    const newDays = Math.max(7, Math.floor(currentDays * 0.5)); // Zoom in by 50%, minimum 7 days
-    setZoomDays(newDays);
+  // Initialize view window when fullData is first populated or selectedRange changes
+  useEffect(() => {
+    if (fullData.length === 0) {
+      setViewStartIdx(null);
+      setViewEndIdx(null);
+      return;
+    }
+    // If we don't have a window yet, initialize it from the current range
+    if (viewStartIdx === null || viewEndIdx === null) {
+      const [start, end] = computeDefaultWindowForRange(fullData, selectedRange);
+      setViewStartIdx(start);
+      setViewEndIdx(end);
+    }
+  }, [fullData, selectedRange]);
+
+  // Minimum number of bars we allow in the window when zoomed in
+  const MIN_WINDOW_BARS = 7;
+
+  // Helper: get current visible window (start/end indices) and base range window
+  function getCurrentWindow(
+    data: PricePoint[],
+    range: PriceRange,
+    startIdx: number | null,
+    endIdx: number | null
+  ) {
+    const total = data.length;
+    if (total === 0) return null;
+
+    const [baseStart, baseEnd] = computeDefaultWindowForRange(data, range);
+    const currentStart = startIdx ?? baseStart;
+    const currentEnd = endIdx ?? baseEnd;
+
+    return {
+      baseStart,
+      baseEnd,
+      start: Math.max(baseStart, Math.min(currentStart, baseEnd)),
+      end: Math.max(baseStart, Math.min(currentEnd, baseEnd)),
+    };
+  }
+
+  // Helper: apply a bar offset to pan the window (used by drag panning)
+  const applyPanOffset = (offsetBars: number) => {
+    const total = fullData.length;
+    if (total === 0 || offsetBars === 0) return;
+
+    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    if (!win) return;
+
+    const { baseStart, baseEnd, start, end } = win;
+    const windowSize = end - start + 1;
+
+    let newStart = start + offsetBars;
+    let newEnd = end + offsetBars;
+
+    if (newStart < baseStart) {
+      newStart = baseStart;
+      newEnd = newStart + windowSize - 1;
+    }
+    if (newEnd > baseEnd) {
+      newEnd = baseEnd;
+      newStart = newEnd - windowSize + 1;
+    }
+
+    setViewStartIdx(newStart);
+    setViewEndIdx(newEnd);
   };
 
-  const zoomOut = () => {
-    if (fullData.length === 0) return;
-    
-    // Get base range data first
-    const baseRangeData = sliceByRange(fullData, selectedRange);
-    const baseDays = baseRangeData.length;
-    
-    const currentDays = zoomDays || baseDays;
-    const newDays = Math.min(baseDays, Math.floor(currentDays * 2)); // Zoom out by 2x
-    
-    if (newDays >= baseDays) {
-      setZoomDays(null); // Reset to full range
-    } else {
-      setZoomDays(newDays);
+  // Zoom In: shrink window around hovered index (or center)
+  const zoomIn = () => {
+    const total = fullData.length;
+    if (total === 0) return;
+
+    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    if (!win) return;
+
+    const { baseStart, baseEnd, start, end } = win;
+    const windowSize = end - start + 1;
+    if (windowSize <= MIN_WINDOW_BARS) return;
+
+    // Anchor: hovered index in fullData, or center of current window
+    const anchorIdx =
+      hoveredIndexRef.current != null
+        ? hoveredIndexRef.current
+        : Math.floor((start + end) / 2);
+
+    const factor = 1 / 1.5; // shrink by ~1.5x
+    const newSize = Math.max(MIN_WINDOW_BARS, Math.floor(windowSize * factor));
+    const half = Math.floor(newSize / 2);
+
+    let newStart = anchorIdx - half;
+    let newEnd = newStart + newSize - 1;
+
+    // Clamp to base window
+    if (newStart < baseStart) {
+      newStart = baseStart;
+      newEnd = newStart + newSize - 1;
     }
+    if (newEnd > baseEnd) {
+      newEnd = baseEnd;
+      newStart = newEnd - newSize + 1;
+    }
+
+    setViewStartIdx(newStart);
+    setViewEndIdx(newEnd);
   };
+
+  // Zoom Out: expand window around hovered index (or center)
+  const zoomOut = () => {
+    const total = fullData.length;
+    if (total === 0) return;
+
+    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    if (!win) return;
+
+    const { baseStart, baseEnd, start, end } = win;
+    const baseSize = baseEnd - baseStart + 1;
+    const windowSize = end - start + 1;
+
+    if (windowSize >= baseSize) {
+      // Already at base window – reset any overrides
+      setViewStartIdx(null);
+      setViewEndIdx(null);
+      return;
+    }
+
+    const anchorIdx =
+      hoveredIndexRef.current != null
+        ? hoveredIndexRef.current
+        : Math.floor((start + end) / 2);
+
+    const factor = 1.5; // expand by ~1.5x
+    const newSize = Math.min(baseSize, Math.floor(windowSize * factor));
+    const half = Math.floor(newSize / 2);
+
+    let newStart = anchorIdx - half;
+    let newEnd = newStart + newSize - 1;
+
+    if (newStart < baseStart) {
+      newStart = baseStart;
+      newEnd = newStart + newSize - 1;
+    }
+    if (newEnd > baseEnd) {
+      newEnd = baseEnd;
+      newStart = newEnd - newSize + 1;
+    }
+
+    setViewStartIdx(newStart);
+    setViewEndIdx(newEnd);
+  };
+
+  // Pan left/right by ~30% of current window size
+  const panStepFraction = 0.3;
+
+  const panLeft = () => {
+    const total = fullData.length;
+    if (total === 0) return;
+
+    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    if (!win) return;
+
+    const { baseStart, baseEnd, start, end } = win;
+    const windowSize = end - start + 1;
+    const step = Math.max(1, Math.floor(windowSize * panStepFraction));
+
+    let newStart = Math.max(baseStart, start - step);
+    let newEnd = newStart + windowSize - 1;
+
+    if (newEnd > baseEnd) {
+      newEnd = baseEnd;
+      newStart = newEnd - windowSize + 1;
+    }
+
+    setViewStartIdx(newStart);
+    setViewEndIdx(newEnd);
+  };
+
+  const panRight = () => {
+    const total = fullData.length;
+    if (total === 0) return;
+
+    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    if (!win) return;
+
+    const { baseStart, baseEnd, start, end } = win;
+    const windowSize = end - start + 1;
+    const step = Math.max(1, Math.floor(windowSize * panStepFraction));
+
+    let newEnd = Math.min(baseEnd, end + step);
+    let newStart = newEnd - windowSize + 1;
+
+    if (newStart < baseStart) {
+      newStart = baseStart;
+      newEnd = newStart + windowSize - 1;
+    }
+
+    setViewStartIdx(newStart);
+    setViewEndIdx(newEnd);
+  };
+
+  // Reset view to base window for current range
+  const resetViewWindow = () => {
+    setViewStartIdx(null);
+    setViewEndIdx(null);
+  };
+
+  // Scroll-wheel zoom/pan handler with accumulator for smoother experience
+  const handleWheelOnChart = useCallback(
+    (event: WheelEvent) => {
+      if (loading || fullData.length === 0) return;
+
+      const dy = event.deltaY || 0;
+      const dx = event.deltaX || 0;
+
+      const ZOOM_THRESHOLD = 40; // vertical sensitivity
+      const PAN_THRESHOLD = 20;  // horizontal sensitivity (can tune)
+
+      // ── Horizontal scroll → Pan left/right ─────────────────────
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > PAN_THRESHOLD) {
+        // If abs(dx) dominates, treat this as a pan gesture
+        if (dx > 0) {
+          // user scrolls right → pan chart right (view moves to later dates)
+          panRight();
+        } else {
+          // user scrolls left → pan chart left (view moves to earlier dates)
+          panLeft();
+        }
+        return;
+      }
+
+      // ── Vertical scroll → Zoom in/out ──────────────────────────
+      if (!dy) return;
+
+      wheelAccumRef.current += dy;
+
+      if (wheelAccumRef.current <= -ZOOM_THRESHOLD) {
+        // scroll up / pinch-out → zoom in
+        zoomIn();
+        wheelAccumRef.current = 0;
+      } else if (wheelAccumRef.current >= ZOOM_THRESHOLD) {
+        // scroll down / pinch-in → zoom out
+        zoomOut();
+        wheelAccumRef.current = 0;
+      }
+    },
+    [loading, fullData.length, zoomIn, zoomOut, panLeft, panRight]
+  );
+
+  // Global wheel listener to block page scroll when hovering over chart
+  useEffect(() => {
+    const handleGlobalWheel = (event: WheelEvent) => {
+      // Only intercept when pointer is over the chart area
+      if (!isHoveringChartRef.current) {
+        return;
+      }
+
+      // Block page scroll
+      event.preventDefault();
+
+      // Forward to chart's wheel handler
+      handleWheelOnChart(event);
+    };
+
+    // IMPORTANT: { passive: false } so we can call preventDefault
+    window.addEventListener("wheel", handleGlobalWheel, { passive: false });
+
+    return () => {
+      window.removeEventListener("wheel", handleGlobalWheel);
+    };
+  }, [handleWheelOnChart]);
+
+  // Compute visual cues for button states
+  const currentWindow = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+  const canZoomIn =
+    currentWindow != null &&
+    currentWindow.end - currentWindow.start + 1 > MIN_WINDOW_BARS;
+
+  const baseSize = currentWindow ? currentWindow.baseEnd - currentWindow.baseStart + 1 : 0;
+  const windowSize = currentWindow ? currentWindow.end - currentWindow.start + 1 : 0;
+
+  const canZoomOut = currentWindow != null && windowSize < baseSize;
+  const canPanLeft = currentWindow != null && currentWindow.start > currentWindow.baseStart;
+  const canPanRight = currentWindow != null && currentWindow.end < currentWindow.baseEnd;
+  const isZoomed =
+    currentWindow != null &&
+    (currentWindow.start !== currentWindow.baseStart ||
+      currentWindow.end !== currentWindow.baseEnd);
+
+  // Helper: compute default [start, end] window for a given range
+  function computeDefaultWindowForRange(
+    allRows: PricePoint[],
+    range: PriceRange
+  ): [number, number] {
+    const n = allRows.length;
+    if (n === 0) return [0, -1]; // empty
+
+    // For most ranges, we mirror sliceByRange's behaviour (last N bars).
+    const clampLast = (count: number) => {
+      const len = Math.min(count, n);
+      const start = Math.max(0, n - len);
+      const end = n - 1;
+      return [start, end] as [number, number];
+    };
+
+    switch (range) {
+      case "ALL":
+        return [0, n - 1];
+      case "1D":
+        return clampLast(1);
+      case "5D":
+        return clampLast(5);
+      case "1M":
+        return clampLast(21);
+      case "6M":
+        return clampLast(126);
+      case "1Y":
+        return clampLast(252);
+      case "5Y":
+        return clampLast(1260);
+      case "YTD": {
+        const lastDate = allRows[n - 1].date;
+        const yearOfLastDate = new Date(lastDate).getFullYear();
+        const yearStart = `${yearOfLastDate}-01-01`;
+        const start = allRows.findIndex((row) => row.date >= yearStart);
+        if (start === -1) return [0, n - 1];
+        return [start, n - 1];
+      }
+      default:
+        return [0, n - 1];
+    }
+  }
 
   // Reset zoom when changing ranges manually
   const handleRangeChange = (range: PriceRange) => {
     setSelectedRange(range);
     setZoomDays(null);
+
+    if (fullData.length > 0) {
+      const [start, end] = computeDefaultWindowForRange(fullData, range);
+      setViewStartIdx(start);
+      setViewEndIdx(end);
+    } else {
+      setViewStartIdx(null);
+      setViewEndIdx(null);
+    }
   };
 
   // Compute range data and performance
@@ -463,14 +806,25 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       perfMap[range] = perfResult?.percentage ?? null;
     }
 
-    // Get data for selected range or zoom
+    // Get data for selected range or explicit view window
     let rangeData: PricePoint[];
-    if (zoomDays !== null) {
-      // Use zoom: get the base range first, then take last N days from it
+
+    if (
+      viewStartIdx !== null &&
+      viewEndIdx !== null &&
+      viewStartIdx >= 0 &&
+      viewEndIdx >= viewStartIdx &&
+      viewStartIdx < fullData.length
+    ) {
+      // New model: explicit index-based window over fullData
+      const clampedEnd = Math.min(viewEndIdx, fullData.length - 1);
+      rangeData = fullData.slice(viewStartIdx, clampedEnd + 1);
+    } else if (zoomDays !== null) {
+      // Legacy zoomDays behaviour (will be refactored later)
       const baseRangeData = sliceByRange(fullData, selectedRange);
       rangeData = baseRangeData.slice(-zoomDays);
     } else {
-      // Use normal range selection
+      // Legacy range behaviour
       rangeData = sliceByRange(fullData, selectedRange);
     }
 
@@ -478,7 +832,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       rangeData,
       perfByRange: perfMap,
     };
-  }, [fullData, selectedRange, zoomDays]);
+  }, [fullData, selectedRange, zoomDays, viewStartIdx, viewEndIdx]);
 
   // Derive last date and future dates
   const lastPoint = rangeData[rangeData.length - 1];
@@ -509,10 +863,28 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       low: p.low,
       close: p.close,
       volume: p.volume,
-      // Determine volume color based on price movement
-      volumeColor: (p.close && p.open && p.close > p.open) ? "#22c55e" : "#ef4444", // green if bullish, red if bearish
+      // Determine volume color based on price movement (vintage palette)
+      volumeColor: (p.close && p.open && p.close > p.open) ? "#5B8A72" : "#B87567", // muted teal if bullish, dusty terracotta if bearish
       isFuture: false as const,
     }));
+
+    // Determine if the current visible window ends at the latest bar in fullData.
+    const latestFullDate =
+      fullData.length > 0 ? fullData[fullData.length - 1].date : null;
+    const lastVisibleDate =
+      rangeData.length > 0 ? rangeData[rangeData.length - 1].date : null;
+
+    const atLatestBar =
+      latestFullDate != null &&
+      lastVisibleDate != null &&
+      lastVisibleDate === latestFullDate;
+
+    // Only build/append future points (forecast horizon) when the visible window
+    // includes the latest bar. If you pan/zoom away from the right edge, we
+    // don't show the forecast cone or extra future placeholders.
+    if (!atLatestBar) {
+      return base;
+    }
 
     // Calculate target date for forecast overlay if we have forecast data
     let forecastTargetDate: string | null = null;
@@ -544,7 +916,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     }));
 
     return [...base, ...futurePoints];
-  }, [rangeData, futureDates, h, forecastOverlay?.activeForecast]);
+  }, [rangeData, fullData, futureDates, h, forecastOverlay?.activeForecast]);
 
   // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
   const chartDataWithEwma = useMemo(() => {
@@ -839,6 +1211,16 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   let overlayCenter: number | null = null;
   let overlayLower: number | null = null;
   let overlayUpper: number | null = null;
+  // GBM parameters
+  let overlayMuStar: number | null = null;
+  let overlaySigma: number | null = null;
+  // GARCH parameters
+  let overlayOmega: number | null = null;
+  let overlayAlpha: number | null = null;
+  let overlayBeta: number | null = null;
+  let overlayAlphaPlusBeta: number | null = null;
+  let overlayUncondVar: number | null = null;
+  let overlayGarchDistribution: string | null = null;
 
   const af = forecastOverlay?.activeForecast;
 
@@ -920,6 +1302,31 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       overlayUpper =
         typeof U === "number" && Number.isFinite(U) ? U : null;
     }
+
+    // Extract mu* and sigma from estimates (GBM)
+    const estimates = af.estimates && typeof af.estimates === "object" ? af.estimates : null;
+    overlayMuStar = estimates?.mu_star_used ?? estimates?.mu_star_hat ?? null;
+    overlaySigma = estimates?.sigma_hat ?? null;
+
+    // Extract GARCH volatility diagnostics
+    const volDiag = estimates?.volatility_diagnostics;
+    if (volDiag && typeof volDiag === "object") {
+      overlayOmega = volDiag.omega ?? null;
+      overlayAlpha = volDiag.alpha ?? null;
+      overlayBeta = volDiag.beta ?? null;
+      overlayAlphaPlusBeta = volDiag.alpha_plus_beta ?? null;
+      overlayUncondVar = volDiag.unconditional_var ?? null;
+    }
+
+    // Extract GARCH distribution from method name (e.g., "GARCH11-N" or "GARCH11-t")
+    const method = af.method;
+    if (typeof method === "string" && method.startsWith("GARCH")) {
+      if (method.includes("-t")) {
+        overlayGarchDistribution = "Student-t";
+      } else if (method.includes("-N")) {
+        overlayGarchDistribution = "Normal";
+      }
+    }
   }
 
   // Get model name for forecast overlay
@@ -929,6 +1336,26 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   const chartDataWithForecastBand = useMemo(() => {
     // Start with the EWMA-merged data
     let data = [...chartDataWithEwma];
+
+    // We only want to show the volatility band when the visible window
+    // actually ends on the latest fullData bar, similar to how chartData
+    // already hides future placeholders in that case.
+    if (fullData.length === 0 || data.length === 0) {
+      return data;
+    }
+
+    const latestFullDate = fullData[fullData.length - 1]?.date;
+    // Find the last *historical* (non-future) point in the current window
+    const lastHistorical = [...data].reverse().find((pt) => !pt.isFuture && pt.date);
+
+    const atLatestBar =
+      lastHistorical?.date && latestFullDate && lastHistorical.date === latestFullDate;
+
+    // If we are not at the last bar of the full series, skip adding any band.
+    // This removes the "floating" cone when you zoom/pan away from the right edge.
+    if (!atLatestBar) {
+      return data;
+    }
     
     // If we have forecast overlay data, add band values to relevant points
     if (overlayDate && overlayCenter != null && lastHistoricalPoint) {
@@ -948,6 +1375,14 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           forecastLower: overlayLower,
           forecastUpper: overlayUpper,
           forecastModelName,
+          forecastMuStar: overlayMuStar,
+          forecastSigma: overlaySigma,
+          forecastOmega: overlayOmega,
+          forecastAlpha: overlayAlpha,
+          forecastBeta: overlayBeta,
+          forecastAlphaPlusBeta: overlayAlphaPlusBeta,
+          forecastUncondVar: overlayUncondVar,
+          forecastGarchDistribution: overlayGarchDistribution,
         }];
         // Sort by date to maintain order
         data.sort((a, b) => a.date.localeCompare(b.date));
@@ -982,6 +1417,14 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               forecastLower: overlayLower,
               forecastUpper: overlayUpper,
               forecastModelName,
+              forecastMuStar: overlayMuStar,
+              forecastSigma: overlaySigma,
+              forecastOmega: overlayOmega,
+              forecastAlpha: overlayAlpha,
+              forecastBeta: overlayBeta,
+              forecastAlphaPlusBeta: overlayAlphaPlusBeta,
+              forecastUncondVar: overlayUncondVar,
+              forecastGarchDistribution: overlayGarchDistribution,
             };
           }
           
@@ -1003,7 +1446,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     }
     
     return data;
-  }, [chartDataWithEwma, overlayDate, overlayCenter, overlayLower, overlayUpper, lastHistoricalPoint, forecastModelName]);
+  }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName]);
 
   // Compute Y-axis domain that includes EWMA values when overlay is active
   const priceYDomain = useMemo(() => {
@@ -1226,7 +1669,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       }
     });
 
-    console.log('[PriceChart] tradeMarkers:', markers.length, 'markers');
     return markers;
   }, [tradeOverlays]);
 
@@ -1286,6 +1728,17 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return map;
   }, [chartDataWithForecastBand]);
 
+  // Map from date -> index in fullData for anchoring zoom/pan
+  const dateToIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    fullData.forEach((pt, idx) => {
+      if (pt.date) {
+        map.set(pt.date, idx);
+      }
+    });
+    return map;
+  }, [fullData]);
+
   // Helper to get Y coordinate for a trade marker
   // Entry markers get a small offset so they're visible even on same-day trades
   const getMarkerY = useCallback((marker: TradeMarker): number | undefined => {
@@ -1300,28 +1753,48 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return close; // exits sit exactly on the close price
   }, [dateToClose]);
 
-  // Handle chart click - opens trade detail card if there's a close event on hovered date
-  const handleChartClick = useCallback(() => {
-    if (!hoveredDate) return;
-    
-    const events = trading212EventsByDate?.get(hoveredDate) ?? [];
-    const closeEvent = events.find(e => e.type === 'close');
-    
-    if (closeEvent && closeEvent.exitDate && closeEvent.exitPrice != null) {
-      setSelectedTrade({
-        side: closeEvent.side,
-        entryDate: closeEvent.entryDate,
-        entryPrice: closeEvent.entryPrice,
-        exitDate: closeEvent.exitDate,
-        exitPrice: closeEvent.exitPrice,
-        netPnl: closeEvent.netPnl ?? 0,
-        margin: closeEvent.margin ?? 0,
-        runId: '',
-        runLabel: closeEvent.runLabel,
+  // Update the chart click handler ref whenever dependencies change
+  // This ensures the onClick in useMemo always has access to current values
+  useEffect(() => {
+    chartClickHandlerRef.current = (state: any) => {
+      if (!state) return;
+
+      // Prefer activeLabel (what Recharts provides on click)
+      const date: string | undefined =
+        (state.activeLabel as string | undefined) ??
+        state.activePayload?.[0]?.payload?.date;
+
+      if (!date) return;
+
+      // Look up all Trading212 events for this date
+      const events = trading212EventsByDate?.get(date) ?? [];
+      if (events.length === 0) return;
+
+      // Prefer a 'close' event for the banner; if none, fall back to first event
+      const primaryClose = events.find((e) => e.type === "close") ?? events[0];
+
+      // For days with only opens, treat exit as equal to entry
+      const exitDate = primaryClose.exitDate ?? date;
+      const exitPrice = primaryClose.exitPrice ?? primaryClose.entryPrice;
+
+      const detail: TradeDetailData = {
+        side: primaryClose.side,
+        entryDate: primaryClose.entryDate,
+        entryPrice: primaryClose.entryPrice,
+        exitDate,
+        exitPrice,
+        netPnl: primaryClose.netPnl ?? 0,
+        margin: primaryClose.margin ?? 0,
+        runId: "",
+        runLabel: primaryClose.runLabel,
         ticker: symbol,
-      });
-    }
-  }, [hoveredDate, trading212EventsByDate, symbol]);
+        date,
+        events,
+      };
+
+      setSelectedTrade(detail);
+    };
+  }, [trading212EventsByDate, symbol]);
 
   // Determine line color from current range performance
   const latestRangePerf = perfByRange[selectedRange];
@@ -1334,10 +1807,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   // Memoized chart element to prevent re-renders when dropdown states change
   const memoizedChartElement = useMemo(() => {
     if (loading || error || chartDataWithEwma.length === 0) return null;
-    
-    // Debug logging for trade markers
-    console.log('[PriceChart] Render - chartDataWithForecastBand:', chartDataWithForecastBand.length, 'points');
-    console.log('[PriceChart] Render - tradeMarkers:', tradeMarkers.length, 'markers');
     
     return (
       <div className="relative">
@@ -1423,26 +1892,85 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             animation: refLineFade 0.6s ease-out forwards;
           }
         `}</style>
-        {/* Combined Price and Volume Chart - wrapped for click handling */}
-        <div 
-          onClick={handleChartClick}
-          onMouseLeave={() => setHoveredDate(null)}
-          style={{ cursor: hoveredDate && trading212EventsByDate?.get(hoveredDate)?.some(e => e.type === 'close') ? 'pointer' : 'default' }}
+        {/* Combined Price and Volume Chart */}
+        <div
+          ref={chartContainerRef}
+          className="w-full"
+          style={{ cursor: isDraggingRef.current ? 'grabbing' : 'grab' }}
+          onMouseEnter={() => {
+            isHoveringChartRef.current = true;
+          }}
+          onMouseLeave={() => {
+            isHoveringChartRef.current = false;
+            // Cancel dragging when leaving chart area
+            isDraggingRef.current = false;
+            dragStartXRef.current = null;
+            dragStartWindowRef.current = null;
+          }}
+          onMouseDown={(e) => {
+            if (fullData.length === 0) return;
+
+            // Start drag
+            isDraggingRef.current = true;
+            dragStartXRef.current = e.clientX;
+
+            const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+            if (win) {
+              dragStartWindowRef.current = { start: win.start, end: win.end };
+            } else {
+              dragStartWindowRef.current = null;
+            }
+
+            // Prevent text selection during drag
+            e.preventDefault();
+          }}
+          onMouseUp={() => {
+            isDraggingRef.current = false;
+            dragStartXRef.current = null;
+            dragStartWindowRef.current = null;
+          }}
+          onMouseMove={(e) => {
+            if (!isDraggingRef.current || !dragStartWindowRef.current) return;
+            if (!chartContainerRef.current) return;
+
+            const rect = chartContainerRef.current.getBoundingClientRect();
+            const windowSize =
+              dragStartWindowRef.current.end - dragStartWindowRef.current.start + 1;
+            if (windowSize <= 0 || rect.width <= 0) return;
+
+            const dxPixels = e.clientX - (dragStartXRef.current ?? e.clientX);
+            const pixelsPerBar = rect.width / windowSize;
+            if (!pixelsPerBar || !isFinite(pixelsPerBar)) return;
+
+            const barOffset = Math.round(-dxPixels / pixelsPerBar);
+            if (barOffset !== 0) {
+              applyPanOffset(barOffset);
+              // Update drag start to current position for continuous dragging
+              dragStartXRef.current = e.clientX;
+              dragStartWindowRef.current = {
+                start: dragStartWindowRef.current.start + barOffset,
+                end: dragStartWindowRef.current.end + barOffset,
+              };
+            }
+          }}
         >
-        <ResponsiveContainer width="100%" height={500}>
-          <ComposedChart
-            data={chartDataWithForecastBand}
-            margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
-            onMouseMove={(state: any) => {
-              // Track hovered date for click handling
-              if (state && state.activePayload && state.activePayload.length > 0) {
-                const date = state.activePayload[0]?.payload?.date;
-                if (date && date !== hoveredDate) {
-                  setHoveredDate(date);
-                }
+          <ResponsiveContainer width="100%" height={500}>
+            <ComposedChart
+              data={chartDataWithForecastBand}
+              margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
+              onClick={(state: any) => {
+                // Call the handler through ref to get latest values
+                chartClickHandlerRef.current?.(state);
+              }}
+              onMouseMove={(state: any) => {
+                const activeLabel = state?.activeLabel as string | undefined;
+                if (activeLabel) {
+                  const idx = dateToIndex.get(activeLabel);
+                  hoveredIndexRef.current = idx ?? null;
+                } else {
+                  hoveredIndexRef.current = null;
               }
             }}
-            onMouseLeave={() => setHoveredDate(null)}
           >
             <defs>
               <linearGradient
@@ -1994,8 +2522,8 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 />
               );
             })}
-          </ComposedChart>
-        </ResponsiveContainer>
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
       </div>
     );
@@ -2018,8 +2546,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     getMarkerY,
     trading212EventsByDate,
     dateToClose,
-    handleChartClick,
-    hoveredDate,
   ]);
 
   return (
@@ -2793,20 +3319,39 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         {!horizonCoverage && <div />}
       </div>
       
-      {/* Zoom Controls Row */}
+      {/* Zoom & Pan Controls Row */}
       <div className="flex items-center gap-4 mb-2 mt-6">
         <div className="flex items-center gap-2">
           <label className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
             Zoom
           </label>
+
+          {/* Zoom Out */}
           <button
-            onClick={zoomIn}
-            disabled={loading || fullData.length === 0}
+            onClick={zoomOut}
+            disabled={!canZoomOut || loading || fullData.length === 0}
             className={`
               w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
               ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400'
+                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
+              }
+              disabled:cursor-not-allowed
+            `}
+            title="Zoom out"
+          >
+            −
+          </button>
+
+          {/* Zoom In */}
+          <button
+            onClick={zoomIn}
+            disabled={!canZoomIn || loading || fullData.length === 0}
+            className={`
+              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
+              ${isDarkMode 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
               }
               disabled:cursor-not-allowed
             `}
@@ -2814,20 +3359,56 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           >
             +
           </button>
+
+          {/* Pan Left */}
           <button
-            onClick={zoomOut}
-            disabled={loading || fullData.length === 0}
+            onClick={panLeft}
+            disabled={!canPanLeft || loading || fullData.length === 0}
             className={`
               w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
               ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400'
+                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
               }
               disabled:cursor-not-allowed
             `}
-            title="Zoom out"
+            title="Scroll left"
           >
-            −
+            ‹
+          </button>
+
+          {/* Pan Right */}
+          <button
+            onClick={panRight}
+            disabled={!canPanRight || loading || fullData.length === 0}
+            className={`
+              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
+              ${isDarkMode 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
+              }
+              disabled:cursor-not-allowed
+            `}
+            title="Scroll right"
+          >
+            ›
+          </button>
+
+          {/* Reset */}
+          <button
+            onClick={resetViewWindow}
+            disabled={!isZoomed || loading || fullData.length === 0}
+            className={`
+              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
+              ${isDarkMode 
+                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
+                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
+              }
+              disabled:cursor-not-allowed
+            `}
+            title="Reset zoom"
+          >
+            ⟳
           </button>
         </div>
       </div>
@@ -3011,11 +3592,6 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   // Get Trading212 events for this date from the map (opens AND closes)
   const t212Events = trading212EventsByDate?.get(labelStr) ?? [];
   
-  // Debug logging for T212 events
-  if (t212Events.length > 0) {
-    console.log('[Tooltip T212]', labelStr, t212Events);
-  }
-  
   // Legacy: Extract trade markers from scatter payload (for backwards compat)
   const tradeMarkers: TradeMarkerPointForTooltip[] = (payload ?? [])
     .map((p) => p.payload?.marker as TradeMarkerPointForTooltip | undefined)
@@ -3075,6 +3651,64 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Lower</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
                     ${data.forecastLower.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {/* μ* and σ parameters */}
+              {data.forecastMuStar != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>μ*</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastMuStar.toExponential(2)}
+                  </span>
+                </div>
+              )}
+              {data.forecastSigma != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>σ</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastSigma.toFixed(4)}
+                  </span>
+                </div>
+              )}
+              {/* GARCH volatility parameters */}
+              {data.forecastOmega != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>ω</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastOmega.toExponential(2)}
+                  </span>
+                </div>
+              )}
+              {data.forecastAlpha != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>α</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastAlpha.toFixed(4)}
+                  </span>
+                </div>
+              )}
+              {data.forecastBeta != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>β</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastBeta.toFixed(4)}
+                  </span>
+                </div>
+              )}
+              {data.forecastAlphaPlusBeta != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>α+β</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastAlphaPlusBeta.toFixed(4)}
+                  </span>
+                </div>
+              )}
+              {data.forecastUncondVar != null && (
+                <div className="flex justify-between gap-3">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>σ²∞</span>
+                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    {data.forecastUncondVar.toExponential(2)}
                   </span>
                 </div>
               )}

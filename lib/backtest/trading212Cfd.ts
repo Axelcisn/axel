@@ -42,6 +42,8 @@ export interface Trading212CfdPosition {
   exposure: number;          // quantity * entryPrice
   margin: number;            // exposure / leverage
   entryDate: string;
+  swapFees: number;          // per-position swap accumulation
+  openingEquity: number;     // equity at the time the trade was opened
 }
 
 export interface Trading212AccountSnapshot {
@@ -70,6 +72,9 @@ export interface Trading212Trade {
   swapFees: number;
   fxFees: number;
   netPnl: number;
+  margin: number;      // exact margin used for this position
+  openingEquity?: number;  // account equity before this trade opened
+  closingEquity?: number;  // account equity after this trade closed
 }
 
 export interface Trading212SimulationResult {
@@ -201,8 +206,8 @@ export function simulateTrading212Cfd(
       const diff = price - position.entryPrice;
       const grossPnl =
         position.side === "long" ? diff * position.quantity : -diff * position.quantity;
-      const swapFees = 0; // for now, we do not separately break out per-trade swap; we'll accumulate below
-      const fxFees = 0;   // FX fee modelling left for future
+      const swapFees = position.swapFees; // use accumulated swap for this position
+      const fxFees = 0;   // FX fee modelling left for future in stop-out path
       const netPnl = grossPnl - fxFees;
 
       realisedPnl += netPnl;
@@ -215,6 +220,8 @@ export function simulateTrading212Cfd(
         freeCash = 0;
       }
 
+      const closingEquity = freeCash; // no open position anymore
+
       trades.push({
         entryDate: position.entryDate,
         exitDate: bar.date,
@@ -226,6 +233,9 @@ export function simulateTrading212Cfd(
         swapFees,
         fxFees,
         netPnl,
+        margin: position.margin,
+        openingEquity: position.openingEquity,
+        closingEquity,
       });
 
       position = null;
@@ -251,6 +261,9 @@ export function simulateTrading212Cfd(
       realisedPnl += swapFee;
       swapFeesAccrued += swapFee;
       equity += swapFee;
+
+      // Accumulate per-position swap
+      position.swapFees += swapFee;
     }
 
     // 5) Decide action based on signal and current position
@@ -279,6 +292,8 @@ export function simulateTrading212Cfd(
       freeCash += pos.margin + netPnl;
       marginUsed = 0;
 
+      const closingEquity = freeCash; // flat after closing, so equity == freeCash
+
       trades.push({
         entryDate: pos.entryDate,
         exitDate: bar.date,
@@ -287,9 +302,12 @@ export function simulateTrading212Cfd(
         exitPrice: price,
         quantity: pos.quantity,
         grossPnl,
-        swapFees: 0,
+        swapFees: pos.swapFees,   // per-position swap
         fxFees,
         netPnl,
+        margin: pos.margin,
+        openingEquity: pos.openingEquity,
+        closingEquity,
       });
     };
 
@@ -317,6 +335,8 @@ export function simulateTrading212Cfd(
         exposure,
         margin,
         entryDate: bar.date,
+        swapFees: 0,           // start with no swap fees
+        openingEquity: equity, // equity BEFORE locking margin
       };
 
       freeCash -= margin;
