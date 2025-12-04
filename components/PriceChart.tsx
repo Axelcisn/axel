@@ -1053,12 +1053,11 @@ export const PriceChart: React.FC<PriceChartProps> = ({
 
   // Custom shape for open/close trade marker (pair glyph: ●──●)
   const PairTradeMarkerShape: React.FC<any> = (props) => {
-    const { cx, cy, marker, isDarkMode: isDark, onMarkerClick } = props as {
+    const { cx, cy, marker, isDarkMode: isDark } = props as {
       cx: number;
       cy: number;
       marker: TradeMarker;
       isDarkMode: boolean;
-      onMarkerClick?: (marker: TradeMarker) => void;
     };
 
     if (!marker) return null;
@@ -1077,21 +1076,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     const offset = 8; // wider glyph
 
     return (
-      <g
-        style={{ cursor: 'pointer' }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onMarkerClick?.(marker);
-        }}
-      >
-        {/* Invisible hit area for easier clicking */}
-        <rect
-          x={cx - offset - 6}
-          y={cy - 8}
-          width={(offset * 2) + 12}
-          height={16}
-          fill="transparent"
-        />
+      <g>
         {/* Horizontal connector */}
         <line
           x1={cx - offset}
@@ -1117,47 +1102,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           fill={isDark ? 'rgba(15, 23, 42, 1)' : 'rgba(248, 250, 252, 1)'}
           stroke={sideColor}
           strokeWidth={1.8}
-        />
-      </g>
-    );
-  };
-
-  // Custom clickable dot shape for single markers
-  const ClickableDotShape: React.FC<any> = (props) => {
-    const { cx, cy, r, fill, stroke, strokeWidth, marker, onMarkerClick } = props as {
-      cx: number;
-      cy: number;
-      r: number;
-      fill: string;
-      stroke: string;
-      strokeWidth: number;
-      marker: TradeMarker;
-      onMarkerClick?: (marker: TradeMarker) => void;
-    };
-
-    return (
-      <g
-        style={{ cursor: 'pointer' }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onMarkerClick?.(marker);
-        }}
-      >
-        {/* Invisible hit area for easier clicking */}
-        <circle
-          cx={cx}
-          cy={cy}
-          r={r + 6}
-          fill="transparent"
-        />
-        {/* Visible dot */}
-        <circle
-          cx={cx}
-          cy={cy}
-          r={r}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth={strokeWidth}
         />
       </g>
     );
@@ -1328,70 +1272,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return map;
   }, [tradeOverlays]);
 
-  // Lookup map for full trade data (for detail card when clicking markers)
-  // Key: `runId|entryDate|exitDate`
-  const tradeDataLookup = useMemo(() => {
-    const map = new Map<string, TradeDetailData>();
-    
-    if (!tradeOverlays || tradeOverlays.length === 0) return map;
-
-    for (const overlay of tradeOverlays) {
-      for (const trade of overlay.trades) {
-        const key = `${overlay.runId}|${trade.entryDate}|${trade.exitDate}`;
-        map.set(key, {
-          side: trade.side,
-          entryDate: trade.entryDate,
-          entryPrice: trade.entryPrice,
-          exitDate: trade.exitDate,
-          exitPrice: trade.exitPrice,
-          netPnl: trade.netPnl,
-          margin: trade.margin,
-          runId: overlay.runId,
-          runLabel: overlay.label,
-          ticker: symbol,
-        });
-      }
-    }
-
-    return map;
-  }, [tradeOverlays, symbol]);
-
-  // Handle click on trade marker
-  const handleTradeMarkerClick = useCallback((marker: TradeMarker) => {
-    // Find the full trade data for this marker
-    // For exit/pair markers, we can find by runId + date (exit date)
-    // For entry markers, we need to find the trade that starts on this date
-    
-    if (!tradeOverlays) return;
-
-    for (const overlay of tradeOverlays) {
-      if (overlay.runId !== marker.runId) continue;
-      
-      for (const trade of overlay.trades) {
-        // Match by date: entry markers match entryDate, exit/pair match exitDate
-        const isMatch = marker.type === 'entry'
-          ? normalizeDateString(trade.entryDate) === marker.date
-          : normalizeDateString(trade.exitDate) === marker.date;
-        
-        if (isMatch && trade.side === marker.side) {
-          setSelectedTrade({
-            side: trade.side,
-            entryDate: trade.entryDate,
-            entryPrice: trade.entryPrice,
-            exitDate: trade.exitDate,
-            exitPrice: trade.exitPrice,
-            netPnl: trade.netPnl,
-            margin: trade.margin,
-            runId: overlay.runId,
-            runLabel: overlay.label,
-            ticker: symbol,
-          });
-          return;
-        }
-      }
-    }
-  }, [tradeOverlays, symbol]);
-
   // Map from date -> close price for ReferenceDot Y positioning
   const dateToClose = useMemo(() => {
     const map = new Map<string, number>();
@@ -1522,6 +1402,32 @@ export const PriceChart: React.FC<PriceChartProps> = ({
           <ComposedChart
             data={chartDataWithForecastBand}
             margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
+            onClick={(state: any) => {
+              // When clicking on the chart, check if there are trades on the hovered date
+              if (state && state.activePayload && state.activePayload.length > 0) {
+                const clickedDate = state.activePayload[0]?.payload?.date;
+                if (clickedDate) {
+                  // Check if there are any close events on this date (to show the trade card)
+                  const events = trading212EventsByDate?.get(clickedDate) ?? [];
+                  const closeEvent = events.find(e => e.type === 'close');
+                  if (closeEvent && closeEvent.exitDate && closeEvent.exitPrice != null) {
+                    // Open the trade detail card for this close event
+                    setSelectedTrade({
+                      side: closeEvent.side,
+                      entryDate: closeEvent.entryDate,
+                      entryPrice: closeEvent.entryPrice,
+                      exitDate: closeEvent.exitDate,
+                      exitPrice: closeEvent.exitPrice,
+                      netPnl: closeEvent.netPnl ?? 0,
+                      margin: closeEvent.margin ?? 0,
+                      runId: '',
+                      runLabel: closeEvent.runLabel,
+                      ticker: symbol,
+                    });
+                  }
+                }
+              }
+            }}
           >
             <defs>
               <linearGradient
@@ -2027,7 +1933,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       <PairTradeMarkerShape
                         {...dotProps}
                         marker={m}
-                        onMarkerClick={handleTradeMarkerClick}
                       />
                     )}
                   />
@@ -2067,18 +1972,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 <ReferenceDot
                   key={markerKey}
                   {...commonProps}
-                  r={0}
-                  shape={(dotProps: any) => (
-                    <ClickableDotShape
-                      {...dotProps}
-                      r={r}
-                      fill={fill}
-                      stroke={stroke}
-                      strokeWidth={1.5}
-                      marker={m}
-                      onMarkerClick={handleTradeMarkerClick}
-                    />
-                  )}
+                  r={r}
+                  fill={fill}
+                  stroke={stroke}
+                  strokeWidth={1.5}
                 />
               );
             })}
@@ -2105,7 +2002,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     getMarkerY,
     trading212EventsByDate,
     dateToClose,
-    handleTradeMarkerClick,
   ]);
 
   return (
