@@ -3243,15 +3243,20 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         {/* Trading212 Events Section (opens AND closes) */}
         {t212Events.length > 0 && (
           <div className="px-4 py-3">
-            {/* Section Header */}
-            <div className="flex items-center gap-1.5 mb-2">
-              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-sky-400' : 'bg-sky-500'}`} />
-              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                isDarkMode ? 'text-sky-400' : 'text-sky-600'
-              }`}>
-                Trading212 Trades
-              </span>
-            </div>
+            {/* Section Header - derive run label from first event (solo mode) */}
+            {(() => {
+              const headerRunLabel = t212Events.length > 0 ? t212Events[0].runLabel : 'EWMA';
+              return (
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-sky-400' : 'bg-sky-500'}`} />
+                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${
+                    isDarkMode ? 'text-sky-400' : 'text-sky-600'
+                  }`}>
+                    {`Portfolio – ${headerRunLabel}`}
+                  </span>
+                </div>
+              );
+            })()}
             
             <div className="space-y-2">
               {t212Events.map((e, idx) => {
@@ -3315,9 +3320,6 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                           </span>
                         )}
                       </span>
-                    </div>
-                    <div className="text-[10px] text-slate-500 ml-3 mt-0.5">
-                      {e.runLabel}
                     </div>
                   </div>
                 );
