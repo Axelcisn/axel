@@ -3284,13 +3284,36 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                   );
                 }
 
-                // Close event - show exit with P&L
+                // Close event - show Open + Exit + P&L for the closed position
                 const pnl = e.netPnl ?? 0;
                 const pct = e.margin ? (pnl / e.margin) * 100 : 0;
                 const isGain = pnl >= 0;
 
                 return (
                   <div key={idx} className="flex flex-col text-[11px]">
+                    {/* Open row for this CLOSED position */}
+                    <div className="flex justify-between mb-0.5">
+                      <span className="flex items-center gap-1 text-slate-300">
+                        <span
+                          className={
+                            'inline-flex h-2 w-2 rounded-full ' +
+                            (isShort ? 'bg-rose-400' : 'bg-emerald-400')
+                          }
+                        />
+                        {openLabel}
+                        {/* show entryDate if different than the hovered date */}
+                        {labelStr !== e.entryDate && (
+                          <span className="ml-1 text-[9px] text-slate-500">
+                            {e.entryDate}
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono tabular-nums text-slate-200">
+                        ${e.entryPrice.toFixed(2)}
+                      </span>
+                    </div>
+
+                    {/* Exit row */}
                     <div className="flex justify-between">
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
@@ -3305,6 +3328,8 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                         ${e.exitPrice?.toFixed(2) ?? '—'}
                       </span>
                     </div>
+
+                    {/* P&L row */}
                     <div className="flex justify-between ml-3">
                       <span className="text-slate-400">P&amp;L</span>
                       <span
