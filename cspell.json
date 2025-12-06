@@ -130,7 +130,10 @@
     "Uncond",
     "yHat",
     "Hilferty",
-    "Coeff"
+    "Coeff",
+    "behaviour",
+    "Pnls",
+    "optimisation"
   ],
   "flagWords": []
 }

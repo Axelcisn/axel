@@ -42,13 +42,14 @@ export default function WatchlistPage() {
     setAlertsLoading(true);
     
     try {
-      const response = await fetch('/api/alerts/run');
+      // Use lightweight fires endpoint instead of heavy /api/alerts/run
+      const response = await fetch('/api/alerts/fires?days=7');
       if (!response.ok) {
         throw new Error(`Failed to load alerts: ${response.statusText}`);
       }
       
       const data = await response.json();
-      setFiredAlerts(data.fired || []);
+      setFiredAlerts(data.fires || []);
     } catch (error) {
       console.error('Failed to load alerts:', error);
     } finally {

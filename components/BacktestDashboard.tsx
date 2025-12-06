@@ -57,10 +57,14 @@ export default function BacktestDashboard() {
   const loadBacktestData = async (symbol: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/backtest?symbol=${symbol}`);
+      // Fetch main backtest data and summary in parallel
+      const [response, summaryResponse] = await Promise.all([
+        fetch(`/api/backtest?symbol=${symbol}`),
+        fetch(`/api/backtest?symbol=${symbol}&action=summary`)
+      ]);
+
       if (response.ok) {
         const data = await response.json();
-        const summaryResponse = await fetch(`/api/backtest?symbol=${symbol}&action=summary`);
         const summaryData = summaryResponse.ok ? await summaryResponse.json() : null;
         
         setBacktestData({

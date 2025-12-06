@@ -28,6 +28,7 @@ import {
   Trading212Signal,
   Trading212SimulationResult,
   Trading212Trade,
+  Trading212AccountSnapshot,
   simulateTrading212Cfd,
 } from '@/lib/backtest/trading212Cfd';
 
@@ -423,6 +424,13 @@ export default function TimingPage({ params }: TimingPageProps) {
         color: runColors[run.id],
         trades: run.result.trades,
       }));
+  }, [t212Runs, t212VisibleRunIds]);
+
+  // Get the account history for the currently visible T212 run (for equity chart)
+  const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
+    // Find the first visible run (we only show one at a time in solo mode)
+    const visibleRun = t212Runs.find((run) => t212VisibleRunIds.has(run.id));
+    return visibleRun?.result.accountHistory ?? null;
   }, [t212Runs, t212VisibleRunIds]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
@@ -4057,6 +4065,9 @@ export default function TimingPage({ params }: TimingPageProps) {
             onGbmLambdaChange: setGbmLambda,
           }}
           tradeOverlays={t212TradeOverlays}
+          t212AccountHistory={t212AccountHistory}
+          activeT212RunId={t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null}
+          onToggleT212Run={toggleT212RunVisibility}
         />
       </div>
       
@@ -4337,84 +4348,10 @@ export default function TimingPage({ params }: TimingPageProps) {
           Trading212 CFD Simulation
         </h3>
 
-        {/* Inputs */}
-          <div className="flex flex-wrap items-end gap-4 mb-4">
-            <div>
-              <label className={`block text-[11px] mb-1 ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                Initial equity
-              </label>
-              <input
-                type="number"
-                className={`px-3 py-1 rounded-full text-xs w-24 ${
-                  isDarkMode 
-                    ? 'bg-slate-900/80 border border-slate-700 text-white' 
-                    : 'bg-white border border-gray-300 text-gray-900'
-                }`}
-                value={t212InitialEquity}
-                onChange={(e) => setT212InitialEquity(Number(e.target.value) || 0)}
-              />
-            </div>
-
-            <div>
-              <label className={`block text-[11px] mb-1 ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                Leverage
-              </label>
-              <input
-                type="number"
-                className={`px-3 py-1 rounded-full text-xs w-16 ${
-                  isDarkMode 
-                    ? 'bg-slate-900/80 border border-slate-700 text-white' 
-                    : 'bg-white border border-gray-300 text-gray-900'
-                }`}
-                value={t212Leverage}
-                onChange={(e) => setT212Leverage(Number(e.target.value) || 1)}
-              />
-            </div>
-
-            <div>
-              <label className={`block text-[11px] mb-1 ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                Position %
-              </label>
-              <input
-                type="number"
-                className={`px-3 py-1 rounded-full text-xs w-16 ${
-                  isDarkMode 
-                    ? 'bg-slate-900/80 border border-slate-700 text-white' 
-                    : 'bg-white border border-gray-300 text-gray-900'
-                }`}
-                value={Math.round(t212PositionFraction * 100)}
-                onChange={(e) =>
-                  setT212PositionFraction(
-                    Math.min(1, Math.max(0, Number(e.target.value) / 100 || 0))
-                  )
-                }
-              />
-            </div>
-
-            <div>
-              <label className={`block text-[11px] mb-1 ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                Bias threshold (%)
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                className={`px-3 py-1 rounded-full text-xs w-20 ${
-                  isDarkMode 
-                    ? 'bg-slate-900/80 border border-slate-700 text-white' 
-                    : 'bg-white border border-gray-300 text-gray-900'
-                }`}
-                value={t212ThresholdPct * 100}
-                onChange={(e) =>
-                  setT212ThresholdPct((Number(e.target.value) || 0) / 100)
-                }
-              />
-            </div>
-
-            {/* Loading indicator */}
-            {isRunningT212Sim && (
-              <span className="text-[11px] text-slate-400 animate-pulse">Running sim...</span>
-            )}
-          </div>
+          {/* Loading indicator */}
+          {isRunningT212Sim && (
+            <span className="text-[11px] text-slate-400 animate-pulse">Running sim...</span>
+          )}
 
           {/* Error */}
           {t212Error && (
@@ -4442,7 +4379,6 @@ export default function TimingPage({ params }: TimingPageProps) {
                     <thead className={`border-b ${isDarkMode ? 'text-slate-400 border-slate-700/70' : 'text-gray-500 border-gray-200'}`}>
                       <tr>
                         <th className="py-1 pr-3 text-left">Label</th>
-                        <th className="py-1 pr-3 text-left">Signal</th>
                         <th className="py-1 pr-3 text-right">λ</th>
                         <th className="py-1 pr-3 text-right">Train%</th>
                         <th className="py-1 pr-3 text-right">Return</th>
@@ -4452,7 +4388,6 @@ export default function TimingPage({ params }: TimingPageProps) {
                         <th className="py-1 pr-3 text-right">Days</th>
                         <th className="py-1 pr-3 text-right">First Date</th>
                         <th className="py-1 pr-3 text-right">Last Date</th>
-                        <th className="py-1 pr-3 text-center">Chart</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4476,15 +4411,6 @@ export default function TimingPage({ params }: TimingPageProps) {
                           }`}
                         >
                           <td className="py-1.5 pr-3 font-medium">{run.label}</td>
-                          <td className="py-1.5 pr-3">
-                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${
-                              run.signalSource === "biased"
-                                ? isDarkMode ? 'bg-amber-900/50 text-amber-300' : 'bg-amber-100 text-amber-700'
-                                : isDarkMode ? 'bg-purple-900/50 text-purple-300' : 'bg-purple-100 text-purple-700'
-                            }`}>
-                              {run.signalSource === "biased" ? "Biased" : "Unbiased"}
-                            </span>
-                          </td>
                           <td className="py-1.5 pr-3 text-right font-mono">
                             {run.lambda != null ? run.lambda.toFixed(2) : "—"}
                           </td>
@@ -4519,26 +4445,6 @@ export default function TimingPage({ params }: TimingPageProps) {
                           </td>
                           <td className="py-1.5 pr-3 text-right font-mono">
                             {r.accountHistory.length > 0 ? r.accountHistory[r.accountHistory.length - 1].date : "—"}
-                          </td>
-                          <td className="py-1.5 pr-3 text-center">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleT212RunVisibility(run.id);
-                              }}
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
-                                t212VisibleRunIds.has(run.id)
-                                  ? isDarkMode
-                                    ? 'bg-cyan-600 text-white'
-                                    : 'bg-cyan-500 text-white'
-                                  : isDarkMode
-                                    ? 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                                    : 'bg-gray-200 text-gray-500 hover:bg-gray-300'
-                              }`}
-                            >
-                              {t212VisibleRunIds.has(run.id) ? 'On' : 'Off'}
-                            </button>
                           </td>
                         </tr>
                       );

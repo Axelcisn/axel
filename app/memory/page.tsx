@@ -39,27 +39,18 @@ export default function MemoryPage() {
         throw new Error(`Failed to load companies: ${response.statusText}`);
       }
 
+      // API now returns an array with hasCanonical/hasUploads flags included
       const companiesData = await response.json();
       
-      // Convert companies object to array and check for data files
-      const companiesArray: CompanyData[] = await Promise.all(
-        Object.values(companiesData).map(async (company: any) => {
-          // Check for data files existence
-          const [canonicalResponse, uploadsResponse] = await Promise.all([
-            fetch(`/api/canonical/${company.ticker}`).catch(() => ({ ok: false })),
-            fetch(`/api/upload?ticker=${company.ticker}`).catch(() => ({ ok: false }))
-          ]);
-
-          return {
-            company,
-            hasCanonical: canonicalResponse.ok,
-            hasUploads: uploadsResponse.ok,
-            hasForecasts: false, // We'll implement this check if needed
-            hasSpecs: false, // We'll implement this check if needed
-            lastModified: company.updatedAt || company.createdAt || new Date().toISOString()
-          };
-        })
-      );
+      // Map the enriched response directly - no per-company fetches needed
+      const companiesArray: CompanyData[] = (Array.isArray(companiesData) ? companiesData : Object.values(companiesData)).map((company: any) => ({
+        company,
+        hasCanonical: company.hasCanonical ?? false,
+        hasUploads: company.hasUploads ?? false,
+        hasForecasts: false, // We'll implement this check if needed
+        hasSpecs: false, // We'll implement this check if needed
+        lastModified: company.updatedAt || company.createdAt || new Date().toISOString()
+      }));
 
       setCompanies(companiesArray);
     } catch (err) {

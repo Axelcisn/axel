@@ -7,7 +7,7 @@
     "window": 504,
     "lambda_drift": 0,
     "coverage": 0.95,
-    "h": 1
+    "h": 2
   },
   "estimates": {
     "mu_star_hat": 0.0006263016027861552,
@@ -18,7 +18,7 @@
     "n": 503
   },
   "target": {
-    "h": 1,
+    "h": 2,
     "coverage": 0.95
   },
   "S_t": 245.27,
@@ -27,22 +27,23 @@
     "z_alpha": 1.959963986120195
   },
   "m_log": 5.502359644559846,
-  "s_scale": 0.01743137229886627,
-  "L_h": 237.03191218150081,
-  "U_h": 253.79440407980238,
-  "band_width_bp": 707.1829165967381,
+  "s_scale": 0.024651683115831356,
+  "L_h": 233.70116661245567,
+  "U_h": 257.41152161109414,
+  "band_width_bp": 683.4301748400374,
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "window": 504,
       "lambda_drift": 0,
       "coverage": 0.95,
-      "h": 1,
+      "h": 2,
       "method": "GBM-CC"
     },
     "regime_tag": null,
     "conformal": null
   },
   "locked": true,
-  "created_at": "2025-12-04T14:44:27.166Z"
+  "created_at": "2025-12-06T04:22:15.831Z",
+  "is_active": false
 }

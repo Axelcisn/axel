@@ -3,15 +3,14 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   ResponsiveContainer,
-  AreaChart,
   Area,
   XAxis,
   YAxis,
   Tooltip,
-  BarChart,
   Bar,
   Cell,
   ComposedChart,
+  CartesianGrid,
   ReferenceLine,
   ReferenceDot,
   Line,
@@ -25,6 +24,7 @@ import {
 } from "@/lib/chart/ranges";
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
 import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
+import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
 
 // Helper function to calculate target date (Date t+h) accounting for business days
 function calculateTargetDate(dateT: string | null, horizon: number): string | null {
@@ -73,7 +73,10 @@ interface ChartPoint {
   close?: number;
   volume?: number;
   volumeColor?: string;
+  volumeStroke?: string;
   isFuture?: boolean;
+  equity?: number | null;
+  equityDelta?: number | null;
   // Forecast band values
   forecastCenter?: number | null;
   forecastLower?: number | null;
@@ -241,6 +244,8 @@ export interface Trading212TradeInfo {
   netPnl: number;
   quantity: number;
   margin: number;  // exact margin used for this position (from engine)
+  swapFees?: number;  // overnight swap fees for this trade
+  grossPnl?: number;  // gross P&L before fees
 }
 
 /** Trade overlay for chart visualization */
@@ -266,6 +271,9 @@ interface PriceChartProps {
   ewmaReactionMapDropdown?: EwmaReactionMapDropdownProps;  // Dropdown controls for (⋯) button
   horizonCoverage?: HorizonCoverageProps;
   tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
+  t212AccountHistory?: Trading212AccountSnapshot[] | null;  // Equity curve from Trading212 simulation
+  activeT212RunId?: string | null;  // Currently active T212 run (for Chart toggle)
+  onToggleT212Run?: (runId: "ewma-unbiased" | "ewma-biased" | "ewma-biased-max") => void;  // Toggle T212 run visibility
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
@@ -279,7 +287,7 @@ const RANGE_OPTIONS: PriceRange[] = [
   "ALL",
 ];
 
-export const PriceChart: React.FC<PriceChartProps> = ({
+const PriceChartInner: React.FC<PriceChartProps> = ({
   symbol,
   className,
   horizon,
@@ -294,13 +302,30 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   ewmaReactionMapDropdown,
   horizonCoverage,
   tradeOverlays,
+  t212AccountHistory,
+  activeT212RunId,
+  onToggleT212Run,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
   
-  // EWMA overlay toggles
+  // EWMA overlay toggles - sync with activeT212RunId
   const [showEwmaOverlay, setShowEwmaOverlay] = useState(false);
   const [showEwmaBiasedOverlay, setShowEwmaBiasedOverlay] = useState(false);
+  
+  // Sync EWMA overlays with activeT212RunId
+  useEffect(() => {
+    if (activeT212RunId === "ewma-unbiased") {
+      setShowEwmaOverlay(true);
+      setShowEwmaBiasedOverlay(false);
+    } else if (activeT212RunId === "ewma-biased" || activeT212RunId === "ewma-biased-max") {
+      setShowEwmaOverlay(false);
+      setShowEwmaBiasedOverlay(true);
+    } else {
+      setShowEwmaOverlay(false);
+      setShowEwmaBiasedOverlay(false);
+    }
+  }, [activeT212RunId]);
   
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
@@ -313,6 +338,14 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   // Model Settings dropdown state (⋯ button next to Model)
   const [showModelSettingsDropdown, setShowModelSettingsDropdown] = useState(false);
   const modelSettingsDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Simulation Settings dropdown state
+  const [showSimulationSettingsDropdown, setShowSimulationSettingsDropdown] = useState(false);
+  const simulationSettingsDropdownRef = useRef<HTMLDivElement>(null);
+  const [simulationInitialEquity, setSimulationInitialEquity] = useState(5000);
+  const [simulationLeverage, setSimulationLeverage] = useState(5);
+  const [simulationPositionPct, setSimulationPositionPct] = useState(25);
+  const [simulationBiasThreshold, setSimulationBiasThreshold] = useState(0);
   
   // Click outside to close EWMA settings dropdown
   useEffect(() => {
@@ -337,6 +370,18 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showModelSettingsDropdown]);
+  
+  // Click outside to close Simulation settings dropdown
+  useEffect(() => {
+    if (!showSimulationSettingsDropdown) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (simulationSettingsDropdownRef.current && !simulationSettingsDropdownRef.current.contains(e.target as Node)) {
+        setShowSimulationSettingsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showSimulationSettingsDropdown]);
   
   // Determine whether the current overlay is in log domain
   const isLogDomain =
@@ -375,10 +420,32 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   // Ref to the chart container div
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
 
+  // React state used for UI only (show/hide zoom overlay)
+  const [isChartHovered, setIsChartHovered] = useState(false);
+
   // Drag-panning refs
   const isDraggingRef = useRef(false);
   const dragStartXRef = useRef<number | null>(null);
   const dragStartWindowRef = useRef<{ start: number; end: number } | null>(null);
+
+  // Shared hover state and smoothing for crosshair alignment
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const pendingHoverIndexRef = useRef<number | null>(null);
+  const hoverRafRef = useRef<number | null>(null);
+
+  // Date range dropdown state (TradingView-style)
+  type DateRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
+  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>("chart");
+  const [showDateRangeDropdown, setShowDateRangeDropdown] = useState(false);
+
+  // Insights tab state (TradingView-style)
+  type InsightTab =
+    | "Overview"
+    | "Performance"
+    | "Trades analysis"
+    | "Risk/performance ratios"
+    | "List of trades";
+  const [activeInsightTab, setActiveInsightTab] = useState<InsightTab>("Overview");
 
 
   // Build canonical date list from fullData
@@ -386,6 +453,54 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     () => fullData.map((p) => p.date),
     [fullData]
   );
+
+  // Compute date range label for dropdown
+  const dateRangeSpan = useMemo(() => {
+    const format = (d: string | null | undefined) => {
+      if (!d) return null;
+      const dt = new Date(d);
+      if (isNaN(dt.getTime())) return null;
+      return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    };
+
+    const latestDate = allDates[allDates.length - 1] ?? null;
+    const pickSpan = (days: number | null) => {
+      if (!latestDate || !allDates.length) return { start: null, end: null };
+      if (days == null || days >= allDates.length) {
+        return { start: allDates[0], end: latestDate };
+      }
+      const startIdx = Math.max(0, allDates.length - days);
+      return { start: allDates[startIdx], end: latestDate };
+    };
+
+    const currentWindow = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    const chartSpan =
+      currentWindow && fullData.length
+        ? {
+            start: fullData[currentWindow.start]?.date ?? null,
+            end: fullData[currentWindow.end]?.date ?? null,
+          }
+        : { start: allDates[0] ?? null, end: latestDate };
+
+    const presetSpan: Record<DateRangePreset, { start: string | null; end: string | null }> = {
+      chart: chartSpan,
+      "7d": pickSpan(7),
+      "30d": pickSpan(30),
+      "90d": pickSpan(90),
+      "365d": pickSpan(365),
+      all: pickSpan(null),
+      custom: chartSpan,
+    };
+
+    const span = presetSpan[dateRangePreset];
+    return {
+      raw: span,
+      label:
+        span.start && span.end
+          ? `${format(span.start) ?? span.start} — ${format(span.end) ?? span.end}`
+          : "No trades",
+    };
+  }, [allDates, dateRangePreset, fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Fetch full history once
   useEffect(() => {
@@ -855,18 +970,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   // Create extended chartData with future placeholders
   const chartData: ChartPoint[] = React.useMemo(() => {
     // Historical portion: same as rangeData, but mark as not future
-    const base = rangeData.map((p) => ({
-      date: p.date,
-      value: p.adj_close,
-      open: p.open,
-      high: p.high,
-      low: p.low,
-      close: p.close,
-      volume: p.volume,
-      // Determine volume color based on price movement (vintage palette)
-      volumeColor: (p.close && p.open && p.close > p.open) ? "#5B8A72" : "#B87567", // muted teal if bullish, dusty terracotta if bearish
-      isFuture: false as const,
-    }));
+    const base = rangeData.map((p) => {
+      const isBullish = p.close && p.open && p.close > p.open;
+      return {
+        date: p.date,
+        value: p.adj_close,
+        open: p.open,
+        high: p.high,
+        low: p.low,
+        close: p.close,
+        volume: p.volume,
+        // Determine volume color based on price movement (modern glass palette with borders)
+        volumeColor: isBullish ? "rgba(52, 211, 153, 0.35)" : "rgba(251, 113, 133, 0.35)",
+        volumeStroke: isBullish ? "rgba(16, 185, 129, 0.8)" : "rgba(244, 63, 94, 0.8)",
+        isFuture: false as const,
+      };
+    });
 
     // Determine if the current visible window ends at the latest bar in fullData.
     const latestFullDate =
@@ -886,13 +1005,23 @@ export const PriceChart: React.FC<PriceChartProps> = ({
       return base;
     }
 
-    // Calculate target date for forecast overlay if we have forecast data
+    // Calculate target date for forecast overlay; anchor to the latest historical bar
+    // so the cone always starts from the right edge of the visible price series.
     let forecastTargetDate: string | null = null;
+    const lastHistDateForForecast = rangeData.length > 0 ? rangeData[rangeData.length - 1].date : null;
     if (forecastOverlay?.activeForecast) {
       const af = forecastOverlay.activeForecast;
       const forecastDateT = af.date_t || af.target_date || af.date;
-      if (forecastDateT && h) {
-        forecastTargetDate = calculateTargetDate(forecastDateT, h);
+      // Anchor origin to whichever is later: the forecast's origin or the last visible bar.
+      const originDate =
+        lastHistDateForForecast && forecastDateT
+          ? lastHistDateForForecast > forecastDateT
+            ? lastHistDateForForecast
+            : forecastDateT
+          : forecastDateT || lastHistDateForForecast;
+
+      if (originDate && h) {
+        forecastTargetDate = calculateTargetDate(originDate, h);
       }
     }
 
@@ -1225,8 +1354,15 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   const af = forecastOverlay?.activeForecast;
 
   if (af && chartData.length > 0) {
-    // 1) Calculate target date (Date t+h) using business days
+    // 1) Calculate target date (Date t+h) using business days.
+    // Anchor origin to whichever is later: the forecast's origin or the last historical bar.
     const forecastDateT = af.date_t || af.target_date || af.date;
+    const originDate =
+      lastHistoricalPoint?.date && forecastDateT
+        ? lastHistoricalPoint.date > forecastDateT
+          ? lastHistoricalPoint.date
+          : forecastDateT
+        : forecastDateT || lastHistoricalPoint?.date || null;
     
     // Use horizon from forecast data if available, fallback to UI horizon
     // This prevents dots from disappearing when horizon changes but forecast hasn't updated yet
@@ -1234,7 +1370,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     const horizonValue = forecastHorizon || h || 1;
     
     // Calculate the target date (t+h) accounting for business days
-    const targetDate = calculateTargetDate(forecastDateT, horizonValue);
+    const targetDate = calculateTargetDate(originDate, horizonValue);
     const lastPoint = chartData[chartData.length - 1];
     
     // Use the target date if available, otherwise fall back to last chart date
@@ -1474,6 +1610,557 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     
     return [min - padding, max + padding];
   }, [chartDataWithForecastBand, showEwmaOverlay]);
+
+  // === Unified Chart Data with Equity ===
+  const chartDataWithEquity = useMemo(() => {
+    if (!t212AccountHistory || t212AccountHistory.length === 0) {
+      return chartDataWithForecastBand;
+    }
+
+    const equityMap = new Map<string, number>();
+    for (const snap of t212AccountHistory) {
+      const key = normalizeDateString(snap.date ?? "");
+      if (key && typeof snap.equity === "number" && Number.isFinite(snap.equity)) {
+        equityMap.set(key, snap.equity);
+      }
+    }
+
+    if (equityMap.size === 0) {
+      return chartDataWithForecastBand;
+    }
+
+    let lastEquity: number | null = null;
+
+    return chartDataWithForecastBand.map((pt) => {
+      const key = normalizeDateString(pt.date ?? "");
+      const direct = key ? equityMap.get(key) ?? null : null;
+      if (direct != null) {
+        lastEquity = direct;
+      }
+      return {
+        ...pt,
+        equity: direct ?? lastEquity,
+      };
+    });
+  }, [chartDataWithForecastBand, t212AccountHistory]);
+
+  const hoveredDate =
+    hoverIndex != null && hoverIndex >= 0 && hoverIndex < chartDataWithEquity.length
+      ? chartDataWithEquity[hoverIndex].date
+      : null;
+
+  const hasEquityData = useMemo(() => {
+    return chartDataWithEquity.some((pt) => pt.equity != null);
+  }, [chartDataWithEquity]);
+
+  // Equity deltas for histogram
+  const equityPanelData = useMemo(() => {
+    return chartDataWithEquity.map((pt, idx) => {
+      const prev = idx > 0 ? chartDataWithEquity[idx - 1].equity : pt.equity;
+      const delta = pt.equity != null && prev != null ? pt.equity - prev : null;
+      return { ...pt, equityDelta: delta };
+    });
+  }, [chartDataWithEquity]);
+
+  const equityYDomain = useMemo(() => {
+    const equities = chartDataWithEquity
+      .map((d) => d.equity)
+      .filter((e): e is number => e !== null && e !== undefined);
+
+    if (equities.length === 0) return [0, 100];
+
+    const min = Math.min(...equities);
+    const max = Math.max(...equities);
+    const padding = (max - min) * 0.05 || max * 0.05;
+
+    return [Math.max(0, min - padding), max + padding];
+  }, [chartDataWithEquity]);
+
+  const equityDeltaDomain = useMemo<[number, number]>(() => {
+    const deltas = equityPanelData
+      .map((d) => d.equityDelta)
+      .filter((v): v is number => v != null && Number.isFinite(v));
+    if (deltas.length === 0) return [-1, 1];
+    const absMax = Math.max(...deltas.map((v) => Math.abs(v)));
+    const pad = absMax * 0.2 || 1;
+    return [-(absMax + pad), absMax + pad];
+  }, [equityPanelData]);
+
+  // Risk/return metrics from equity series
+  const riskMetrics = useMemo(() => {
+    const series = equityPanelData
+      .filter((p) => p.equity != null && Number.isFinite(p.equity))
+      .map((p) => p.equity as number);
+    
+    if (series.length < 2) {
+      return {
+        sharpeRatio: null,
+        sortinoRatio: null,
+      };
+    }
+
+    const returns: number[] = [];
+    for (let i = 1; i < series.length; i++) {
+      if (series[i - 1] > 0) {
+        returns.push(series[i] / series[i - 1] - 1);
+      }
+    }
+
+    if (returns.length === 0) {
+      return {
+        sharpeRatio: null,
+        sortinoRatio: null,
+      };
+    }
+
+    const meanReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((a, r) => a + Math.pow(r - meanReturn, 2), 0) / returns.length;
+    const stdReturn = Math.sqrt(variance);
+
+    const negativeReturns = returns.filter((r) => r < 0);
+    const downsideVariance =
+      negativeReturns.length > 0
+        ? negativeReturns.reduce((a, r) => a + Math.pow(r, 2), 0) / negativeReturns.length
+        : 0;
+    const downsideDeviation = Math.sqrt(downsideVariance);
+
+    const sharpeRatio = stdReturn > 0 ? (meanReturn / stdReturn) * Math.sqrt(252) : null;
+    const sortinoRatio = downsideDeviation > 0 ? (meanReturn / downsideDeviation) * Math.sqrt(252) : null;
+
+    return {
+      sharpeRatio,
+      sortinoRatio,
+    };
+  }, [equityPanelData]);
+
+  // Fast lookup helpers for equity series
+  const equityLookup = useMemo(() => {
+    const byDate = new Map<string, number>();
+    const series: number[] = [];
+    chartDataWithEquity.forEach((pt) => {
+      if (pt.date && pt.equity != null && Number.isFinite(pt.equity)) {
+        byDate.set(pt.date, pt.equity);
+        series.push(pt.equity);
+      }
+    });
+    return {
+      byDate,
+      firstEquity: series.length ? series[0] : null,
+      lastEquity: series.length ? series[series.length - 1] : null,
+    };
+  }, [chartDataWithEquity]);
+
+  const equityStatsBase = useMemo(() => {
+    const series = chartDataWithEquity
+      .map((p) => p.equity)
+      .filter((v): v is number => v != null && Number.isFinite(v));
+
+    if (series.length === 0) {
+      return {
+        baseEquity: null,
+        maxDrawdownAbs: null,
+        maxDrawdownPct: null,
+      };
+    }
+
+    const baseEquity = series[0];
+    let peak = series[0];
+    let maxDrawdown = 0;
+    let peakAtMaxDrawdown = series[0];
+    for (const value of series) {
+      if (value > peak) peak = value;
+      const dd = (peak - value) / peak;
+      if (dd > maxDrawdown) {
+        maxDrawdown = dd;
+        peakAtMaxDrawdown = peak;
+      }
+    }
+    const maxDrawdownAbs = peakAtMaxDrawdown * maxDrawdown;
+
+    return {
+      baseEquity,
+      maxDrawdownAbs,
+      maxDrawdownPct: maxDrawdown,
+    };
+  }, [chartDataWithEquity]);
+
+  // Overview metrics (hover-aware P&L)
+  const equitySummary = useMemo(() => {
+    const { baseEquity, maxDrawdownAbs, maxDrawdownPct } = equityStatsBase;
+    const lastEquity = equityLookup.lastEquity;
+
+    if (baseEquity == null || lastEquity == null) {
+      return {
+        baseEquity: null,
+        currentEquity: null,
+        pnlAbs: null,
+        pnlPct: null,
+        maxDrawdownAbs: null,
+        maxDrawdownPct: null,
+      };
+    }
+
+    const currentEquity = (() => {
+      if (!hoveredDate) return lastEquity;
+      return equityLookup.byDate.get(hoveredDate) ?? lastEquity;
+    })();
+
+    const pnlAbs = currentEquity - baseEquity;
+    const pnlPct = baseEquity !== 0 ? pnlAbs / baseEquity : null;
+
+    return {
+      baseEquity,
+      currentEquity,
+      pnlAbs,
+      pnlPct,
+      maxDrawdownAbs: maxDrawdownAbs != null ? Math.abs(maxDrawdownAbs) : null,
+      maxDrawdownPct: maxDrawdownPct != null ? Math.abs(maxDrawdownPct) : null,
+    };
+  }, [equityStatsBase, equityLookup, hoveredDate]);
+
+  // Flatten all trades once for downstream tables
+  const flattenedTrades = useMemo(
+    () => tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [],
+    [tradeOverlays]
+  );
+
+  // Formatting helpers for the insight tables
+  const formatUsd = (v: number | null | undefined, opts?: { sign?: boolean; precision?: number }) => {
+    if (v == null || !Number.isFinite(v)) return "—";
+    const sign = opts?.sign ? (v > 0 ? "+" : v < 0 ? "−" : "") : "";
+    const precision = opts?.precision ?? 2;
+    return `${sign}$${Math.abs(v).toFixed(precision)}`;
+  };
+
+  const formatPct = (v: number | null | undefined, opts?: { precision?: number }) => {
+    if (v == null || !Number.isFinite(v)) return "";
+    const precision = opts?.precision ?? 2;
+    return `${(v * 100).toFixed(precision)}%`;
+  };
+
+  // Comprehensive trade summary for all tabs
+  const tradeSummary = useMemo(() => {
+    const allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
+    const longTrades = allTrades.filter((t) => t.side === "long");
+    const shortTrades = allTrades.filter((t) => t.side === "short");
+    
+    const totalTrades = allTrades.length;
+    const totalLong = longTrades.length;
+    const totalShort = shortTrades.length;
+    
+    // Check for open position (trade with no exit date or exit date in future)
+    const openTrades = allTrades.filter((t) => !t.exitDate);
+    const totalOpen = openTrades.length;
+    const openLong = openTrades.filter((t) => t.side === "long").length;
+    const openShort = openTrades.filter((t) => t.side === "short").length;
+    
+    // Closed trades for analysis
+    const closedTrades = allTrades.filter((t) => t.exitDate);
+    const closedLong = closedTrades.filter((t) => t.side === "long");
+    const closedShort = closedTrades.filter((t) => t.side === "short");
+    
+    // Winning/losing trades
+    const winningTrades = closedTrades.filter((t) => (t.netPnl ?? 0) > 0);
+    const losingTrades = closedTrades.filter((t) => (t.netPnl ?? 0) < 0);
+    const winningLong = closedLong.filter((t) => (t.netPnl ?? 0) > 0);
+    const losingLong = closedLong.filter((t) => (t.netPnl ?? 0) < 0);
+    const winningShort = closedShort.filter((t) => (t.netPnl ?? 0) > 0);
+    const losingShort = closedShort.filter((t) => (t.netPnl ?? 0) < 0);
+    
+    const profitableTrades = winningTrades.length;
+    const profitableLong = winningLong.length;
+    const profitableShort = winningShort.length;
+    
+    // Percent profitable
+    const pctProfitable = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
+    const pctProfitableLong = closedLong.length > 0 ? (winningLong.length / closedLong.length) * 100 : 0;
+    const pctProfitableShort = closedShort.length > 0 ? (winningShort.length / closedShort.length) * 100 : 0;
+    
+    // Gross profit & loss
+    const grossProfit = closedTrades.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+    const grossLoss = Math.abs(closedTrades.filter((t) => (t.netPnl ?? 0) < 0).reduce((a, t) => a + (t.netPnl ?? 0), 0));
+    const grossProfitLong = closedLong.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+    const grossLossLong = Math.abs(closedLong.filter((t) => (t.netPnl ?? 0) < 0).reduce((a, t) => a + (t.netPnl ?? 0), 0));
+    const grossProfitShort = closedShort.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+    const grossLossShort = Math.abs(closedShort.filter((t) => (t.netPnl ?? 0) < 0).reduce((a, t) => a + (t.netPnl ?? 0), 0));
+    
+    // Net profit
+    const netProfit = closedTrades.reduce((a, t) => a + (t.netPnl ?? 0), 0);
+    const netProfitLong = closedLong.reduce((a, t) => a + (t.netPnl ?? 0), 0);
+    const netProfitShort = closedShort.reduce((a, t) => a + (t.netPnl ?? 0), 0);
+    
+    // Profit factor
+    const profitFactor = grossLoss === 0 ? (grossProfit > 0 ? Infinity : null) : grossProfit / grossLoss;
+    const profitFactorLong = grossLossLong === 0 ? (grossProfitLong > 0 ? Infinity : null) : grossProfitLong / grossLossLong;
+    const profitFactorShort = grossLossShort === 0 ? (grossProfitShort > 0 ? Infinity : null) : grossProfitShort / grossLossShort;
+    
+    // Avg P&L
+    const avgPnl = closedTrades.length > 0 ? netProfit / closedTrades.length : 0;
+    const avgPnlLong = closedLong.length > 0 ? netProfitLong / closedLong.length : 0;
+    const avgPnlShort = closedShort.length > 0 ? netProfitShort / closedShort.length : 0;
+    
+    // Avg winning/losing trade
+    const avgWin = winningTrades.length > 0 ? winningTrades.reduce((a, t) => a + (t.netPnl ?? 0), 0) / winningTrades.length : 0;
+    const avgLoss = losingTrades.length > 0 ? Math.abs(losingTrades.reduce((a, t) => a + (t.netPnl ?? 0), 0) / losingTrades.length) : 0;
+    const avgWinLong = winningLong.length > 0 ? winningLong.reduce((a, t) => a + (t.netPnl ?? 0), 0) / winningLong.length : 0;
+    const avgLossLong = losingLong.length > 0 ? Math.abs(losingLong.reduce((a, t) => a + (t.netPnl ?? 0), 0) / losingLong.length) : 0;
+    const avgWinShort = winningShort.length > 0 ? winningShort.reduce((a, t) => a + (t.netPnl ?? 0), 0) / winningShort.length : 0;
+    const avgLossShort = losingShort.length > 0 ? Math.abs(losingShort.reduce((a, t) => a + (t.netPnl ?? 0), 0) / losingShort.length) : 0;
+    
+    // Ratio avg win / avg loss
+    const ratioWinLoss = avgLoss > 0 ? avgWin / avgLoss : 0;
+    const ratioWinLossLong = avgLossLong > 0 ? avgWinLong / avgLossLong : 0;
+    const ratioWinLossShort = avgLossShort > 0 ? avgWinShort / avgLossShort : 0;
+    
+    // Largest winning/losing trade
+    const largestWin = winningTrades.length > 0 ? Math.max(...winningTrades.map((t) => t.netPnl ?? 0)) : 0;
+    const largestLoss = losingTrades.length > 0 ? Math.abs(Math.min(...losingTrades.map((t) => t.netPnl ?? 0))) : 0;
+    const largestWinLong = winningLong.length > 0 ? Math.max(...winningLong.map((t) => t.netPnl ?? 0)) : 0;
+    const largestLossLong = losingLong.length > 0 ? Math.abs(Math.min(...losingLong.map((t) => t.netPnl ?? 0))) : 0;
+    const largestWinShort = winningShort.length > 0 ? Math.max(...winningShort.map((t) => t.netPnl ?? 0)) : 0;
+    const largestLossShort = losingShort.length > 0 ? Math.abs(Math.min(...losingShort.map((t) => t.netPnl ?? 0))) : 0;
+    
+    // Trade duration (in days) - calculate from entry/exit dates
+    const getDurationDays = (t: Trading212TradeInfo) => {
+      if (!t.entryDate || !t.exitDate) return 0;
+      const entry = new Date(t.entryDate);
+      const exit = new Date(t.exitDate);
+      return Math.round((exit.getTime() - entry.getTime()) / (1000 * 60 * 60 * 24));
+    };
+    
+    const durations = closedTrades.map(getDurationDays).filter((d) => d > 0);
+    const avgBarsInTrades = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
+    
+    const winningDurations = winningTrades.map(getDurationDays).filter((d) => d > 0);
+    const avgBarsInWinning = winningDurations.length > 0 ? winningDurations.reduce((a, b) => a + b, 0) / winningDurations.length : 0;
+    
+    const losingDurations = losingTrades.map(getDurationDays).filter((d) => d > 0);
+    const avgBarsInLosing = losingDurations.length > 0 ? losingDurations.reduce((a, b) => a + b, 0) / losingDurations.length : 0;
+    
+    // Initial capital (from first account snapshot if available)
+    const initialCapital = t212AccountHistory && t212AccountHistory.length > 0 ? t212AccountHistory[0].equity : 0;
+    
+    // Open P&L (unrealized from last snapshot)
+    const lastSnapshot = t212AccountHistory && t212AccountHistory.length > 0 ? t212AccountHistory[t212AccountHistory.length - 1] : null;
+    const openPnl = lastSnapshot?.unrealisedPnl ?? 0;
+    
+    // Swap fees total
+    const swapFeesTotal = closedTrades.reduce((a, t) => a + (t.swapFees ?? 0), 0);
+    
+    return {
+      // Overview
+      totalTrades,
+      profitableTrades,
+      profitFactor,
+      
+      // Performance
+      initialCapital,
+      openPnl,
+      netProfit,
+      netProfitLong,
+      netProfitShort,
+      grossProfit,
+      grossLoss,
+      grossProfitLong,
+      grossLossLong,
+      grossProfitShort,
+      grossLossShort,
+      swapFeesTotal,
+      
+      // Trades analysis
+      totalLong,
+      totalShort,
+      totalOpen,
+      openLong,
+      openShort,
+      winningTrades: winningTrades.length,
+      losingTrades: losingTrades.length,
+      winningLong: winningLong.length,
+      losingLong: losingLong.length,
+      winningShort: winningShort.length,
+      losingShort: losingShort.length,
+      pctProfitable,
+      pctProfitableLong,
+      pctProfitableShort,
+      avgPnl,
+      avgPnlLong,
+      avgPnlShort,
+      avgWin,
+      avgLoss,
+      avgWinLong,
+      avgLossLong,
+      avgWinShort,
+      avgLossShort,
+      ratioWinLoss,
+      ratioWinLossLong,
+      ratioWinLossShort,
+      largestWin,
+      largestLoss,
+      largestWinLong,
+      largestLossLong,
+      largestWinShort,
+      largestLossShort,
+      avgBarsInTrades,
+      avgBarsInWinning,
+      avgBarsInLosing,
+      
+      // Risk/performance ratios
+      profitFactorLong,
+      profitFactorShort,
+      
+      // Raw trades for List of trades
+      allTrades: allTrades.sort((a, b) => {
+        // Sort by entry date descending (newest first)
+        const dateA = a.entryDate || "";
+        const dateB = b.entryDate || "";
+        return dateB.localeCompare(dateA);
+      }),
+    };
+  }, [tradeOverlays, t212AccountHistory]);
+
+  // Additional derived stats for the insight tabs (buy & hold, size, risk ratios)
+  const insightStats = useMemo(() => {
+    const priceSeries = chartDataWithEquity.filter((p) => p.close != null);
+    const firstPrice = priceSeries[0]?.close ?? null;
+    const lastPrice = priceSeries[priceSeries.length - 1]?.close ?? null;
+
+    const buyHoldPct =
+      firstPrice != null && lastPrice != null && firstPrice !== 0
+        ? (lastPrice - firstPrice) / firstPrice
+        : null;
+    const buyHoldAbs =
+      buyHoldPct != null && tradeSummary.initialCapital != null
+        ? tradeSummary.initialCapital * buyHoldPct
+        : null;
+
+    const maxContractsHeld = Math.max(
+      0,
+      ...flattenedTrades.map((t) => {
+        const qty = t.quantity ?? 0;
+        return Number.isFinite(qty) ? Math.abs(qty) : 0;
+      })
+    );
+
+    const riskRatios = {
+      sharpe: riskMetrics.sharpeRatio,
+      sortino: riskMetrics.sortinoRatio,
+      profitFactorAll: tradeSummary.profitFactor ?? null,
+      profitFactorLong: tradeSummary.profitFactorLong ?? null,
+      profitFactorShort: tradeSummary.profitFactorShort ?? null,
+      marginCalls: 0,
+    };
+
+    return { buyHoldAbs, buyHoldPct, maxContractsHeld, riskRatios };
+  }, [chartDataWithEquity, flattenedTrades, riskMetrics, tradeSummary]);
+
+  // Equity run-up / drawdown stats (value + duration)
+  const performanceSeriesStats = useMemo(() => {
+    const series = chartDataWithEquity
+      .filter((p) => p.equity != null && Number.isFinite(p.equity as number) && p.date)
+      .map((p) => ({ equity: p.equity as number, date: new Date(p.date as string) }))
+      .filter((p) => !Number.isNaN(p.date.getTime()))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
+
+    if (series.length < 2) {
+      return {
+        avgRunUpDuration: null,
+        maxRunUpDuration: null,
+        avgDrawdownDuration: null,
+        maxDrawdownDuration: null,
+        avgRunUpValue: null,
+        maxRunUpValue: null,
+        avgDrawdownValue: null,
+        maxDrawdownValue: equityStatsBase.maxDrawdownAbs ?? null,
+      };
+    }
+
+    const dayDiff = (prev: { date: Date }, curr: { date: Date }) => {
+      const diff = Math.max(1, Math.round((curr.date.getTime() - prev.date.getTime()) / (1000 * 60 * 60 * 24)));
+      return Number.isFinite(diff) ? diff : 1;
+    };
+
+    let upLen = 0;
+    let upVal = 0;
+    let downLen = 0;
+    let downVal = 0;
+    const upLens: number[] = [];
+    const upVals: number[] = [];
+    const downLens: number[] = [];
+    const downVals: number[] = [];
+
+    for (let i = 1; i < series.length; i++) {
+      const d = series[i].equity - series[i - 1].equity;
+      const span = dayDiff(series[i - 1], series[i]);
+      if (d > 0) {
+        upLen += span;
+        upVal += d;
+        if (downLen > 0) {
+          downLens.push(downLen);
+          downVals.push(downVal);
+          downLen = 0;
+          downVal = 0;
+        }
+      } else if (d < 0) {
+        downLen += span;
+        downVal += Math.abs(d);
+        if (upLen > 0) {
+          upLens.push(upLen);
+          upVals.push(upVal);
+          upLen = 0;
+          upVal = 0;
+        }
+      } else {
+        // flat day ends streaks
+        if (upLen > 0) {
+          upLens.push(upLen);
+          upVals.push(upVal);
+          upLen = 0;
+          upVal = 0;
+        }
+        if (downLen > 0) {
+          downLens.push(downLen);
+          downVals.push(downVal);
+          downLen = 0;
+          downVal = 0;
+        }
+      }
+    }
+    if (upLen > 0) {
+      upLens.push(upLen);
+      upVals.push(upVal);
+    }
+    if (downLen > 0) {
+      downLens.push(downLen);
+      downVals.push(downVal);
+    }
+
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    const max = (arr: number[]) => (arr.length ? Math.max(...arr) : null);
+
+    return {
+      avgRunUpDuration: avg(upLens),
+      maxRunUpDuration: max(upLens),
+      avgDrawdownDuration: avg(downLens),
+      maxDrawdownDuration: max(downLens),
+      avgRunUpValue: avg(upVals),
+      maxRunUpValue: max(upVals),
+      avgDrawdownValue: avg(downVals),
+      maxDrawdownValue: equityStatsBase.maxDrawdownAbs ?? max(downVals) ?? null,
+    };
+  }, [chartDataWithEquity, equityStatsBase.maxDrawdownAbs]);
+
+  // Helpers for the performance table
+  const perfInitialEquity = tradeSummary.initialCapital ?? equityStatsBase.baseEquity ?? 0;
+  const pctOfPerfInitial = (v: number | null | undefined) => {
+    if (perfInitialEquity <= 0 || v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
+    return formatPct(v / perfInitialEquity);
+  };
+  const durationLabel = (v: number | null | undefined) => {
+    if (v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
+    return `${Math.round(v)} days`;
+  };
+  const perfAvgDrawdownValue = performanceSeriesStats.avgDrawdownValue != null ? -performanceSeriesStats.avgDrawdownValue : null;
+  const perfMaxDrawdownValue = performanceSeriesStats.maxDrawdownValue != null ? -performanceSeriesStats.maxDrawdownValue : null;
 
   // Stable reference for ewma maximized state
   const ewmaIsMaximized = ewmaReactionMapDropdown?.isMaximized ?? false;
@@ -1728,7 +2415,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     return map;
   }, [chartDataWithForecastBand]);
 
-  // Map from date -> index in fullData for anchoring zoom/pan
+  // Map from date -> index in fullData (for zoom anchoring)
   const dateToIndex = useMemo(() => {
     const map = new Map<string, number>();
     fullData.forEach((pt, idx) => {
@@ -1738,6 +2425,75 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     });
     return map;
   }, [fullData]);
+
+  // Map from date -> index in current chart data for fast hover updates
+  const dateToChartIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    chartDataWithEquity.forEach((pt, idx) => {
+      if (pt.date) {
+        map.set(pt.date, idx);
+      }
+    });
+    return map;
+  }, [chartDataWithEquity]);
+
+  // Hover sync helpers (price + equity)
+  const applyHoverFromRechartsState = useCallback(
+    (state: any) => {
+      if (!state || chartDataWithEquity.length === 0) {
+        pendingHoverIndexRef.current = null;
+        if (hoverRafRef.current != null) {
+          cancelAnimationFrame(hoverRafRef.current);
+          hoverRafRef.current = null;
+        }
+        setHoverIndex(null);
+        hoveredIndexRef.current = null;
+        return;
+      }
+
+      const idxFromTooltip =
+        typeof state.activeTooltipIndex === "number"
+          ? state.activeTooltipIndex
+          : null;
+
+      let idx = idxFromTooltip;
+      const label = state.activeLabel as string | undefined;
+      if (idx == null || idx < 0 || idx >= chartDataWithEquity.length) {
+        idx = label ? dateToChartIndex.get(label) ?? -1 : -1;
+      }
+
+      if (idx == null || idx < 0 || idx >= chartDataWithEquity.length) {
+        return;
+      }
+
+      if (idx === hoveredIndexRef.current && idx === hoverIndex) {
+        return;
+      }
+
+      pendingHoverIndexRef.current = idx;
+      if (hoverRafRef.current == null) {
+        hoverRafRef.current = requestAnimationFrame(() => {
+          hoverRafRef.current = null;
+          if (pendingHoverIndexRef.current == null) return;
+          const next = pendingHoverIndexRef.current;
+          setHoverIndex(next);
+          const fullIdx = label ? dateToIndex.get(label) ?? next : next;
+          hoveredIndexRef.current = fullIdx;
+        });
+      }
+    },
+    [chartDataWithEquity, dateToChartIndex, hoverIndex, dateToIndex]
+  );
+
+  const handleChartMouseLeave = useCallback(() => {
+    pendingHoverIndexRef.current = null;
+    if (hoverRafRef.current != null) {
+      cancelAnimationFrame(hoverRafRef.current);
+      hoverRafRef.current = null;
+    }
+    setHoverIndex(null);
+    hoveredIndexRef.current = null;
+  }, []);
 
   // Helper to get Y coordinate for a trade marker
   // Entry markers get a small offset so they're visible even on same-day trades
@@ -1841,18 +2597,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             }
           }
           
-          /* Shimmer effect for area fill */
-          @keyframes areaShimmer {
-            0% {
-              opacity: 0;
-              clip-path: inset(0 100% 0 0);
-            }
-            100% {
-              opacity: 1;
-              clip-path: inset(0 0 0 0);
-            }
-          }
-          
           /* Reference line fade in */
           @keyframes refLineFade {
             0% {
@@ -1883,10 +2627,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             animation-delay: 0.5s, 1s;
           }
           
-          .recharts-area-area {
-            animation: areaShimmer 0.8s ease-out forwards;
-          }
-          
           .forecast-ref-line {
             stroke-dasharray: 100;
             animation: refLineFade 0.6s ease-out forwards;
@@ -1895,13 +2635,15 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         {/* Combined Price and Volume Chart */}
         <div
           ref={chartContainerRef}
-          className="w-full"
+          className="relative w-full"
           style={{ cursor: isDraggingRef.current ? 'grabbing' : 'grab' }}
           onMouseEnter={() => {
             isHoveringChartRef.current = true;
+            setIsChartHovered(true);
           }}
           onMouseLeave={() => {
             isHoveringChartRef.current = false;
+            setIsChartHovered(false);
             // Cancel dragging when leaving chart area
             isDraggingRef.current = false;
             dragStartXRef.current = null;
@@ -1956,22 +2698,15 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         >
           <ResponsiveContainer width="100%" height={500}>
             <ComposedChart
-              data={chartDataWithForecastBand}
+              data={chartDataWithEquity}
               margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
+              syncId="price-equity-sync"
               onClick={(state: any) => {
-                // Call the handler through ref to get latest values
                 chartClickHandlerRef.current?.(state);
               }}
-              onMouseMove={(state: any) => {
-                const activeLabel = state?.activeLabel as string | undefined;
-                if (activeLabel) {
-                  const idx = dateToIndex.get(activeLabel);
-                  hoveredIndexRef.current = idx ?? null;
-                } else {
-                  hoveredIndexRef.current = null;
-              }
-            }}
-          >
+              onMouseMove={applyHoverFromRechartsState}
+              onMouseLeave={handleChartMouseLeave}
+            >
             <defs>
               <linearGradient
                 id="priceFill"
@@ -2113,10 +2848,20 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
+              {/* Soft blur filter for volume bars */}
+              <filter id="volumeBlur" x="-10%" y="-10%" width="120%" height="120%">
+                <feGaussianBlur stdDeviation="0.8" result="blur"/>
+                <feMerge>
+                  <feMergeNode in="blur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
             </defs>
 
             <XAxis
               dataKey="date"
+              type="category"
+              allowDuplicatedCategory={false}
               axisLine={false}
               tickLine={false}
               tickMargin={8}
@@ -2126,7 +2871,6 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 fill: isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)",
               }}
               tickFormatter={formatXAxisDate}
-              domain={['dataMin', 'dataMax']}
             />
             
             {/* Price Y-Axis */}
@@ -2167,7 +2911,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               )}
               animationDuration={0}
               cursor={{
-                stroke: isDarkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)",
+                stroke: "rgba(148, 163, 184, 0.35)",
                 strokeWidth: 1,
               }}
             />
@@ -2340,16 +3084,23 @@ export const PriceChart: React.FC<PriceChartProps> = ({
               activeDot={<AnimatedPriceDot />}
               connectNulls={true}
               filter="url(#priceLineGlow)"
+              isAnimationActive={false}
             />
             
-            {/* Volume Bars - bottom 25% */}
+            {/* Volume Bars - bottom with modern emerald/rose colors and borders */}
             <Bar
               yAxisId="volume"
               dataKey="volume"
               fill="#666"
+              radius={[2, 2, 0, 0]}
             >
-              {chartDataWithForecastBand.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.volumeColor || "#666"} />
+              {chartDataWithEquity.map((entry, index) => (
+                <Cell 
+                  key={`cell-${index}`} 
+                  fill={entry.volumeColor || "rgba(100, 100, 100, 0.4)"} 
+                  stroke={entry.volumeStroke || "rgba(100, 100, 100, 0.6)"}
+                  strokeWidth={1}
+                />
               ))}
             </Bar>
             
@@ -2524,11 +3275,116 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             })}
             </ComposedChart>
           </ResponsiveContainer>
+
+          {/* Hover Overlay Controls - Apple Liquid Glass style */}
+          <div 
+            className={`
+              absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 
+              px-1 py-1
+              transition-all duration-300 ease-out pointer-events-none
+              ${isChartHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}
+            `}
+          >
+            {/* Pan Left */}
+            <button
+              onClick={panLeft}
+              disabled={!canPanLeft || loading || fullData.length === 0}
+              className={`
+                pointer-events-auto
+                w-10 h-10 rounded-full text-lg font-extralight transition-all duration-200 flex items-center justify-center
+                backdrop-blur-3xl
+                ${isDarkMode 
+                  ? 'bg-transparent hover:bg-white/[0.04] active:bg-white/[0.08] text-white hover:text-white border border-white/[0.05] hover:border-white/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.02)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)] disabled:opacity-20'
+                  : 'bg-transparent hover:bg-white/20 active:bg-white/35 text-black hover:text-black border border-black/[0.05] hover:border-black/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.03),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.5)] disabled:opacity-30'
+                }
+                disabled:cursor-not-allowed active:scale-95
+              `}
+              title="Pan left"
+            >
+              ‹
+            </button>
+
+            {/* Zoom Out */}
+            <button
+              onClick={zoomOut}
+              disabled={!canZoomOut || loading || fullData.length === 0}
+              className={`
+                pointer-events-auto
+                w-10 h-10 rounded-full text-lg font-extralight transition-all duration-200 flex items-center justify-center
+                backdrop-blur-3xl
+                ${isDarkMode 
+                  ? 'bg-transparent hover:bg-white/[0.04] active:bg-white/[0.08] text-white hover:text-white border border-white/[0.05] hover:border-white/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.02)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)] disabled:opacity-20'
+                  : 'bg-transparent hover:bg-white/20 active:bg-white/35 text-black hover:text-black border border-black/[0.05] hover:border-black/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.03),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.5)] disabled:opacity-30'
+                }
+                disabled:cursor-not-allowed active:scale-95
+              `}
+              title="Zoom out"
+            >
+              −
+            </button>
+
+            {/* Reset */}
+            <button
+              onClick={resetViewWindow}
+              disabled={!isZoomed || loading || fullData.length === 0}
+              className={`
+                pointer-events-auto
+                w-10 h-10 rounded-full text-base font-extralight transition-all duration-200 flex items-center justify-center
+                backdrop-blur-3xl
+                ${isDarkMode 
+                  ? 'bg-transparent hover:bg-white/[0.04] active:bg-white/[0.08] text-white hover:text-white border border-white/[0.05] hover:border-white/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.02)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)] disabled:opacity-20'
+                  : 'bg-transparent hover:bg-white/20 active:bg-white/35 text-black hover:text-black border border-black/[0.05] hover:border-black/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.03),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.5)] disabled:opacity-30'
+                }
+                disabled:cursor-not-allowed active:scale-95
+              `}
+              title="Reset zoom"
+            >
+              ⟳
+            </button>
+
+            {/* Zoom In */}
+            <button
+              onClick={zoomIn}
+              disabled={!canZoomIn || loading || fullData.length === 0}
+              className={`
+                pointer-events-auto
+                w-10 h-10 rounded-full text-lg font-extralight transition-all duration-200 flex items-center justify-center
+                backdrop-blur-3xl
+                ${isDarkMode 
+                  ? 'bg-transparent hover:bg-white/[0.04] active:bg-white/[0.08] text-white hover:text-white border border-white/[0.05] hover:border-white/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.02)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)] disabled:opacity-20'
+                  : 'bg-transparent hover:bg-white/20 active:bg-white/35 text-black hover:text-black border border-black/[0.05] hover:border-black/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.03),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.5)] disabled:opacity-30'
+                }
+                disabled:cursor-not-allowed active:scale-95
+              `}
+              title="Zoom in"
+            >
+              +
+            </button>
+
+            {/* Pan Right */}
+            <button
+              onClick={panRight}
+              disabled={!canPanRight || loading || fullData.length === 0}
+              className={`
+                pointer-events-auto
+                w-10 h-10 rounded-full text-lg font-extralight transition-all duration-200 flex items-center justify-center
+                backdrop-blur-3xl
+                ${isDarkMode 
+                  ? 'bg-transparent hover:bg-white/[0.04] active:bg-white/[0.08] text-white hover:text-white border border-white/[0.05] hover:border-white/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.1),inset_0_1px_0_rgba(255,255,255,0.02)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.2),inset_0_1px_0_rgba(255,255,255,0.06)] disabled:opacity-20'
+                  : 'bg-transparent hover:bg-white/20 active:bg-white/35 text-black hover:text-black border border-black/[0.05] hover:border-black/[0.12] shadow-[0_2px_16px_rgba(0,0,0,0.03),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_4px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.5)] disabled:opacity-30'
+                }
+                disabled:cursor-not-allowed active:scale-95
+              `}
+              title="Pan right"
+            >
+              ›
+            </button>
+          </div>
         </div>
       </div>
     );
   }, [
-    chartDataWithForecastBand,
+    chartDataWithEquity,
     lineColor,
     isDarkMode,
     priceYDomain,
@@ -2546,6 +3402,21 @@ export const PriceChart: React.FC<PriceChartProps> = ({
     getMarkerY,
     trading212EventsByDate,
     dateToClose,
+    // Overlay controls dependencies
+    isChartHovered,
+    canPanLeft,
+    canPanRight,
+    canZoomIn,
+    canZoomOut,
+    isZoomed,
+    loading,
+    fullData.length,
+    panLeft,
+    panRight,
+    zoomIn,
+    zoomOut,
+    resetViewWindow,
+    hoveredDate,
   ]);
 
   return (
@@ -2989,7 +3860,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             <div className="flex flex-col gap-0.5">
               <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>EWMA</span>
               <div className="flex items-center gap-1">
-                {/* EWMA Button */}
+                {/* EWMA Unbiased Button */}
                 <div className="relative group">
                   <button
                     onClick={() => {
@@ -2997,12 +3868,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                       if (onLoadEwmaUnbiased) {
                         onLoadEwmaUnbiased();
                       }
-                      setShowEwmaOverlay(!showEwmaOverlay);
+                      // Radio behavior: if already on, turn off; otherwise turn on and turn off others
+                      if (showEwmaOverlay) {
+                        setShowEwmaOverlay(false);
+                      } else {
+                        setShowEwmaOverlay(true);
+                        setShowEwmaBiasedOverlay(false);
+                      }
+                      // Toggle T212 run visibility
+                      if (onToggleT212Run) {
+                        onToggleT212Run("ewma-unbiased");
+                      }
                     }}
                     disabled={!ewmaPath || ewmaPath.length === 0}
                     className={`
                       px-2 py-0.5 text-xs rounded-full transition-colors
-                      ${showEwmaOverlay && ewmaPath && ewmaPath.length > 0
+                      ${activeT212RunId === "ewma-unbiased"
                         ? isDarkMode
                           ? 'bg-purple-600 text-white'
                           : 'bg-purple-500 text-white'
@@ -3018,7 +3899,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                   </button>
                   
                   {/* EWMA Stats Hover Card */}
-                  {showEwmaOverlay && ewmaSummary && (
+                  {activeT212RunId === "ewma-unbiased" && ewmaSummary && (
                     <div 
                       className={`absolute top-full mt-2 left-0 z-50 min-w-[280px] rounded-xl border shadow-xl p-3 backdrop-blur-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ${
                         isDarkMode 
@@ -3089,16 +3970,22 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                           onLoadEwmaBiased();
                         }
 
-                        if (ewmaBiasedPath && ewmaBiasedPath.length > 0) {
-                          setShowEwmaBiasedOverlay(!showEwmaBiasedOverlay);
+                        // Radio behavior: if already on, turn off; otherwise turn on and turn off others
+                        if (showEwmaBiasedOverlay) {
+                          setShowEwmaBiasedOverlay(false);
                         } else {
                           setShowEwmaBiasedOverlay(true);
+                          setShowEwmaOverlay(false);
+                        }
+                        // Toggle T212 run visibility
+                        if (onToggleT212Run) {
+                          onToggleT212Run("ewma-biased");
                         }
                       }}
                       disabled={isLoadingEwmaBiased}
                       className={`
                         px-2 py-0.5 text-xs rounded-full transition-colors
-                        ${showEwmaBiasedOverlay && ewmaBiasedPath && ewmaBiasedPath.length > 0
+                        ${activeT212RunId === "ewma-biased"
                           ? isDarkMode
                             ? 'bg-amber-600 text-white'
                             : 'bg-amber-500 text-white'
@@ -3114,7 +4001,7 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     </button>
                     
                     {/* EWMA Biased Stats Hover Card */}
-                    {showEwmaBiasedOverlay && ewmaBiasedSummary && (
+                    {activeT212RunId === "ewma-biased" && ewmaBiasedSummary && (
                       <div 
                         className={`absolute top-full mt-2 left-0 z-50 min-w-[280px] rounded-xl border shadow-xl p-3 backdrop-blur-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ${
                           isDarkMode 
@@ -3175,6 +4062,32 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                     )}
                   </div>
                 )}
+
+                {/* Max Button */}
+                <button
+                  onClick={() => {
+                    // Radio behavior: turn off all other EWMA overlays
+                    setShowEwmaOverlay(false);
+                    setShowEwmaBiasedOverlay(false);
+                    // Toggle T212 run visibility for Max
+                    if (onToggleT212Run) {
+                      onToggleT212Run("ewma-biased-max");
+                    }
+                  }}
+                  className={`
+                    px-2 py-0.5 text-xs rounded-full transition-colors
+                    ${activeT212RunId === "ewma-biased-max"
+                      ? isDarkMode
+                        ? 'bg-orange-600 text-white'
+                        : 'bg-orange-500 text-white'
+                      : isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }
+                  `}
+                >
+                  Max
+                </button>
 
                 {/* EWMA Settings Button (⋯) with Dropdown */}
                 {ewmaReactionMapDropdown && (
@@ -3312,6 +4225,156 @@ export const PriceChart: React.FC<PriceChartProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Vertical Divider - before Simulation */}
+            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+
+            {/* Simulation Section */}
+            <div className="flex flex-col gap-0.5">
+              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Simulation</span>
+              <div className="flex items-center gap-1">
+                {/* CFD Button */}
+                <button
+                  className={`
+                    px-2 py-0.5 text-xs rounded-full transition-colors
+                    ${isDarkMode 
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }
+                  `}
+                >
+                  CFD
+                </button>
+
+                {/* Simulation Settings Button (⋯) with Dropdown */}
+                <div className="relative" ref={simulationSettingsDropdownRef}>
+                  <button
+                    onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
+                    className={`
+                      w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
+                      ${showSimulationSettingsDropdown
+                        ? isDarkMode 
+                          ? 'border-amber-500 text-amber-400' 
+                          : 'border-amber-500 text-amber-600'
+                        : isDarkMode 
+                          ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
+                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                      }
+                    `}
+                    title="Simulation Settings"
+                  >
+                    ⋯
+                  </button>
+
+                  {/* Simulation Settings Dropdown */}
+                  {showSimulationSettingsDropdown && (
+                    <div 
+                      className={`
+                        absolute top-10 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
+                        ${isDarkMode 
+                          ? 'bg-gray-900/80 border-gray-500/30' 
+                          : 'bg-white/80 border-gray-400/30'
+                        }
+                      `}
+                    >
+                      <div className="space-y-2 text-xs">
+                        {/* Initial Equity Row */}
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
+                          <input
+                            type="number"
+                            min={100}
+                            max={1000000}
+                            step={100}
+                            value={simulationInitialEquity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 100) {
+                                setSimulationInitialEquity(val);
+                              }
+                            }}
+                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus:border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+
+                        {/* Leverage Row */}
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={simulationLeverage}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 1) {
+                                setSimulationLeverage(Math.min(100, val));
+                              }
+                            }}
+                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus:border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+
+                        {/* Position % Row */}
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={simulationPositionPct}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 1) {
+                                setSimulationPositionPct(Math.min(100, val));
+                              }
+                            }}
+                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus:border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+
+                        {/* Bias Threshold Row */}
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={1}
+                            value={simulationBiasThreshold}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 0) {
+                                setSimulationBiasThreshold(Math.min(100, val));
+                              }
+                            }}
+                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus:border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
         
@@ -3319,99 +4382,18 @@ export const PriceChart: React.FC<PriceChartProps> = ({
         {!horizonCoverage && <div />}
       </div>
       
-      {/* Zoom & Pan Controls Row */}
-      <div className="flex items-center gap-4 mb-2 mt-6">
-        <div className="flex items-center gap-2">
-          <label className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            Zoom
-          </label>
-
-          {/* Zoom Out */}
-          <button
-            onClick={zoomOut}
-            disabled={!canZoomOut || loading || fullData.length === 0}
-            className={`
-              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
-              ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
-              }
-              disabled:cursor-not-allowed
-            `}
-            title="Zoom out"
-          >
-            −
-          </button>
-
-          {/* Zoom In */}
-          <button
-            onClick={zoomIn}
-            disabled={!canZoomIn || loading || fullData.length === 0}
-            className={`
-              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
-              ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
-              }
-              disabled:cursor-not-allowed
-            `}
-            title="Zoom in"
-          >
-            +
-          </button>
-
-          {/* Pan Left */}
-          <button
-            onClick={panLeft}
-            disabled={!canPanLeft || loading || fullData.length === 0}
-            className={`
-              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
-              ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
-              }
-              disabled:cursor-not-allowed
-            `}
-            title="Scroll left"
-          >
-            ‹
-          </button>
-
-          {/* Pan Right */}
-          <button
-            onClick={panRight}
-            disabled={!canPanRight || loading || fullData.length === 0}
-            className={`
-              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
-              ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
-              }
-              disabled:cursor-not-allowed
-            `}
-            title="Scroll right"
-          >
-            ›
-          </button>
-
-          {/* Reset */}
-          <button
-            onClick={resetViewWindow}
-            disabled={!isZoomed || loading || fullData.length === 0}
-            className={`
-              w-6 h-6 rounded-full text-xs font-medium transition-all flex items-center justify-center
-              ${isDarkMode 
-                ? 'bg-gray-700 hover:bg-gray-600 text-white border border-gray-600 disabled:bg-gray-800 disabled:text-gray-500 disabled:opacity-50'
-                : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-300 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-60'
-              }
-              disabled:cursor-not-allowed
-            `}
-            title="Reset zoom"
-          >
-            ⟳
-          </button>
+      {/* Range Selector - independent row below controls */}
+      {perfByRange && (
+        <div className="mt-7 mb-2">
+          <RangeSelector
+            selectedRange={selectedRange}
+            perfByRange={perfByRange}
+            onChange={handleRangeChange}
+            isDarkMode={isDarkMode}
+            compact={true}
+          />
         </div>
-      </div>
+      )}
       
       {/* Chart Area */}
       <div className={chartBg}>
@@ -3431,17 +4413,800 @@ export const PriceChart: React.FC<PriceChartProps> = ({
             No historical data available.
           </div>
         ) : (
-          memoizedChartElement
+          <>
+            {memoizedChartElement}
+          </>
         )}
       </div>
-      
-      {/* Range Selector - positioned below chart like TradingView */}
-      <RangeSelector
-        selectedRange={selectedRange}
-        perfByRange={perfByRange}
-        onChange={handleRangeChange}
-        isDarkMode={isDarkMode}
-      />
+
+      {/* TradingView-style Insights Panel */}
+      {hasEquityData && (
+        <div className="mt-6">
+          {/* Header Row: Insight Pills (left) + Date Range (right) */}
+          <div className="flex items-center justify-between mb-4">
+            {/* Insight Pills */}
+            <div className="flex flex-wrap gap-2">
+              {["Overview", "Performance", "Trades analysis", "Risk/performance ratios", "List of trades"].map((tab) => {
+                const isActive = tab === activeInsightTab;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveInsightTab(tab as any)}
+                    className={`
+                      px-3.5 py-1.5 rounded-full text-xs font-medium transition-all
+                      ${isActive
+                        ? isDarkMode
+                          ? "bg-white text-slate-900 shadow"
+                          : "bg-slate-900 text-white shadow"
+                        : isDarkMode
+                          ? "bg-slate-800/70 text-slate-200 hover:bg-slate-700/80"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }
+                    `}
+                  >
+                    {tab}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Date Range Dropdown */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowDateRangeDropdown((v) => !v)}
+                className={`
+                  flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all
+                  ${isDarkMode
+                    ? "bg-slate-900/70 text-slate-200 hover:bg-slate-800/80"
+                    : "bg-white text-slate-700 hover:bg-slate-50"}
+                `}
+              >
+                <svg 
+                  className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" strokeWidth="2"/>
+                  <line x1="16" y1="2" x2="16" y2="6" strokeWidth="2"/>
+                  <line x1="8" y1="2" x2="8" y2="6" strokeWidth="2"/>
+                  <line x1="3" y1="10" x2="21" y2="10" strokeWidth="2"/>
+                </svg>
+                <span className="font-medium">{dateRangeSpan.label}</span>
+                <svg 
+                  className={`w-3 h-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <polyline points="6 9 12 15 18 9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+
+              {showDateRangeDropdown && (
+                <div className={`
+                  absolute right-0 mt-2 w-64 rounded-2xl border shadow-2xl z-50
+                  ${isDarkMode ? "bg-slate-900 border-slate-700/70" : "bg-white border-slate-200"}
+                `}>
+                  <div className="px-3 py-2">
+                    <div className={`text-xs mb-2 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Selected range</div>
+                    <input
+                      readOnly
+                      value={dateRangeSpan.label}
+                      className={`
+                        w-full text-sm px-2 py-1.5 rounded-lg border focus:outline-none
+                        ${isDarkMode ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-800"}
+                      `}
+                    />
+                  </div>
+                  <div className={`text-xs px-3 py-2 border-t ${isDarkMode ? "border-slate-800 text-slate-500" : "border-slate-100 text-slate-500"}`}>
+                    Other ranges
+                  </div>
+                  {[
+                    { key: "chart", label: "Range from chart" },
+                    { key: "7d", label: "Last 7 days" },
+                    { key: "30d", label: "Last 30 days" },
+                    { key: "90d", label: "Last 90 days" },
+                    { key: "365d", label: "Last 365 days" },
+                    { key: "all", label: "Entire history" },
+                  ].map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => {
+                        setDateRangePreset(opt.key as DateRangePreset);
+                        setShowDateRangeDropdown(false);
+                      }}
+                      className={`
+                        w-full text-left px-3 py-2 text-sm hover:bg-slate-800/50 transition
+                        ${dateRangePreset === opt.key ? (isDarkMode ? "text-white" : "text-slate-900 font-semibold") : (isDarkMode ? "text-slate-200" : "text-slate-700")}
+                      `}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                  <div className={`px-3 py-3 border-t ${isDarkMode ? "border-slate-800" : "border-slate-100"}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateRangePreset("custom");
+                        setShowDateRangeDropdown(false);
+                      }}
+                      className={`
+                        w-full text-left text-sm px-2 py-2 rounded-lg border
+                        ${isDarkMode ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}
+                      `}
+                    >
+                      Custom date range…
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Overview Tab - Stats + Equity Chart */}
+          {activeInsightTab === "Overview" && (
+            <div>
+              {/* Stats Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                {/* Total P&L */}
+                <div>
+                  <div className="text-sm">
+                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total P&L</span>
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className={`text-xs font-mono ${equitySummary.pnlAbs != null && equitySummary.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {equitySummary.pnlAbs != null ? `${equitySummary.pnlAbs >= 0 ? "+" : ""}${equitySummary.pnlAbs.toFixed(2)}` : "—"}
+                    </span>
+                    <span className={`text-xs ${equitySummary.pnlPct != null && equitySummary.pnlPct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {equitySummary.pnlPct != null ? `${(equitySummary.pnlPct * 100).toFixed(2)}%` : ""}
+                    </span>
+                  </div>
+                  <div className={isDarkMode ? "text-xs text-slate-500" : "text-xs text-slate-500"}>
+                    {hoveredDate ? `At ${hoveredDate}` : "Today"}
+                  </div>
+                </div>
+
+                {/* Max equity drawdown */}
+                <div>
+                  <div className="text-sm">
+                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Max equity drawdown</span>
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-xs font-mono text-slate-400">
+                      {equitySummary.maxDrawdownAbs != null ? `${equitySummary.maxDrawdownAbs.toFixed(2)}` : "—"}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {equitySummary.maxDrawdownPct != null ? `${(equitySummary.maxDrawdownPct * 100).toFixed(2)}%` : ""}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Total trades */}
+                <div>
+                  <div className="text-sm">
+                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total trades</span>
+                  </div>
+                  <div className="mt-1 text-xs font-mono text-slate-400">
+                    {tradeSummary.totalTrades || 0}
+                  </div>
+                </div>
+
+                {/* Profitable trades */}
+                <div>
+                  <div className="text-sm">
+                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profitable trades</span>
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-xs font-mono text-slate-400">
+                      {tradeSummary.profitableTrades || 0}
+                    </span>
+                    <span className="text-xs text-slate-500">
+                      {tradeSummary.totalTrades > 0
+                        ? `${((tradeSummary.profitableTrades / tradeSummary.totalTrades) * 100).toFixed(1)}%`
+                        : "—"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Profit factor */}
+                <div>
+                  <div className="text-sm">
+                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profit factor</span>
+                  </div>
+                  <div className="mt-1 text-xs font-mono text-slate-400">
+                    {tradeSummary.profitFactor == null
+                      ? "—"
+                      : tradeSummary.profitFactor === Infinity
+                      ? "∞"
+                      : tradeSummary.profitFactor.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Equity Chart inside Overview tab */}
+              <div className="mt-6">
+                <ResponsiveContainer width="100%" height={220}>
+                  <ComposedChart
+                    data={equityPanelData}
+                    margin={{ top: 10, right: 0, left: 0, bottom: 10 }}
+                    syncId="price-equity-sync"
+                    onMouseMove={applyHoverFromRechartsState}
+                    onMouseLeave={handleChartMouseLeave}
+                  >
+                    <CartesianGrid
+                      stroke={isDarkMode ? "rgba(148, 163, 184, 0.07)" : "rgba(100, 116, 139, 0.12)"}
+                      vertical={false}
+                    />
+                    <XAxis
+                      dataKey="date"
+                      type="category"
+                      allowDuplicatedCategory={false}
+                      axisLine={false}
+                      tickLine={false}
+                      tickMargin={6}
+                      padding={{ left: 0, right: 0 }}
+                      tick={false}
+                    />
+                    <YAxis
+                      yAxisId="equity"
+                      domain={equityYDomain}
+                      orientation="right"
+                      width={50}
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
+                      tickFormatter={(value: number) => {
+                        if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
+                        return value.toFixed(0);
+                      }}
+                    />
+                    <YAxis yAxisId="delta" domain={equityDeltaDomain} hide />
+                    <Tooltip
+                      cursor={false}
+                      animationDuration={0}
+                      content={() => {
+                        if (!hoveredDate) return null;
+                        const point = equityPanelData.find((p) => p.date === hoveredDate);
+                        if (!point || point.equity == null) return null;
+
+                        const deltaStr =
+                          point.equityDelta != null
+                            ? `${point.equityDelta >= 0 ? "+" : ""}${point.equityDelta.toFixed(2)}`
+                            : "—";
+
+                        return (
+                          <div className={`rounded-xl px-3 py-2 shadow-lg border ${
+                            isDarkMode 
+                              ? 'bg-slate-900/95 border-slate-700/70' 
+                              : 'bg-white/95 border-gray-200'
+                          }`}>
+                            <div className={`text-[11px] font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
+                              {hoveredDate}
+                            </div>
+                            <div className="text-[11px] space-y-0.5">
+                              <div>
+                                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Equity: </span>
+                                <span className="font-mono text-emerald-500 font-semibold">
+                                  ${point.equity.toFixed(2)}
+                                </span>
+                              </div>
+                              <div>
+                                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Δ Day: </span>
+                                <span className={`font-mono font-semibold ${
+                                  point.equityDelta != null && point.equityDelta >= 0
+                                    ? 'text-emerald-400'
+                                    : 'text-rose-400'
+                                }`}>
+                                  {deltaStr}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    />
+
+                    {hoveredDate && (
+                      <ReferenceLine
+                        x={hoveredDate}
+                        stroke={isDarkMode ? "#FFFFFF" : "rgba(148, 163, 184, 0.35)"}
+                        strokeWidth={1}
+                        strokeDasharray="4 2"
+                      />
+                    )}
+
+                    <ReferenceLine
+                      y={0}
+                      yAxisId="delta"
+                      stroke={isDarkMode ? "rgba(148, 163, 184, 0.4)" : "rgba(100, 116, 139, 0.5)"}
+                      strokeDasharray="3 3"
+                      strokeWidth={1}
+                    />
+
+                    <Bar
+                      yAxisId="delta"
+                      dataKey="equityDelta"
+                      radius={[2, 2, 0, 0]}
+                      isAnimationActive={false}
+                    >
+                      {equityPanelData.map((entry, index) => {
+                        const positive = (entry.equityDelta ?? 0) >= 0;
+                        return (
+                          <Cell
+                            key={`eq-bar-${index}`}
+                            fill={
+                              positive
+                                ? "rgba(52, 211, 153, 0.35)"
+                                : "rgba(251, 113, 133, 0.35)"
+                            }
+                            stroke={
+                              positive
+                                ? "rgba(16, 185, 129, 0.8)"
+                                : "rgba(244, 63, 94, 0.8)"
+                            }
+                            strokeWidth={1}
+                          />
+                        );
+                      })}
+                    </Bar>
+
+                    <Line
+                      yAxisId="equity"
+                      type="monotone"
+                      dataKey="equity"
+                      stroke={isDarkMode ? "#38bdf8" : "#0ea5e9"}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                      connectNulls
+                      activeDot={{ r: 4, strokeWidth: 2, fill: isDarkMode ? "#38bdf8" : "#0ea5e9", stroke: isDarkMode ? "#0f172a" : "#f8fafc" }}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Performance Tab */}
+          {activeInsightTab === "Performance" && (
+            <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
+                    <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>All</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Long</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Short</th>
+                  </tr>
+                </thead>
+                <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Initial Capital</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(perfInitialEquity)} <span className="text-xs text-slate-500">USD</span>
+                    </td>
+                    <td className="text-right py-2.5 px-4"></td>
+                    <td className="text-right py-2.5 px-4"></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Open P&L</td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.openPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {formatUsd(tradeSummary.openPnl, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className={`text-xs ${tradeSummary.openPnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                        {pctOfPerfInitial(tradeSummary.openPnl)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4"></td>
+                    <td className="text-right py-2.5 px-4"></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Net profit</td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.netProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {formatUsd(tradeSummary.netProfit, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className={`text-xs ${tradeSummary.netProfit >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                        {pctOfPerfInitial(tradeSummary.netProfit)}
+                      </div>
+                    </td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.netProfitLong >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {formatUsd(tradeSummary.netProfitLong, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className={`text-xs ${tradeSummary.netProfitLong >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                        {pctOfPerfInitial(tradeSummary.netProfitLong)}
+                      </div>
+                    </td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.netProfitShort >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {formatUsd(tradeSummary.netProfitShort, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className={`text-xs ${tradeSummary.netProfitShort >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                        {pctOfPerfInitial(tradeSummary.netProfitShort)}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Gross profit</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.grossProfit)} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(tradeSummary.grossProfit)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.grossProfitLong)} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(tradeSummary.grossProfitLong)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.grossProfitShort)} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(tradeSummary.grossProfitShort)}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Gross loss</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.grossLoss, { sign: false })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(tradeSummary.grossLoss)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.grossLossLong, { sign: false })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(tradeSummary.grossLossLong)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.grossLossShort, { sign: false })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(tradeSummary.grossLossShort)}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Commission paid</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(tradeSummary.swapFeesTotal ?? 0)} <span className="text-xs text-slate-500">USD</span>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">0 <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono">0 <span className="text-xs text-slate-500">USD</span></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Buy &amp; hold return</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {formatUsd(insightStats.buyHoldAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {insightStats.buyHoldPct != null ? formatPct(insightStats.buyHoldPct) : "—"}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4"></td>
+                    <td className="text-right py-2.5 px-4"></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Max contracts held</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.maxContractsHeld}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.maxContractsHeld}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.maxContractsHeld}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg equity run-up duration</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg equity run-up</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                      {formatUsd(performanceSeriesStats.avgRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(performanceSeriesStats.avgRunUpValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                      {formatUsd(performanceSeriesStats.avgRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(performanceSeriesStats.avgRunUpValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                      {formatUsd(performanceSeriesStats.avgRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(performanceSeriesStats.avgRunUpValue)}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Max equity run-up</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                      {formatUsd(performanceSeriesStats.maxRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(performanceSeriesStats.maxRunUpValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                      {formatUsd(performanceSeriesStats.maxRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(performanceSeriesStats.maxRunUpValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                      {formatUsd(performanceSeriesStats.maxRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-emerald-300">
+                        {pctOfPerfInitial(performanceSeriesStats.maxRunUpValue)}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg equity drawdown duration</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg equity drawdown</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                      {formatUsd(perfAvgDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(perfAvgDrawdownValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                      {formatUsd(perfAvgDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(perfAvgDrawdownValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                      {formatUsd(perfAvgDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(perfAvgDrawdownValue)}
+                      </div>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4">Max equity drawdown</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                      {formatUsd(perfMaxDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(perfMaxDrawdownValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                      {formatUsd(perfMaxDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(perfMaxDrawdownValue)}
+                      </div>
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                      {formatUsd(perfMaxDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                      <div className="text-xs text-rose-300">
+                        {pctOfPerfInitial(perfMaxDrawdownValue)}
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Trades Analysis Tab */}
+          {activeInsightTab === "Trades analysis" && (
+            <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
+                    <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>All</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Long</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Short</th>
+                  </tr>
+                </thead>
+                <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Total trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalTrades}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalLong}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalShort}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Total open trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalOpen}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.openLong}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.openShort}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Winning trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.winningTrades}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.winningLong}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.winningShort}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Losing trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.losingTrades}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.losingLong}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.losingShort}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Percent profitable</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.pctProfitable.toFixed(2)}%</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.pctProfitableLong.toFixed(2)}%</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.pctProfitableShort.toFixed(2)}%</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg P&L</td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.avgPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {tradeSummary.avgPnl.toFixed(2)} <span className="text-xs text-slate-500">USD</span>
+                    </td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.avgPnlLong >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {tradeSummary.avgPnlLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span>
+                    </td>
+                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.avgPnlShort >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {tradeSummary.avgPnlShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span>
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg winning trade</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.avgWin.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.avgWinLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.avgWinShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg losing trade</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.avgLoss.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.avgLossLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.avgLossShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Ratio avg win / avg loss</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.ratioWinLoss.toFixed(3)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.ratioWinLossLong.toFixed(3)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.ratioWinLossShort.toFixed(3)}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Largest winning trade</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.largestWin.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.largestWinLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.largestWinShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Largest losing trade</td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.largestLoss.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.largestLossLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.largestLossShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg # bars in trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInTrades)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInTrades)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInTrades)}</td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Avg # bars in winning trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInWinning)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInWinning)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInWinning)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4">Avg # bars in losing trades</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInLosing)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInLosing)}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInLosing)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Risk/Performance Ratios Tab */}
+          {activeInsightTab === "Risk/performance ratios" && (
+            <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
+                    <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>All</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Long</th>
+                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Short</th>
+                  </tr>
+                </thead>
+                <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Profit factor</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {insightStats.riskRatios.profitFactorAll == null ? "—" : insightStats.riskRatios.profitFactorAll === Infinity ? "∞" : insightStats.riskRatios.profitFactorAll.toFixed(3)}
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {insightStats.riskRatios.profitFactorLong == null ? "—" : insightStats.riskRatios.profitFactorLong === Infinity ? "∞" : insightStats.riskRatios.profitFactorLong.toFixed(3)}
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {insightStats.riskRatios.profitFactorShort == null ? "—" : insightStats.riskRatios.profitFactorShort === Infinity ? "∞" : insightStats.riskRatios.profitFactorShort.toFixed(3)}
+                    </td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Sharpe ratio</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.sharpe != null ? insightStats.riskRatios.sharpe.toFixed(3) : "—"}</td>
+                    <td className="text-right py-2.5 px-4 font-mono"></td>
+                    <td className="text-right py-2.5 px-4 font-mono"></td>
+                  </tr>
+                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                    <td className="py-2.5 px-4">Sortino ratio</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.sortino != null ? insightStats.riskRatios.sortino.toFixed(3) : "—"}</td>
+                    <td className="text-right py-2.5 px-4 font-mono"></td>
+                    <td className="text-right py-2.5 px-4 font-mono"></td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4">Margin calls</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.marginCalls}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.marginCalls}</td>
+                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.marginCalls}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* List of Trades Tab */}
+          {activeInsightTab === "List of trades" && (
+            <div className={`rounded-2xl border overflow-hidden ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
+              <div className="max-h-[400px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className={`sticky top-0 ${isDarkMode ? "bg-slate-900" : "bg-white"}`}>
+                    <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
+                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Trade #</th>
+                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Type</th>
+                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Date/Time</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Price</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Qty</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Net P&L</th>
+                    </tr>
+                  </thead>
+                  <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
+                    {tradeSummary.allTrades.map((trade, idx) => {
+                      const tradeNum = tradeSummary.allTrades.length - idx;
+                      return (
+                        <React.Fragment key={`trade-${idx}`}>
+                          {/* Exit row */}
+                          <tr className={isDarkMode ? "border-b border-slate-800/30" : "border-b border-slate-50"}>
+                            <td className="py-2 px-3" rowSpan={2}>
+                              <span className="font-mono">{tradeNum}</span>{" "}
+                              <span className={trade.side === "long" ? "text-emerald-400" : "text-rose-400"}>
+                                {trade.side === "long" ? "Long" : "Short"}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">Exit</td>
+                            <td className="py-2 px-3">{trade.exitDate || "Open"}</td>
+                            <td className="text-right py-2 px-3 font-mono">{trade.exitPrice?.toFixed(2) || "—"} <span className="text-xs text-slate-500">USD</span></td>
+                            <td className="text-right py-2 px-3 font-mono">{trade.quantity}</td>
+                            <td className={`text-right py-2 px-3 font-mono ${(trade.netPnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {trade.netPnl != null ? `${trade.netPnl >= 0 ? "+" : ""}${trade.netPnl.toFixed(2)}` : "—"} <span className="text-xs text-slate-500">USD</span>
+                            </td>
+                          </tr>
+                          {/* Entry row */}
+                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
+                            <td className="py-2 px-3 text-slate-400">Entry</td>
+                            <td className="py-2 px-3">{trade.entryDate}</td>
+                            <td className="text-right py-2 px-3 font-mono">{trade.entryPrice.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
+                            <td className="text-right py-2 px-3 font-mono">{trade.quantity}</td>
+                            <td className="text-right py-2 px-3"></td>
+                          </tr>
+                        </React.Fragment>
+                      );
+                    })}
+                    {tradeSummary.allTrades.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-500">No trades to display</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Trade Detail Card - shown when a trade marker is clicked */}
       {selectedTrade && (
@@ -3455,6 +5220,10 @@ export const PriceChart: React.FC<PriceChartProps> = ({
   );
 };
 
+// Memoize PriceChart to prevent re-renders from parent state changes
+// (e.g., T212 table updates) that don't affect chart props
+export const PriceChart = React.memo(PriceChartInner);
+
 type PerfMap = Record<PriceRange, number | null>;
 
 interface RangeSelectorProps {
@@ -3462,6 +5231,7 @@ interface RangeSelectorProps {
   perfByRange: PerfMap;
   onChange: (range: PriceRange) => void;
   isDarkMode: boolean;
+  compact?: boolean;  // For inline display in controls row
 }
 
 const RangeSelector: React.FC<RangeSelectorProps> = ({
@@ -3469,7 +5239,48 @@ const RangeSelector: React.FC<RangeSelectorProps> = ({
   perfByRange,
   onChange,
   isDarkMode,
+  compact = false,
 }) => {
+  if (compact) {
+    // Compact inline version for controls row
+    return (
+      <div className="flex items-center gap-1">
+        {RANGE_OPTIONS.map((range) => {
+          const perf = perfByRange[range];
+          const isSelected = range === selectedRange;
+          const isPositive = perf != null && perf >= 0;
+
+          return (
+            <button
+              key={range}
+              type="button"
+              onClick={() => onChange(range)}
+              className={`
+                px-2 py-0.5 text-xs font-medium transition-colors rounded-full flex items-center gap-1.5
+                ${isSelected 
+                  ? 'bg-blue-600 text-white'
+                  : isDarkMode
+                    ? 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
+                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
+                }
+              `}
+            >
+              {range}
+              {isSelected && perf != null && (
+                <span className={`text-[10px] font-semibold ${
+                  isPositive ? 'text-green-300' : 'text-red-300'
+                }`}>
+                  {isPositive ? '+' : ''}{perf.toFixed(1)}%
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Original full version (kept for backwards compatibility)
   return (
     <div className="w-full mt-4">
       <div className="flex justify-between w-full">

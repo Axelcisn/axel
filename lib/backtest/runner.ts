@@ -26,6 +26,64 @@ interface PriceRecord {
 }
 
 /**
+ * Canonical row structure from data/canonical/{symbol}.json
+ */
+interface CanonicalRow {
+  date: string;
+  adj_close: number;
+  open?: number;
+  high?: number;
+  low?: number;
+  close?: number;
+  volume?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Module-level cache for canonical data to avoid repeated file reads
+ */
+const canonicalCache = new Map<string, CanonicalRow[]>();
+
+/**
+ * Load canonical rows for a symbol with caching
+ * Returns cached data if available, otherwise reads from disk and caches
+ */
+async function loadCanonicalRows(symbol: string): Promise<CanonicalRow[] | null> {
+  // Return cached data if available
+  if (canonicalCache.has(symbol)) {
+    return canonicalCache.get(symbol)!;
+  }
+
+  try {
+    const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
+    
+    // Check if file exists
+    try {
+      await fs.access(canonicalPath);
+    } catch {
+      console.warn(`Canonical file not found for ${symbol}`);
+      return null;
+    }
+
+    const content = await fs.readFile(canonicalPath, 'utf8');
+    const data = JSON.parse(content);
+
+    // Canonical files have structure: { rows: [...], meta: {...} }
+    if (!data.rows || !Array.isArray(data.rows)) {
+      console.error(`Invalid canonical structure for ${symbol}: missing or invalid 'rows' array`);
+      return null;
+    }
+
+    // Cache the rows for future calls
+    canonicalCache.set(symbol, data.rows);
+    return data.rows;
+  } catch (error) {
+    console.error(`Failed to load canonical data for ${symbol}:`, error);
+    return null;
+  }
+}
+
+/**
  * Load Final PI for a specific date and engine
  */
 async function loadFinalPI(
@@ -69,20 +127,11 @@ async function loadFinalPI(
  */
 async function loadRealizedPrice(symbol: string, date: string): Promise<number | null> {
   try {
-    // Load from canonical data
-    const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
-    try {
-      await fs.access(canonicalPath);
-    } catch {
-      return null; // File doesn't exist
-    }
-    
-    const content = await fs.readFile(canonicalPath, 'utf8');
-    const data = JSON.parse(content);
-    
-    // Find the specific date
-    const dayData = data.find((row: any) => row.date === date);
-    return dayData?.adj_close || null;
+    const rows = await loadCanonicalRows(symbol);
+    if (!rows) return null;
+
+    const dayData = rows.find(row => row.date === date);
+    return dayData?.adj_close ?? null;
   } catch (error) {
     return null;
   }
@@ -226,24 +275,16 @@ async function generateModelPI(opts: {
  */
 async function loadHistoricalData(symbol: string, endDate: string): Promise<Array<{ date: string; adj_close: number }> | null> {
   try {
-    // Load canonical data and filter up to endDate
-    const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
-    try {
-      await fs.access(canonicalPath);
-    } catch {
-      return null; // File doesn't exist
-    }
-    
-    const content = await fs.readFile(canonicalPath, 'utf8');
-    const data = JSON.parse(content);
-    
-    return data
-      .filter((row: any) => row.date <= endDate && row.adj_close > 0)
-      .map((row: any) => ({
+    const rows = await loadCanonicalRows(symbol);
+    if (!rows) return null;
+
+    return rows
+      .filter(row => row.date <= endDate && row.adj_close > 0)
+      .map(row => ({
         date: row.date,
         adj_close: row.adj_close
       }))
-      .sort((a: any, b: any) => a.date.localeCompare(b.date));
+      .sort((a, b) => a.date.localeCompare(b.date));
   } catch (error) {
     return null;
   }

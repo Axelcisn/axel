@@ -5,6 +5,9 @@
 
 import { loadBaseForecastPairs } from '../conformal/calibration';
 
+// Debug flag to enable verbose per-point logging (set PREDICTION_DEBUG=1 in environment)
+const PREDICTION_DEBUG = process.env.PREDICTION_DEBUG === '1';
+
 /**
  * Load prediction series for visualization (orange model line)
  * Only uses forecasts with explicit y_hat values
@@ -29,12 +32,16 @@ export async function loadPredictionSeries(
         model_price: forecast.y_hat,     // explicit prediction in price space
       });
       
-      console.log(`[PREDICTION LINE] ${pair.realizedDate}: model_price=${forecast.y_hat.toFixed(2)} from ${forecast.method}`);
+      if (PREDICTION_DEBUG) {
+        console.log(`[PREDICTION LINE] ${pair.realizedDate}: model_price=${forecast.y_hat.toFixed(2)} from ${forecast.method}`);
+      }
     }
     // If y_hat is missing, skip this point (don't use geometric mean for visualization)
   }
 
-  console.log(`[PREDICTION SERIES] ${symbol} ${method}: ${series.length} points with y_hat out of ${allPairs.length} total pairs`);
+  if (PREDICTION_DEBUG) {
+    console.log(`[PREDICTION SERIES] ${symbol} ${method}: ${series.length} points with y_hat out of ${allPairs.length} total pairs`);
+  }
   
   return series;
 }

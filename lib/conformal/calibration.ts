@@ -2,8 +2,13 @@ import { ConformalParams, ConformalState, ConformalMode, ConformalDomain } from 
 import { loadCanonicalData } from '../storage/canonical';
 import { getTargetSpec } from '../storage/targetSpecStore';
 import { ForecastRecord } from '../forecast/types';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
+
+/**
+ * Debug flag for verbose logging - can be enabled via environment variable
+ */
+const CONFORMAL_DEBUG = process.env.CONFORMAL_DEBUG === '1';
 
 /**
  * Calibrate conformal prediction parameters using historical base forecasts
@@ -340,8 +345,11 @@ export async function loadBaseForecastPairs(
 ): Promise<ForecastPair[]> {
   const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
   
-  if (!fs.existsSync(forecastsDir)) {
-    return [];
+  // Check if directory exists using async stat
+  try {
+    await fs.stat(forecastsDir);
+  } catch {
+    return []; // Directory doesn't exist
   }
   
   // Load canonical data
@@ -353,16 +361,17 @@ export async function loadBaseForecastPairs(
     }
   });
   
-  // Load all forecast files
-  const files = fs.readdirSync(forecastsDir)
-    .filter(f => f.endsWith('.json') && f.includes('-'))
+  // Load all forecast files asynchronously
+  const allFiles = await fs.readdir(forecastsDir);
+  const files = allFiles
+    .filter((f: string) => f.endsWith('.json') && f.includes('-'))
     .sort();
   
   const pairs: ForecastPair[] = [];
   
   for (const file of files) {
     try {
-      const content = fs.readFileSync(path.join(forecastsDir, file), 'utf-8');
+      const content = await fs.readFile(path.join(forecastsDir, file), 'utf-8');
       const forecast: ForecastRecord = JSON.parse(content);
       
       // Use unified selector for all filtering
@@ -374,7 +383,7 @@ export async function loadBaseForecastPairs(
         coverage
       });
       
-      if (isMatching) {
+      if (CONFORMAL_DEBUG && isMatching) {
         console.log('[DEBUG] matching base forecast', forecast.date_t, forecast.method, forecast.target);
       }
       
@@ -398,11 +407,13 @@ export async function loadBaseForecastPairs(
       );
       
       if (!verifyDate) {
-        console.log(
-          '[DEBUG] no trading day', effectiveHorizon, 'days after',
-          forecast.date_t,
-          'method=', forecast.method
-        );
+        if (CONFORMAL_DEBUG) {
+          console.log(
+            '[DEBUG] no trading day', effectiveHorizon, 'days after',
+            forecast.date_t,
+            'method=', forecast.method
+          );
+        }
         continue;
       }
       
@@ -410,7 +421,9 @@ export async function loadBaseForecastPairs(
       const S_t_plus_h = priceMap.get(verifyDate);
       
       if (!S_t || !S_t_plus_h) {
-        console.log('[DEBUG] no canonical outcome for forecast', forecast.date_t, 'verifyDate=', verifyDate, 'S_t=', S_t, 'S_t_plus_h=', S_t_plus_h);
+        if (CONFORMAL_DEBUG) {
+          console.log('[DEBUG] no canonical outcome for forecast', forecast.date_t, 'verifyDate=', verifyDate, 'S_t=', S_t, 'S_t_plus_h=', S_t_plus_h);
+        }
         continue;
       }
       
@@ -434,8 +447,10 @@ export async function loadBaseForecastPairs(
       const prediction_source = forecast.y_hat != null ? 'y_hat' : 
                                (L && U ? 'geometric_mean' : 'S_t_fallback');
       
-      // Debug logging for calibration robustness
-      console.log(`[CALIBRATION] ${forecastDate}: y_pred=${y_predPrice.toFixed(2)}, realized=${S_t_plus_h.toFixed(2)}, diff=${(y_predPrice - S_t_plus_h).toFixed(2)}, source=${prediction_source}`);
+      // Debug logging for calibration robustness (only when debug enabled)
+      if (CONFORMAL_DEBUG) {
+        console.log(`[CALIBRATION] ${forecastDate}: y_pred=${y_predPrice.toFixed(2)}, realized=${S_t_plus_h.toFixed(2)}, diff=${(y_predPrice - S_t_plus_h).toFixed(2)}, source=${prediction_source}`);
+      }
       
       // Convert to target domain  
       const y_pred = domain === 'log' ? Math.log(y_predPrice) : y_predPrice;
@@ -501,18 +516,22 @@ function getTradingDayOffset(
 async function loadLatestBaseForecast(symbol: string, base_method?: string): Promise<ForecastRecord | null> {
   const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
   
-  if (!fs.existsSync(forecastsDir)) {
-    return null;
+  // Check if directory exists using async stat
+  try {
+    await fs.stat(forecastsDir);
+  } catch {
+    return null; // Directory doesn't exist
   }
   
-  const files = fs.readdirSync(forecastsDir)
-    .filter(f => f.endsWith('.json') && f.includes('-'))
+  const allFiles = await fs.readdir(forecastsDir);
+  const files = allFiles
+    .filter((f: string) => f.endsWith('.json') && f.includes('-'))
     .sort()
     .reverse(); // Latest first
   
   for (const file of files) {
     try {
-      const content = fs.readFileSync(path.join(forecastsDir, file), 'utf-8');
+      const content = await fs.readFile(path.join(forecastsDir, file), 'utf-8');
       const forecast: ForecastRecord = JSON.parse(content);
       
       if (!forecast.locked) continue;

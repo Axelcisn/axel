@@ -2,7 +2,7 @@
 import { loadCanonicalData } from '@/lib/storage/canonical';
 import { ForecastRecord } from '@/lib/forecast/types';
 import { getTargetSpec } from '@/lib/storage/targetSpecStore';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
 
 type BaseMethod =
@@ -107,18 +107,22 @@ export async function generateBaseForecastsForWindow(opts: GenerateOptions): Pro
 async function loadExistingForecasts(symbol: string): Promise<ForecastRecord[]> {
   try {
     const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
-    if (!fs.existsSync(forecastsDir)) {
-      return [];
+    
+    // Check if directory exists using async stat
+    try {
+      await fs.stat(forecastsDir);
+    } catch {
+      return []; // Directory doesn't exist
     }
 
-    const files = fs.readdirSync(forecastsDir);
+    const files = await fs.readdir(forecastsDir);
     const forecasts: ForecastRecord[] = [];
 
     for (const file of files) {
       if (file.endsWith('.json')) {
         try {
           const filePath = path.join(forecastsDir, file);
-          const content = fs.readFileSync(filePath, 'utf-8');
+          const content = await fs.readFile(filePath, 'utf-8');
           const forecast = JSON.parse(content) as ForecastRecord;
           forecasts.push(forecast);
         } catch (err) {
@@ -136,6 +140,10 @@ async function loadExistingForecasts(symbol: string): Promise<ForecastRecord[]> 
 
 /**
  * Determine which dates need base forecasts generated
+ * 
+ * Uses a pre-built index to avoid O(M×N) scans when checking existing forecasts.
+ * Previous implementation used existingForecasts.find() for each canonical bar,
+ * resulting in ~1M comparisons for AAPL-sized data. The index reduces this to O(M + N).
  */
 function getRequiredForecastDates(
   canonical: any[],
@@ -149,6 +157,20 @@ function getRequiredForecastDates(
     throw new Error(`Insufficient canonical data: need ${calWindow + 1} days, have ${canonical.length}`);
   }
 
+  // Build an index of existing forecasts keyed by date_t::method
+  // Only include locked, non-Conformal forecasts (the basic filter criteria)
+  const forecastIndex = new Map<string, ForecastRecord[]>();
+  
+  for (const f of existingForecasts) {
+    if (!f.locked) continue;
+    if (f.method.includes('Conformal')) continue;
+    
+    const key = `${f.date_t}::${f.method}`;
+    const arr = forecastIndex.get(key) ?? [];
+    arr.push(f);
+    forecastIndex.set(key, arr);
+  }
+
   // Get the last calWindow trading days (excluding the most recent day)
   const lastIdx = canonical.length - 1;
   const startIdx = Math.max(0, lastIdx - calWindow);
@@ -159,13 +181,12 @@ function getRequiredForecastDates(
   for (let i = startIdx; i < endIdx; i++) {
     const date = canonical[i].date;
     
-    // Check if we already have a locked base forecast for this date, method, and horizon
-    const existing = existingForecasts.find(f => {
-      if (f.date_t !== date) return false;
-      if (f.method !== baseMethod) return false;
-      if (!f.locked) return false;
-      if (f.method.includes('Conformal')) return false;
-
+    // Look up candidates from the index instead of scanning all forecasts
+    const key = `${date}::${baseMethod}`;
+    const candidates = forecastIndex.get(key) ?? [];
+    
+    // Check horizon and coverage among the (small number of) candidates
+    const existing = candidates.find(f => {
       // Horizon-aware duplicate detection
       if (typeof horizon === "number") {
         const forecastH =
@@ -641,7 +662,7 @@ async function saveForecast(symbol: string, forecast: ForecastRecord): Promise<s
   const forecastsDir = path.join(process.cwd(), 'data', 'forecasts', symbol);
   
   // Ensure directory exists
-  fs.mkdirSync(forecastsDir, { recursive: true });
+  await fs.mkdir(forecastsDir, { recursive: true });
   
   // Generate timestamp ID for tracking
   const timestampId = Date.now().toString();
@@ -650,7 +671,7 @@ async function saveForecast(symbol: string, forecast: ForecastRecord): Promise<s
   const filename = `${forecast.date_t}_${forecast.method.replace(/[^a-zA-Z0-9]/g, '-')}_${timestampId}.json`;
   const filePath = path.join(forecastsDir, filename);
   
-  fs.writeFileSync(filePath, JSON.stringify(forecast, null, 2));
+  await fs.writeFile(filePath, JSON.stringify(forecast, null, 2));
   
   // Return the timestamp ID for tracking
   return timestampId;

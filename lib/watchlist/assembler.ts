@@ -90,19 +90,24 @@ export async function assembleRow(symbol: string, todayISO: string): Promise<Wat
 
 /**
  * Assembles watchlist for multiple symbols
+ * Uses Promise.allSettled to process symbols in parallel while handling errors per-symbol
  */
 export async function assembleWatchlist(symbols: string[], todayISO: string): Promise<WatchlistSummary> {
+  // Process all symbols in parallel
+  const results = await Promise.allSettled(
+    symbols.map(symbol => assembleRow(symbol, todayISO))
+  );
+
+  // Collect successful rows and log errors
   const rows: WatchlistRow[] = [];
-  
-  for (const symbol of symbols) {
-    try {
-      const row = await assembleRow(symbol, todayISO);
-      rows.push(row);
-    } catch (error) {
-      console.error(`Failed to assemble row for ${symbol}:`, error);
-      // Continue with other symbols
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      rows.push(result.value);
+    } else {
+      console.error(`Failed to assemble row for ${symbols[index]}:`, result.reason);
+      // Continue with other symbols - error already logged
     }
-  }
+  });
 
   const summary: WatchlistSummary = {
     as_of: todayISO,

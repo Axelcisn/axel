@@ -44,21 +44,27 @@ export default function CompanyFolderPage() {
     setError(null);
 
     try {
-      // Load company info
+      // Load company info first (required)
       const companyResponse = await fetch(`/api/companies?ticker=${ticker}`);
       if (!companyResponse.ok) {
         throw new Error('Company not found');
       }
       const company = await companyResponse.json();
 
-      // Load all file types
+      // Fetch all file types in parallel
+      const [canonicalResult, uploadsResult, specResult, forecastResult] = await Promise.allSettled([
+        fetch(`/api/canonical/${ticker}`),
+        fetch(`/api/upload?ticker=${ticker}`),
+        fetch(`/api/target-spec/${ticker}`),
+        fetch(`/api/forecast/gbm/${ticker}`)
+      ]);
+
       const files: FileInfo[] = [];
 
-      // Check for canonical data
-      try {
-        const canonicalResponse = await fetch(`/api/canonical/${ticker}`);
-        if (canonicalResponse.ok) {
-          const canonicalData = await canonicalResponse.json();
+      // Process canonical data
+      if (canonicalResult.status === 'fulfilled' && canonicalResult.value.ok) {
+        try {
+          const canonicalData = await canonicalResult.value.json();
           if (canonicalData.meta) {
             files.push({
               name: `${ticker}.json`,
@@ -68,71 +74,51 @@ export default function CompanyFolderPage() {
               path: `/api/canonical/${ticker}`
             });
           }
+        } catch (e) {
+          console.log('Error parsing canonical data');
         }
-      } catch (e) {
-        console.log('No canonical data found');
       }
 
-      // Check for uploads
-      try {
-        const uploadsResponse = await fetch(`/api/upload?ticker=${ticker}`);
-        if (uploadsResponse.ok) {
-          const uploadsData = await uploadsResponse.json();
+      // Process uploads
+      if (uploadsResult.status === 'fulfilled' && uploadsResult.value.ok) {
+        try {
+          const uploadsData = await uploadsResult.value.json();
           if (uploadsData.hasUploads && uploadsData.files) {
             uploadsData.files.forEach((fileName: string) => {
               files.push({
                 name: fileName,
                 type: 'upload',
                 size: 'Excel/CSV file',
-                lastModified: new Date().toISOString(), // We'll improve this later
+                lastModified: new Date().toISOString(),
                 path: `/data/uploads/${fileName}`
               });
             });
           }
+        } catch (e) {
+          console.log('Error parsing uploads data');
         }
-      } catch (e) {
-        console.log('No uploads found');
       }
 
-      // Check for target specs
-      try {
-        const specResponse = await fetch(`/api/target-spec/${ticker}`);
-        if (specResponse.ok) {
-          files.push({
-            name: `${ticker}-target-spec.json`,
-            type: 'spec',
-            size: 'Target specification',
-            lastModified: new Date().toISOString(),
-            path: `/api/target-spec/${ticker}`
-          });
-        }
-      } catch (e) {
-        console.log('No target spec found');
+      // Process target specs
+      if (specResult.status === 'fulfilled' && specResult.value.ok) {
+        files.push({
+          name: `${ticker}-target-spec.json`,
+          type: 'spec',
+          size: 'Target specification',
+          lastModified: new Date().toISOString(),
+          path: `/api/target-spec/${ticker}`
+        });
       }
 
-      // Check for forecasts
-      try {
-        const forecastResponse = await fetch(`/api/forecast/gbm/${ticker}`);
-        if (forecastResponse.ok) {
-          files.push({
-            name: `${ticker}-gbm-forecast.json`,
-            type: 'forecast',
-            size: 'GBM forecast data',
-            lastModified: new Date().toISOString(),
-            path: `/api/forecast/gbm/${ticker}`
-          });
-        }
-      } catch (e) {
-        console.log('No forecast found');
-      }
-
-      // Check for audit/repair records
-      try {
-        const auditFiles = [`repairs-${ticker}.json`];
-        // This would need an API endpoint to check audit files
-        // For now, we'll skip this check
-      } catch (e) {
-        console.log('No audit files found');
+      // Process forecasts
+      if (forecastResult.status === 'fulfilled' && forecastResult.value.ok) {
+        files.push({
+          name: `${ticker}-gbm-forecast.json`,
+          type: 'forecast',
+          size: 'GBM forecast data',
+          lastModified: new Date().toISOString(),
+          path: `/api/forecast/gbm/${ticker}`
+        });
       }
 
       setData({ company, files });

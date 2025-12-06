@@ -93,14 +93,15 @@ export async function loadBaseForecasts(symbol: string, method?: string): Promis
       .filter(f => !f.includes('Conformal')) // Exclude conformal forecasts
       .sort();
     
+    // Apply method filter if specified
+    let filesToLoad = forecastFiles;
     if (method) {
-      // Filter by specific method if provided
       const methodSlug = method.replace(/[^a-zA-Z0-9]/g, '-');
-      forecastFiles.filter(f => f.includes(methodSlug));
+      filesToLoad = forecastFiles.filter(f => f.includes(methodSlug));
     }
     
     const forecasts: ForecastRecord[] = [];
-    for (const file of forecastFiles) {
+    for (const file of filesToLoad) {
       try {
         const filePath = path.join(symbolDir, file);
         const content = await fs.promises.readFile(filePath, 'utf-8');

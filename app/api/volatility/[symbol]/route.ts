@@ -6,15 +6,153 @@ import { composePi } from '../../../../lib/volatility/piComposer';
 import { SigmaSource, VolParams, SigmaForecast, PiComposeInput } from '../../../../lib/volatility/types';
 import { getTargetSpec } from '../../../../lib/storage/targetSpecStore';
 import { loadCanonicalData } from '../../../../lib/storage/canonical';
-import { ForecastRecord } from '../../../../lib/forecast/types';
+import { ForecastRecord, GbmEstimates } from '../../../../lib/forecast/types';
 import { saveForecast, setActiveForecast } from '../../../../lib/forecast/store';
 import { specFileFor } from '../../../../lib/paths';
 import { getNormalCritical, getStudentTCritical } from '../../../../lib/forecast/critical';
-import { computeGbmForecast } from '../../../../lib/gbm/engine_old';
-import { computeGbmExpectedPrice } from '../../../../lib/gbm/engine';
+import { 
+  computeGbmEstimates, 
+  computeGbmInterval, 
+  computeGbmExpectedPrice,
+  validateSeriesForGBM,
+  type GbmInputs
+} from '../../../../lib/gbm/engine';
 import { getNthTradingCloseAfter } from '../../../../lib/calendar/service';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/**
+ * Compute a GBM forecast using pure functions from engine.ts
+ * This replaces the I/O-heavy computeGbmForecast from engine_old.ts
+ */
+async function computeGbmForecastPure(params: {
+  symbol: string;
+  date_t: string;
+  window: number;
+  lambda_drift: number;
+  canonicalData: Array<{ date: string; adj_close: number | null }>;
+  h: number;
+  coverage: number;
+}): Promise<ForecastRecord> {
+  const { symbol, date_t, window, lambda_drift, canonicalData, h, coverage } = params;
+
+  // Filter valid rows and sort by date
+  const validRows = canonicalData
+    .filter(row => row.adj_close !== null && row.adj_close > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  if (validRows.length === 0) {
+    throw new Error('No valid price data found');
+  }
+
+  // Find index for date_t
+  const dateIndex = validRows.findIndex(row => row.date === date_t);
+  if (dateIndex === -1) {
+    throw new Error(`Date ${date_t} not found in canonical data`);
+  }
+
+  // Get S_t
+  const S_t = validRows[dateIndex].adj_close!;
+  if (S_t <= 0) {
+    throw new Error('Non-positive price at date_t');
+  }
+
+  // Get window slice
+  const endIndex = dateIndex;
+  const startIndex = Math.max(0, endIndex - window + 1);
+  
+  if (endIndex - startIndex + 1 < window) {
+    throw new Error(`Insufficient history (N<window): have ${endIndex - startIndex + 1}, need ${window}`);
+  }
+
+  const windowRows = validRows.slice(startIndex, endIndex + 1);
+  const dates = windowRows.map(r => r.date);
+  const adjClose = windowRows.map(r => r.adj_close!);
+
+  // Use pure GBM estimation
+  const gbmInput: GbmInputs = {
+    dates,
+    adjClose,
+    windowN: window as 252 | 504 | 756,
+    lambdaDrift: lambda_drift,
+    coverage
+  };
+
+  const estimates = computeGbmEstimates(gbmInput);
+
+  // Compute interval for horizon h
+  const interval = computeGbmInterval({
+    S_t,
+    muStarUsed: estimates.mu_star_used,
+    sigmaHat: estimates.sigma_hat,
+    h_trading: h,
+    coverage
+  });
+
+  // Compute expected price (y_hat)
+  const y_hat = S_t * Math.exp(estimates.mu_star_used * h);
+
+  // Band width in basis points
+  const band_width_bp = Math.round(10000 * (interval.U_h / interval.L_h - 1));
+
+  // Build estimates object matching the expected shape
+  const forecastEstimates: GbmEstimates = {
+    mu_star_hat: estimates.mu_star_hat,
+    sigma_hat: estimates.sigma_hat,
+    mu_star_used: estimates.mu_star_used,
+    window_start: windowRows[0].date,
+    window_end: windowRows[windowRows.length - 1].date,
+    n: windowRows.length - 1 // Number of returns
+  };
+
+  // Build forecast record
+  const forecastRecord: ForecastRecord = {
+    symbol,
+    date_t,
+    method: "GBM-CC",
+    y_hat,
+    params: {
+      window,
+      lambda_drift,
+      coverage,
+      h
+    },
+    estimates: forecastEstimates,
+    target: {
+      h,
+      coverage
+    },
+    S_t,
+    critical: {
+      type: "normal",
+      z_alpha: estimates.z_alpha
+    },
+    m_log: interval.m_t,
+    s_scale: interval.s_t,
+    L_h: interval.L_h,
+    U_h: interval.U_h,
+    band_width_bp,
+    provenance: {
+      rng_seed: null,
+      params_snapshot: {
+        window,
+        lambda_drift,
+        coverage,
+        h,
+        method: "GBM-CC"
+      },
+      regime_tag: null,
+      conformal: null
+    },
+    locked: true,
+    created_at: new Date().toISOString()
+  };
+
+  // Persist forecast
+  await saveForecast(forecastRecord);
+  
+  return forecastRecord;
+}
 
 interface VolatilityRequest {
   model: SigmaSource;
@@ -140,15 +278,18 @@ export async function POST(
             );
           }
           
-          // Call the GBM computation function directly and return the ForecastRecord
-          const gbmForecast = await computeGbmForecast({
+          // Use pure GBM computation with canonical data already loaded
+          const gbmForecast = await computeGbmForecastPure({
             symbol,
             date_t,
             window: volParams.gbm.windowN,
-            lambda_drift: volParams.gbm.lambdaDrift
+            lambda_drift: volParams.gbm.lambdaDrift,
+            canonicalData,
+            h,
+            coverage
           });
           
-          // Save and activate the forecast
+          // Activate the forecast
           await setActiveForecast(symbol, date_t, 'GBM-CC');
           
           return NextResponse.json({
