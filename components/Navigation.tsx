@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
+import { TickerSearch } from '@/components/TickerSearch';
 
 export default function Navigation() {
   const pathname = usePathname();
@@ -15,13 +16,26 @@ export default function Navigation() {
     { href: '/watchlist', label: 'Watchlist' },
   ];
 
+  // Extract current ticker from pathname if on a company page
+  const tickerMatch = pathname.match(/\/company\/([^/]+)/);
+  const currentTicker = tickerMatch ? tickerMatch[1] : undefined;
+
   return (
     <nav className={`shadow-sm border-b ${isDarkMode ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}>
       <div className="w-full px-[5%]">
         <div className="flex justify-between items-center h-12">
-          <Link href="/" className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-            Axel
-          </Link>
+          <div className="flex items-center gap-6">
+            <Link href="/" className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+              Axel
+            </Link>
+            
+            {/* Ticker Search in Navbar */}
+            <TickerSearch 
+              initialSymbol={currentTicker} 
+              isDarkMode={isDarkMode}
+              compact={true}
+            />
+          </div>
           
           <div className="flex space-x-8">
             {navItems.map((item) => (

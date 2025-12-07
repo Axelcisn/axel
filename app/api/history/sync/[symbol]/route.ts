@@ -41,11 +41,30 @@ export async function GET(
   const symbol = rawSymbol.toUpperCase();
 
   const { searchParams } = new URL(request.url);
-  const range = searchParams.get("range") ?? "5y";
   const interval = searchParams.get("interval") ?? "1d";
+  
+  // Sensible range defaults per interval
+  const defaultRangeForInterval: Record<string, string> = {
+    "1d": "5y",
+    "1h": "6mo",
+    "1m": "5d",
+  };
+  const range = searchParams.get("range") ?? defaultRangeForInterval[interval] ?? "1y";
 
   try {
     const rows = await fetchYahooOhlcv(symbol, { range, interval });
+
+    // Check if Yahoo returned empty data (symbol not found or no data available)
+    if (!rows || rows.length === 0) {
+      return NextResponse.json(
+        {
+          error: "yahoo_not_found",
+          symbol,
+          message: `No Yahoo Finance data found for ${symbol}`,
+        },
+        { status: 404 }
+      );
+    }
 
     // Build meta compatible with the existing canonical pipeline
     const meta = buildMeta(symbol, rows, {
@@ -61,12 +80,32 @@ export async function GET(
   } catch (err: unknown) {
     console.error("Yahoo history sync error", err);
     const message = err instanceof Error ? err.message : "Unknown error";
+
+    // Distinguish between "no data" errors and network/server errors
+    const isNotFound =
+      message.includes("chart error") ||
+      message.includes("Not Found") ||
+      message.includes("No data");
+
+    if (isNotFound) {
+      return NextResponse.json(
+        {
+          error: "yahoo_not_found",
+          symbol,
+          message: `No Yahoo Finance data found for ${symbol}`,
+        },
+        { status: 404 }
+      );
+    }
+
+    // Network/server/rate-limit errors
     return NextResponse.json(
       {
-        error: "Yahoo history sync failed",
-        message,
+        error: "yahoo_failed",
+        symbol,
+        message: "Failed to fetch data from Yahoo Finance. Please try again later.",
       },
-      { status: 500 }
+      { status: 502 }
     );
   }
 }

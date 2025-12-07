@@ -420,6 +420,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Auto-sync state for handling missing canonical history
+  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
+  const [hasTriedSync, setHasTriedSync] = useState(false);
+  
+  
   // Zoom state - tracks how many days to show from the end
   const [zoomDays, setZoomDays] = useState<number | null>(null);
 
@@ -528,57 +533,185 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [allDates, dateRangePreset, fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
-  // Fetch full history once
+  // Helper to parse rows into PricePoint[]
+  const parseRowsToPoints = (rows: any[]): PricePoint[] => {
+    return rows
+      .filter((row: any) => row.valid !== false)
+      .map((row: any) => ({
+        date: row.date,
+        adj_close:
+          typeof row.adj_close === "number"
+            ? row.adj_close
+            : typeof row.close === "number"
+            ? row.close
+            : NaN,
+        open: typeof row.open === "number" ? row.open : undefined,
+        high: typeof row.high === "number" ? row.high : undefined,
+        low: typeof row.low === "number" ? row.low : undefined,
+        close: typeof row.close === "number" ? row.close : undefined,
+        volume: typeof row.volume === "number" ? row.volume : undefined,
+      }))
+      .filter((p: PricePoint) => !isNaN(p.adj_close))
+      .sort((a: PricePoint, b: PricePoint) => a.date.localeCompare(b.date));
+  };
+
+  // Fetch full history with auto-sync for missing symbols
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
+    const loadHistoryWithAutoSync = async () => {
+      setLoading(true);
+      setError(null);
+      setHasTriedSync(false);
+
+      // Build URL with interval param
+  const interval = "1d";
+  const historyUrl = `/api/history/${encodeURIComponent(symbol)}?interval=${interval}`;
+
       try {
-        setLoading(true);
-        setError(null);
+        const res = await fetch(historyUrl, { cache: "no-store" });
 
-        const res = await fetch(`/api/history/${encodeURIComponent(symbol)}`);
-        if (!res.ok) {
-          throw new Error(`Failed to load history (${res.status})`);
+        if (res.ok) {
+          const json = await res.json();
+          const rows = Array.isArray(json.rows) ? json.rows : [];
+          const points = parseRowsToPoints(rows);
+
+          // Check if the loaded data matches the requested interval
+          const storedInterval = json.meta?.interval;
+          if (storedInterval && storedInterval !== interval) {
+            // Mismatch - trigger sync for the new interval
+            if (!cancelled) {
+              setHasTriedSync(true);
+              setIsSyncingHistory(true);
+            }
+
+            const syncUrl = `/api/history/sync/${encodeURIComponent(symbol)}?interval=${interval}`;
+            const syncRes = await fetch(syncUrl, { method: "GET" });
+
+            if (!cancelled) {
+              setIsSyncingHistory(false);
+            }
+
+            if (!syncRes.ok) {
+              if (!cancelled) {
+                let errorMessage = `Failed to sync ${interval} history for ${symbol}`;
+                try {
+                  const syncErr = await syncRes.json();
+                  if (syncErr.error === "yahoo_not_found") {
+                    errorMessage = `Symbol "${symbol}" not found on Yahoo Finance`;
+                  } else if (syncErr.error === "yahoo_failed") {
+                    errorMessage = "Yahoo Finance is temporarily unavailable. Please try again later.";
+                  }
+                } catch {
+                  // Fallback to generic message
+                }
+                setError(errorMessage);
+                setLoading(false);
+              }
+              return;
+            }
+
+            // Re-fetch after sync
+            const res2 = await fetch(historyUrl, { cache: "no-store" });
+            if (!res2.ok) {
+              if (!cancelled) {
+                setError(`Failed to load history after sync (${res2.status})`);
+                setLoading(false);
+              }
+              return;
+            }
+
+            const json2 = await res2.json();
+            const rows2 = Array.isArray(json2.rows) ? json2.rows : [];
+            const points2 = parseRowsToPoints(rows2);
+
+            if (!cancelled) {
+              setFullData(points2);
+              setLoading(false);
+            }
+            return;
+          }
+
+          if (!cancelled) {
+            setFullData(points);
+            setLoading(false);
+          }
+          return;
         }
-        const json = await res.json();
-        const rows = Array.isArray(json.rows) ? json.rows : [];
 
-        const points: PricePoint[] = rows
-          .filter((row: any) => row.valid !== false)
-          .map((row: any) => ({
-            date: row.date,
-            adj_close:
-              typeof row.adj_close === "number"
-                ? row.adj_close
-                : typeof row.close === "number"
-                ? row.close
-                : NaN,
-            open: typeof row.open === "number" ? row.open : undefined,
-            high: typeof row.high === "number" ? row.high : undefined,
-            low: typeof row.low === "number" ? row.low : undefined,
-            close: typeof row.close === "number" ? row.close : undefined,
-            volume: typeof row.volume === "number" ? row.volume : undefined,
-          }))
-          .filter((p: PricePoint) => !isNaN(p.adj_close))
-          .sort((a: PricePoint, b: PricePoint) => a.date.localeCompare(b.date));
+        // Handle 404 -> auto sync via Yahoo
+        if (res.status === 404) {
+          if (!cancelled) {
+            setHasTriedSync(true);
+            setIsSyncingHistory(true);
+          }
 
+          const syncUrl = `/api/history/sync/${encodeURIComponent(symbol)}?interval=${interval}`;
+          const syncRes = await fetch(syncUrl, { method: "GET" });
+
+          if (!cancelled) {
+            setIsSyncingHistory(false);
+          }
+
+          if (!syncRes.ok) {
+            if (!cancelled) {
+              // Parse structured error from sync endpoint
+              let errorMessage = `Failed to sync history for ${symbol}`;
+              try {
+                const syncErr = await syncRes.json();
+                if (syncErr.error === "yahoo_not_found") {
+                  errorMessage = `Symbol "${symbol}" not found on Yahoo Finance`;
+                } else if (syncErr.error === "yahoo_failed") {
+                  errorMessage = "Yahoo Finance is temporarily unavailable. Please try again later.";
+                }
+              } catch {
+                // Fallback to generic message
+              }
+              setError(errorMessage);
+              setLoading(false);
+            }
+            return;
+          }
+
+          // After successful sync, re-fetch history
+          const res2 = await fetch(historyUrl, { cache: "no-store" });
+
+          if (!res2.ok) {
+            if (!cancelled) {
+              setError(`Failed to load history after sync (${res2.status})`);
+              setLoading(false);
+            }
+            return;
+          }
+
+          const json2 = await res2.json();
+          const rows2 = Array.isArray(json2.rows) ? json2.rows : [];
+          const points2 = parseRowsToPoints(rows2);
+
+          if (!cancelled) {
+            setFullData(points2);
+            setLoading(false);
+          }
+          return;
+        }
+
+        // Any other non-OK status: treat as error
         if (!cancelled) {
-          setFullData(points);
+          setError(`Failed to load history (${res.status})`);
+          setLoading(false);
         }
       } catch (err) {
         if (!cancelled) {
-          console.error("PriceChart load error:", err);
-          setError(err instanceof Error ? err.message : "Load failed");
-        }
-      } finally {
-        if (!cancelled) {
+          console.error("PriceChart history load error:", err);
+          setError(err instanceof Error ? err.message : "Failed to load history");
           setLoading(false);
+          setIsSyncingHistory(false);
         }
       }
     };
 
-    load();
+    loadHistoryWithAutoSync();
+
     return () => {
       cancelled = true;
     };
@@ -4358,159 +4491,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 )}
               </div>
             </div>
-
-            {/* Vertical Divider - before Simulation */}
-            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-
-            {/* Simulation Section */}
-            <div className="flex flex-col gap-0.5">
-              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Simulation</span>
-              <div className="flex items-center gap-1">
-                {/* CFD Button */}
-                <button
-                  onClick={onToggleCfd}
-                  className={`
-                    px-2 py-0.5 text-xs rounded-full transition-colors
-                    ${isCfdEnabled
-                      ? 'bg-blue-500 text-white'
-                      : isDarkMode 
-                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }
-                  `}
-                >
-                  CFD
-                </button>
-
-                {/* Simulation Settings Button (⋯) with Dropdown */}
-                <div className="relative" ref={simulationSettingsDropdownRef}>
-                  <button
-                    onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
-                    className={`
-                      w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
-                      ${showSimulationSettingsDropdown
-                        ? isDarkMode 
-                          ? 'border-amber-500 text-amber-400' 
-                          : 'border-amber-500 text-amber-600'
-                        : isDarkMode 
-                          ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
-                          : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                      }
-                    `}
-                    title="Simulation Settings"
-                  >
-                    ⋯
-                  </button>
-
-                  {/* Simulation Settings Dropdown */}
-                  {showSimulationSettingsDropdown && (
-                    <div 
-                      className={`
-                        absolute top-10 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
-                        ${isDarkMode 
-                          ? 'bg-gray-900/80 border-gray-500/30' 
-                          : 'bg-white/80 border-gray-400/30'
-                        }
-                      `}
-                    >
-                      <div className="space-y-2 text-xs">
-                        {/* Initial Equity Row */}
-                        <div className="flex items-center justify-between gap-4">
-                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
-                          <input
-                            type="number"
-                            min={100}
-                            max={1000000}
-                            step={100}
-                            value={simulationInitialEquity}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              if (Number.isFinite(val) && val >= 100) {
-                                setSimulationInitialEquity(val);
-                              }
-                            }}
-                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                              isDarkMode 
-                                ? 'border-gray-600 text-white focus:border-amber-500' 
-                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                            }`}
-                          />
-                        </div>
-
-                        {/* Leverage Row */}
-                        <div className="flex items-center justify-between gap-4">
-                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={100}
-                            step={1}
-                            value={simulationLeverage}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              if (Number.isFinite(val) && val >= 1) {
-                                setSimulationLeverage(Math.min(100, val));
-                              }
-                            }}
-                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                              isDarkMode 
-                                ? 'border-gray-600 text-white focus:border-amber-500' 
-                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                            }`}
-                          />
-                        </div>
-
-                        {/* Position % Row */}
-                        <div className="flex items-center justify-between gap-4">
-                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
-                          <input
-                            type="number"
-                            min={1}
-                            max={100}
-                            step={1}
-                            value={simulationPositionPct}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              if (Number.isFinite(val) && val >= 1) {
-                                setSimulationPositionPct(Math.min(100, val));
-                              }
-                            }}
-                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                              isDarkMode 
-                                ? 'border-gray-600 text-white focus:border-amber-500' 
-                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                            }`}
-                          />
-                        </div>
-
-                        {/* Bias Threshold Row */}
-                        <div className="flex items-center justify-between gap-4">
-                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={1}
-                            value={simulationBiasThreshold}
-                            onChange={(e) => {
-                              const val = Number(e.target.value);
-                              if (Number.isFinite(val) && val >= 0) {
-                                setSimulationBiasThreshold(Math.min(100, val));
-                              }
-                            }}
-                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                              isDarkMode 
-                                ? 'border-gray-600 text-white focus:border-amber-500' 
-                                : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                            }`}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
           </div>
         )}
         
@@ -4537,12 +4517,19 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           <div className="flex h-[400px] items-center justify-center">
             <div className="flex flex-col items-center space-y-2">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"></div>
-              <div className={`text-sm ${isDarkMode ? 'text-gray-500' : 'text-gray-600'}`}>Loading chart...</div>
+              <div className={`text-sm ${isDarkMode ? 'text-gray-500' : 'text-gray-600'}`}>
+                {isSyncingHistory ? 'Syncing history from Yahoo…' : 'Loading chart...'}
+              </div>
             </div>
           </div>
         ) : error ? (
-          <div className={`flex h-[400px] items-center justify-center text-xs ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
-            {error}
+          <div className={`flex h-[400px] flex-col items-center justify-center gap-2 ${isDarkMode ? 'text-red-400' : 'text-red-600'}`}>
+            <div className="text-xs">{error}</div>
+            {hasTriedSync && (
+              <div className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                Could not find or sync historical data for this symbol.
+              </div>
+            )}
           </div>
         ) : chartDataWithEwma.length === 0 ? (
           <div className={`flex h-[400px] items-center justify-center text-xs ${isDarkMode ? 'text-muted-foreground' : 'text-gray-500'}`}>
@@ -4553,6 +4540,156 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             {memoizedChartElement}
           </>
         )}
+      </div>
+
+      {/* Simulation Controls Row - Above tabs */}
+      <div className="mt-4 mb-2 flex flex-col gap-1">
+        <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Simulation</span>
+        <div className="flex items-center gap-2">
+          {/* CFD Toggle Button */}
+          <button
+            onClick={onToggleCfd}
+            className={`
+              px-3 py-1 text-xs rounded-full transition-colors font-medium
+              ${isCfdEnabled
+                ? 'bg-blue-500 text-white'
+                : isDarkMode 
+                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }
+            `}
+          >
+            {isCfdEnabled ? 'CFD On' : 'CFD Off'}
+          </button>
+
+          {/* Simulation Settings Button (⋯) with Dropdown */}
+          <div className="relative" ref={simulationSettingsDropdownRef}>
+            <button
+              onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
+              className={`
+                w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
+                ${showSimulationSettingsDropdown
+                  ? isDarkMode 
+                    ? 'border-amber-500 text-amber-400' 
+                    : 'border-amber-500 text-amber-600'
+                  : isDarkMode 
+                    ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
+                    : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                }
+              `}
+              title="Simulation Settings"
+            >
+              ⋯
+            </button>
+
+            {/* Simulation Settings Dropdown */}
+            {showSimulationSettingsDropdown && (
+            <div 
+              className={`
+                absolute top-8 left-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
+                ${isDarkMode 
+                  ? 'bg-gray-900/95 border-gray-500/30' 
+                  : 'bg-white/95 border-gray-400/30'
+                }
+              `}
+            >
+              <div className="space-y-2 text-xs">
+                {/* Initial Equity Row */}
+                <div className="flex items-center justify-between gap-4">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
+                  <input
+                    type="number"
+                    min={100}
+                    max={1000000}
+                    step={100}
+                    value={simulationInitialEquity}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val) && val >= 100) {
+                        setSimulationInitialEquity(val);
+                      }
+                    }}
+                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                      isDarkMode 
+                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+
+                {/* Leverage Row */}
+                <div className="flex items-center justify-between gap-4">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={simulationLeverage}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val) && val >= 1) {
+                        setSimulationLeverage(Math.min(100, val));
+                      }
+                    }}
+                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                      isDarkMode 
+                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+
+                {/* Position % Row */}
+                <div className="flex items-center justify-between gap-4">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    step={1}
+                    value={simulationPositionPct}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val) && val >= 1) {
+                        setSimulationPositionPct(Math.min(100, val));
+                      }
+                    }}
+                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                      isDarkMode 
+                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+
+                {/* Bias Threshold Row */}
+                <div className="flex items-center justify-between gap-4">
+                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={simulationBiasThreshold}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      if (Number.isFinite(val) && val >= 0) {
+                        setSimulationBiasThreshold(Math.min(100, val));
+                      }
+                    }}
+                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                      isDarkMode 
+                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                    }`}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+          </div>
+        </div>
       </div>
 
       {/* TradingView-style Insights Panel - Always visible */}

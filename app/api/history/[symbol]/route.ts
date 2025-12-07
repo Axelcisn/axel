@@ -10,6 +10,7 @@ export async function GET(
     const url = new URL(request.url);
     const start = url.searchParams.get("start");
     const end = url.searchParams.get("end");
+    const requestedInterval = url.searchParams.get("interval"); // e.g., "1d", "1h", "1m"
 
     // Load canonical data using existing utility
     const canonicalData = await loadCanonicalDataWithMeta(symbol);
@@ -22,6 +23,14 @@ export async function GET(
     }
 
     let { rows, meta } = canonicalData;
+
+    // Log a warning if the requested interval doesn't match stored meta (debug helper)
+    const storedInterval = (meta as any)?.interval;
+    if (requestedInterval && storedInterval && requestedInterval !== storedInterval) {
+      console.warn(
+        `[history/${symbol}] Requested interval=${requestedInterval} but canonical has interval=${storedInterval}`
+      );
+    }
 
     // Filter by date range if provided
     if (start || end) {
@@ -46,10 +55,23 @@ export async function GET(
       }
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('Historical data API error:', error);
+
+    // Detect missing file / missing canonical case
+    const code = error?.code;
+    const msg = String(error?.message ?? "");
+
+    if (code === "ENOENT" || msg.includes("No canonical data")) {
+      const { symbol } = params;
+      return NextResponse.json(
+        { error: "not_found", symbol, message: `No canonical history found for ${symbol}` },
+        { status: 404 }
+      );
+    }
+
     return NextResponse.json(
-      { error: 'Failed to fetch historical data' },
+      { error: "internal_error", message: "Failed to fetch historical data" },
       { status: 500 }
     );
   }

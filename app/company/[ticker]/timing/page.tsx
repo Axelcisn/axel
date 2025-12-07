@@ -41,6 +41,8 @@ import {
   PairedTradesSummary,
   RealTradesOverlay,
 } from '@/lib/trading212/tradesClient';
+import { TickerSearch } from '@/components/TickerSearch';
+import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 
 // Badge component interface and implementation
 interface BadgeProps {
@@ -176,6 +178,9 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Base forecast for conformal (internal, not displayed until conformal is applied)
   const [baseForecast, setBaseForecast] = useState<any | null>(null);
+
+  // Current price state for header display
+  const [headerPrice, setHeaderPrice] = useState<{ price: number | null; date: string | null }>({ price: null, date: null });
 
   // Single source for what the "Final Prediction Intervals" card shows
   const [activeForecast, setActiveForecast] = useState<any | null>(null);
@@ -895,6 +900,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           loadTargetSpec(),
           loadLatestForecast(),
           loadCompanyInfo(),
+          loadCurrentPrice(),
           loadExistingCorporateActions(),
           loadDelistingStatus(),
           loadExistingCanonicalData()
@@ -1048,6 +1054,23 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.error('Failed to load company info:', error);
       // Set default ticker from URL
       setCompanyTicker(params.ticker);
+    }
+  };
+
+  // Fetch current price for header display
+  const loadCurrentPrice = async () => {
+    try {
+      const response = await fetch(`/api/history/${params.ticker}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data && data.length > 0) {
+          const latest = data[data.length - 1];
+          const price = latest.adj_close ?? latest.close ?? null;
+          setHeaderPrice({ price, date: latest.date });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load current price:', error);
     }
   };
 
@@ -4188,14 +4211,34 @@ export default function TimingPage({ params }: TimingPageProps) {
     <div className={`w-full px-[5%] py-6 ${
       isDarkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
     }`}>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className={`text-3xl font-bold ${
             isDarkMode ? 'text-white' : 'text-gray-900'
           }`}>{companyName || companyTicker}</h1>
-          <p className={`text-xl ${
-            isDarkMode ? 'text-gray-300' : 'text-gray-600'
-          }`}>{companyTicker} · {companyExchange}</p>
+          <div className="flex items-center gap-2">
+            <span className={`text-sm ${
+              isDarkMode ? 'text-gray-400' : 'text-gray-500'
+            }`}>{companyTicker} · {companyExchange}</span>
+            <MarketSessionBadge symbol={params.ticker} />
+          </div>
+          {/* Current price under title (Google Finance style) */}
+          {headerPrice.price != null && (
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className={`text-2xl font-semibold ${
+                isDarkMode ? 'text-white' : 'text-gray-900'
+              }`}>
+                {headerPrice.price.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+              </span>
+              {headerPrice.date && (
+                <span className={`text-xs ${
+                  isDarkMode ? 'text-gray-500' : 'text-gray-400'
+                }`}>
+                  as of {headerPrice.date}
+                </span>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {watchlistSuccess && (
