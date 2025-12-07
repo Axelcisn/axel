@@ -360,6 +360,18 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [reactionOptimizeError, setReactionOptimizeError] = useState<string | null>(null);
 
   // Trading212 CFD Simulation state
+  const [isCfdEnabled, setIsCfdEnabled] = useState(false);  // CFD simulation toggle
+  const [t212DateRange, setT212DateRange] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });  // Date range filter for simulation
+  
+  // Memoized callback for date range changes to avoid infinite loops
+  const handleDateRangeChange = useCallback((start: string | null, end: string | null) => {
+    setT212DateRange(prev => {
+      // Only update if values actually changed
+      if (prev.start === start && prev.end === end) return prev;
+      return { start, end };
+    });
+  }, []);
+  
   const [t212InitialEquity, setT212InitialEquity] = useState(5000);
   const [t212Leverage, setT212Leverage] = useState(5);
   const [t212PositionFraction, setT212PositionFraction] = useState(0.25); // 25% default
@@ -432,6 +444,87 @@ export default function TimingPage({ params }: TimingPageProps) {
     const visibleRun = t212Runs.find((run) => t212VisibleRunIds.has(run.id));
     return visibleRun?.result.accountHistory ?? null;
   }, [t212Runs, t212VisibleRunIds]);
+
+  // Filter t212Runs by date range for table display
+  type FilteredStats = {
+    days: number;
+    firstDate: string;
+    lastDate: string;
+    returnPct: number;
+    maxDrawdown: number;
+    tradeCount: number;
+    stopOutEvents: number;
+  };
+  type T212RunFiltered = Trading212SimRun & { filteredHistory: Trading212AccountSnapshot[]; filteredStats: FilteredStats | null };
+  
+  const t212RunsFiltered: T212RunFiltered[] = useMemo(() => {
+    if (!t212DateRange.start || !t212DateRange.end) {
+      // No filter - return runs with null filteredStats (will use original values)
+      return t212Runs.map((run) => ({ ...run, filteredHistory: run.result.accountHistory, filteredStats: null }));
+    }
+    const startDate = t212DateRange.start;
+    const endDate = t212DateRange.end;
+    return t212Runs.map((run) => {
+      const filtered = run.result.accountHistory.filter(
+        (snap) => snap.date >= startDate && snap.date <= endDate
+      );
+      if (filtered.length === 0) {
+        return { ...run, filteredHistory: [] as Trading212AccountSnapshot[], filteredStats: null };
+      }
+      // Recalculate stats for filtered range
+      const first = filtered[0];
+      const last = filtered[filtered.length - 1];
+      const filteredReturn = (last.equity - first.equity) / first.equity;
+      // Max drawdown within filtered range
+      let peak = first.equity;
+      let maxDd = 0;
+      for (const snap of filtered) {
+        if (snap.equity > peak) peak = snap.equity;
+        const dd = (peak - snap.equity) / peak;
+        if (dd > maxDd) maxDd = dd;
+      }
+      // Count trades within date range
+      const filteredTrades = run.result.trades.filter(
+        (t) => t.entryDate >= startDate && t.entryDate <= endDate
+      );
+      // Stop-outs can't be tracked per-trade; use 0 for filtered view
+      const filteredStopOuts = 0;
+      return {
+        ...run,
+        filteredHistory: filtered,
+        filteredStats: {
+          days: filtered.length,
+          firstDate: first.date,
+          lastDate: last.date,
+          returnPct: filteredReturn,
+          maxDrawdown: maxDd,
+          tradeCount: filteredTrades.length,
+          stopOutEvents: filteredStopOuts,
+        },
+      };
+    });
+  }, [t212Runs, t212DateRange]);
+
+  // Create simulation runs summary for PriceChart Overview tab
+  const simulationRunsSummary = useMemo(() => {
+    return t212RunsFiltered.map((run) => {
+      const r = run.result;
+      const stats = run.filteredStats;
+      return {
+        id: run.id,
+        label: run.label,
+        lambda: run.lambda,
+        trainFraction: run.trainFraction,
+        returnPct: stats ? stats.returnPct : (r.finalEquity - r.initialEquity) / r.initialEquity,
+        maxDrawdown: stats ? stats.maxDrawdown : r.maxDrawdown,
+        tradeCount: stats ? stats.tradeCount : r.trades.length,
+        stopOutEvents: stats ? stats.stopOutEvents : r.stopOutEvents,
+        days: stats ? stats.days : r.accountHistory.length,
+        firstDate: stats ? stats.firstDate : (r.accountHistory.length > 0 ? r.accountHistory[0].date : "—"),
+        lastDate: stats ? stats.lastDate : (r.accountHistory.length > 0 ? r.accountHistory[r.accountHistory.length - 1].date : "—"),
+      };
+    });
+  }, [t212RunsFiltered]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -1707,6 +1800,16 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
   }, [t212Runs]);
 
+  // Clear T212 runs when CFD is disabled (but keep EWMA overlay selection)
+  useEffect(() => {
+    if (!isCfdEnabled && t212Runs.length > 0) {
+      console.log("[T212] CFD disabled, clearing runs (keeping EWMA overlay selection)");
+      setT212Runs([]);
+      setT212CurrentRunId(null);
+      // Don't clear t212VisibleRunIds - keep EWMA overlay active on chart
+    }
+  }, [isCfdEnabled, t212Runs.length]);
+
   // Clear T212 runs when key parameters change to trigger fresh re-computation
   useEffect(() => {
     if (t212Runs.length > 0) {
@@ -1726,9 +1829,10 @@ export default function TimingPage({ params }: TimingPageProps) {
     t212ThresholdPct,
   ]);
 
-  // Auto-run T212 sims when data is ready and there are no runs
+  // Auto-run T212 sims when CFD is enabled and data is ready
   useEffect(() => {
     console.log("[T212 Auto-Run] Checking conditions:", {
+      isCfdEnabled,
       t212RunsLength: t212Runs.length,
       hasEwmaPath: !!ewmaPath && ewmaPath.length > 0,
       hasEwmaBiasedPath: !!ewmaBiasedPath && ewmaBiasedPath.length > 0,
@@ -1736,6 +1840,9 @@ export default function TimingPage({ params }: TimingPageProps) {
       hasOptimizationBest: !!reactionOptimizationBest,
     });
 
+    // Only run when CFD is enabled
+    if (!isCfdEnabled) return;
+    
     // Only auto-run when we have no runs and the core model data is ready
     if (t212Runs.length > 0) return;
 
@@ -1767,6 +1874,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       );
     }
   }, [
+    isCfdEnabled,
     t212Runs.length,
     ewmaPath,
     ewmaBiasedPath,
@@ -1777,6 +1885,9 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Add "EWMA Biased (Max)" run when optimization completes (if not already present)
   useEffect(() => {
+    // Only add if CFD is enabled
+    if (!isCfdEnabled) return;
+    
     // Only add if we have optimization results and the run doesn't exist yet
     if (!reactionOptimizationBest) return;
     if (!ewmaBiasedPath || ewmaBiasedPath.length === 0) return;
@@ -1793,7 +1904,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       "EWMA Biased (Max)",
       { autoSelect: false }
     );
-  }, [reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource]);
+  }, [isCfdEnabled, reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -4068,6 +4179,10 @@ export default function TimingPage({ params }: TimingPageProps) {
           t212AccountHistory={t212AccountHistory}
           activeT212RunId={t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null}
           onToggleT212Run={toggleT212RunVisibility}
+          isCfdEnabled={isCfdEnabled}
+          onToggleCfd={() => setIsCfdEnabled(prev => !prev)}
+          onDateRangeChange={handleDateRangeChange}
+          simulationRuns={simulationRunsSummary}
         />
       </div>
       
@@ -4336,231 +4451,6 @@ export default function TimingPage({ params }: TimingPageProps) {
             Click &quot;Run&quot; to compute the EWMA Reaction Map
           </div>
         )}
-      </div>
-
-      {/* Trading212 CFD Simulation */}
-      <div className="mb-8">
-        <h3
-          className={`text-lg font-semibold mb-4 ${
-            isDarkMode ? "text-white" : "text-gray-900"
-          }`}
-        >
-          Trading212 CFD Simulation
-        </h3>
-
-          {/* Loading indicator */}
-          {isRunningT212Sim && (
-            <span className="text-[11px] text-slate-400 animate-pulse">Running sim...</span>
-          )}
-
-          {/* Error */}
-          {t212Error && (
-            <p className="text-xs text-rose-400 mb-2">{t212Error}</p>
-          )}
-
-          {/* Simulation Comparison Table */}
-          {t212Runs.length > 0 && (
-            <div className="mt-2">
-              <h4
-                className={`text-[11px] font-semibold mb-2 ${
-                  isDarkMode ? "text-slate-300" : "text-gray-700"
-                }`}
-              >
-                Simulation Comparison
-              </h4>
-              
-              <div className={`p-4 rounded-xl border ${
-                isDarkMode 
-                  ? 'bg-slate-900/60 border-slate-700/50' 
-                  : 'bg-gray-50 border-gray-200'
-              }`}>
-                <div className="overflow-x-auto">
-                  <table className={`min-w-full text-[11px] ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
-                    <thead className={`border-b ${isDarkMode ? 'text-slate-400 border-slate-700/70' : 'text-gray-500 border-gray-200'}`}>
-                      <tr>
-                        <th className="py-1 pr-3 text-left">Label</th>
-                        <th className="py-1 pr-3 text-right">λ</th>
-                        <th className="py-1 pr-3 text-right">Train%</th>
-                        <th className="py-1 pr-3 text-right">Return</th>
-                        <th className="py-1 pr-3 text-right">Max DD</th>
-                        <th className="py-1 pr-3 text-right">Trades</th>
-                        <th className="py-1 pr-3 text-right">Stop-outs</th>
-                        <th className="py-1 pr-3 text-right">Days</th>
-                        <th className="py-1 pr-3 text-right">First Date</th>
-                        <th className="py-1 pr-3 text-right">Last Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {t212Runs.map((run) => {
-                      const r = run.result;
-                      const ret =
-                        (r.finalEquity - r.initialEquity) / r.initialEquity;
-                      const maxDdPct = r.maxDrawdown * 100;
-
-                      // Debug: Log table row values (only once per render cycle via effect below)
-                      
-                      const isCurrent = run.id === t212CurrentRunId;
-
-                      return (
-                        <tr
-                          key={run.id}
-                          className={`border-b transition-colors ${
-                            isDarkMode 
-                              ? `border-slate-800/60 hover:bg-slate-800/70 ${isCurrent ? 'bg-slate-800/60' : ''}`
-                              : `border-gray-100 hover:bg-gray-50 ${isCurrent ? 'bg-gray-100' : ''}`
-                          }`}
-                        >
-                          <td className="py-1.5 pr-3 font-medium">{run.label}</td>
-                          <td className="py-1.5 pr-3 text-right font-mono">
-                            {run.lambda != null ? run.lambda.toFixed(2) : "—"}
-                          </td>
-                          <td className="py-1.5 pr-3 text-right font-mono">
-                            {run.trainFraction != null
-                              ? `${(run.trainFraction * 100).toFixed(0)}%`
-                              : "—"}
-                          </td>
-                          <td className={`py-1.5 pr-3 text-right font-mono ${
-                            ret >= 0 ? 'text-emerald-500' : 'text-rose-500'
-                          }`}>
-                            {(ret * 100).toFixed(1)}%
-                          </td>
-                          <td
-                            className={`py-1.5 pr-3 text-right font-mono ${
-                              maxDdPct > 50 ? "text-rose-400" : isDarkMode ? "text-slate-200" : "text-gray-700"
-                            }`}
-                          >
-                            {maxDdPct.toFixed(1)}%
-                          </td>
-                          <td className="py-1.5 pr-3 text-right font-mono">
-                            {r.trades.length}
-                          </td>
-                          <td className={`py-1.5 pr-3 text-right font-mono ${r.stopOutEvents > 0 ? 'text-rose-400' : ''}`}>
-                            {r.stopOutEvents}
-                          </td>
-                          <td className="py-1.5 pr-3 text-right font-mono">
-                            {r.accountHistory.length}
-                          </td>
-                          <td className="py-1.5 pr-3 text-right font-mono">
-                            {r.accountHistory.length > 0 ? r.accountHistory[0].date : "—"}
-                          </td>
-                          <td className="py-1.5 pr-3 text-right font-mono">
-                            {r.accountHistory.length > 0 ? r.accountHistory[r.accountHistory.length - 1].date : "—"}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-          )}
-
-          {/* Selected run details - Trading212 style */}
-          {t212CurrentRunId && (() => {
-            const selectedRun = t212Runs.find(r => r.id === t212CurrentRunId);
-            if (!selectedRun) return null;
-            const r = selectedRun.result;
-            const totalReturn = r.finalEquity - r.initialEquity;
-            const returnPct = (totalReturn / r.initialEquity) * 100;
-            const isPositive = totalReturn > 0;
-            const isZero = totalReturn === 0;
-            
-            // Calculate components: RESULT = Profit/Loss - FX Fee - Overnight Interest
-            const fxFee = Math.abs(totalReturn * 0.005); // ~0.5% FX fee estimate
-            const overnightInterest = r.swapFeesTotal ?? 0; // Use actual swap fees from sim
-            const profitLoss = totalReturn + fxFee - overnightInterest; // Back-calculate P/L
-            
-            // Color helper: negative = red, zero = white, positive = green
-            const getValueColor = (value: number) => {
-              if (value === 0) return isDarkMode ? 'text-slate-100' : 'text-gray-700';
-              return value > 0 ? 'text-emerald-500' : 'text-red-400';
-            };
-            
-            return (
-              <div className={`mt-4 rounded-xl overflow-hidden ${isDarkMode ? 'bg-slate-800 border border-slate-700/50' : 'bg-white border border-gray-200'}`}>
-                {/* Header with close button */}
-                <div className={`px-4 py-3 flex items-center justify-between ${isDarkMode ? 'border-b border-slate-700/50' : 'border-b border-gray-100'}`}>
-                  <span className={`text-[13px] font-medium ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
-                    {selectedRun.label}
-                  </span>
-                  <button
-                    onClick={() => setT212CurrentRunId(null)}
-                    className={`p-1 rounded-full transition-colors ${
-                      isDarkMode 
-                        ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50' 
-                        : 'text-gray-400 hover:text-gray-600 hover:bg-gray-200'
-                    }`}
-                    title="Close"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Balance beg. */}
-                <div className={`px-4 py-2.5 flex items-center justify-between ${isDarkMode ? 'border-b border-slate-700/30' : 'border-b border-gray-100'}`}>
-                  <span className={`text-[13px] ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>Balance beg.</span>
-                  <span className={`text-[13px] font-medium tabular-nums ${isDarkMode ? 'text-slate-100' : 'text-gray-800'}`}>${r.initialEquity.toFixed(2)}</span>
-                </div>
-
-                {/* RESULT section */}
-                <div className={`px-4 py-3 ${isDarkMode ? 'border-b border-slate-700/30' : 'border-b border-gray-100'}`}>
-                  <div className="flex items-center justify-between mb-2.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`text-[11px] font-semibold tracking-wide uppercase ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Result</span>
-                      <svg className={`w-2.5 h-2.5 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-                      </svg>
-                    </div>
-                    <span className={`text-[15px] font-semibold tabular-nums ${isZero ? (isDarkMode ? 'text-slate-100' : 'text-gray-700') : (isPositive ? 'text-emerald-500' : 'text-red-400')}`}>
-                      {isPositive ? '+' : ''}{returnPct.toFixed(1)}%
-                    </span>
-                  </div>
-                  
-                  {/* Breakdown items */}
-                  <div className="space-y-1.5 pl-1">
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Profit/Loss</span>
-                      <span className={`text-[12px] tabular-nums ${getValueColor(profitLoss)}`}>
-                        {profitLoss >= 0 ? '+' : ''}${profitLoss.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>FX Fee</span>
-                      <span className={`text-[12px] tabular-nums ${fxFee === 0 ? (isDarkMode ? 'text-slate-100' : 'text-gray-700') : 'text-red-400'}`}>
-                        -${fxFee.toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Overnight Interest</span>
-                      <span className={`text-[12px] tabular-nums ${getValueColor(overnightInterest)}`}>
-                        {overnightInterest >= 0 ? '+' : ''}${overnightInterest.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Total - shows Final Equity */}
-                <div className="px-4 py-3">
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[13px] font-medium ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Total</span>
-                    <span className={`text-[15px] font-semibold tabular-nums ${isZero ? (isDarkMode ? 'text-slate-100' : 'text-gray-700') : (isPositive ? 'text-emerald-500' : 'text-red-400')}`}>
-                      ${r.finalEquity.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Empty state */}
-          {t212Runs.length === 0 && !t212Error && (
-            <div className={`text-center py-6 rounded-lg ${isDarkMode ? 'bg-slate-800/30 text-slate-500' : 'bg-gray-50 text-gray-400'}`}>
-              <div className="text-[11px]">Simulations will appear automatically once data is loaded.</div>
-            </div>
-          )}
       </div>
 
       {/* Unified Forecast Bands Card - Full Width */}

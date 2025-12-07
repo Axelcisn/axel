@@ -246,6 +246,9 @@ export interface Trading212TradeInfo {
   margin: number;  // exact margin used for this position (from engine)
   swapFees?: number;  // overnight swap fees for this trade
   grossPnl?: number;  // gross P&L before fees
+  signal?: string;  // optional strategy signal label
+  runUp?: number;  // optional max favorable excursion in currency
+  drawdown?: number;  // optional max adverse excursion in currency (positive number)
 }
 
 /** Trade overlay for chart visualization */
@@ -254,6 +257,21 @@ export interface Trading212TradeOverlay {
   label: string;
   color: string;  // hex color for this run
   trades: Trading212TradeInfo[];
+}
+
+/** Simulation run summary for comparison table */
+export interface SimulationRunSummary {
+  id: string;
+  label: string;
+  lambda?: number | null;
+  trainFraction?: number | null;
+  returnPct: number;
+  maxDrawdown: number;
+  tradeCount: number;
+  stopOutEvents: number;
+  days: number;
+  firstDate: string;
+  lastDate: string;
 }
 
 interface PriceChartProps {
@@ -274,6 +292,10 @@ interface PriceChartProps {
   t212AccountHistory?: Trading212AccountSnapshot[] | null;  // Equity curve from Trading212 simulation
   activeT212RunId?: string | null;  // Currently active T212 run (for Chart toggle)
   onToggleT212Run?: (runId: "ewma-unbiased" | "ewma-biased" | "ewma-biased-max") => void;  // Toggle T212 run visibility
+  isCfdEnabled?: boolean;  // Whether CFD simulation is enabled
+  onToggleCfd?: () => void;  // Toggle CFD simulation on/off
+  onDateRangeChange?: (startDate: string | null, endDate: string | null) => void;  // Callback when date range changes
+  simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
@@ -305,6 +327,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   t212AccountHistory,
   activeT212RunId,
   onToggleT212Run,
+  isCfdEnabled,
+  onToggleCfd,
+  onDateRangeChange,
+  simulationRuns,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
@@ -1644,6 +1670,57 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [chartDataWithForecastBand, t212AccountHistory]);
 
+  // Filter equity data by selected date range - nullify equity outside the range
+  // This keeps charts synced but only shows equity within the selected period
+  const filteredEquityData = useMemo(() => {
+    const startDate = dateRangeSpan.raw.start;
+    const endDate = dateRangeSpan.raw.end;
+    
+    if (!startDate || !endDate) {
+      return chartDataWithEquity;
+    }
+    
+    // Get all trades from tradeOverlays
+    const allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
+    
+    // Find trades that have entry within the selected date range
+    const tradesInRange = allTrades
+      .filter((t) => t.entryDate && t.entryDate >= startDate && t.entryDate <= endDate)
+      .sort((a, b) => (a.entryDate || "").localeCompare(b.entryDate || ""));
+    
+    if (tradesInRange.length === 0) {
+      return chartDataWithEquity.map((pt) => ({ ...pt, equity: null }));
+    }
+    
+    const firstTradeDate = tradesInRange[0].entryDate!;
+    
+    // Find the last relevant date: either the last exit date or endDate if there's an open position
+    const hasOpenPosition = tradesInRange.some((t) => !t.exitDate);
+    let lastTradeDate: string;
+    
+    if (hasOpenPosition) {
+      // If there's an open position, extend equity to endDate
+      lastTradeDate = endDate;
+    } else {
+      // Find the latest exit date among trades in range
+      const exitDates = tradesInRange
+        .map((t) => t.exitDate)
+        .filter((d): d is string => !!d)
+        .sort((a, b) => b.localeCompare(a)); // Sort descending
+      lastTradeDate = exitDates.length > 0 ? exitDates[0] : firstTradeDate;
+    }
+    
+    // Keep full data structure but nullify equity outside the active range
+    return chartDataWithEquity.map((pt) => {
+      if (!pt.date) return { ...pt, equity: null };
+      // Only show equity from first trade date to last trade date
+      if (pt.date >= firstTradeDate && pt.date <= lastTradeDate) {
+        return pt; // Keep equity
+      }
+      return { ...pt, equity: null }; // Nullify equity outside range
+    });
+  }, [chartDataWithEquity, dateRangeSpan.raw.start, dateRangeSpan.raw.end, tradeOverlays]);
+
   const hoveredDate =
     hoverIndex != null && hoverIndex >= 0 && hoverIndex < chartDataWithEquity.length
       ? chartDataWithEquity[hoverIndex].date
@@ -1653,7 +1730,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return chartDataWithEquity.some((pt) => pt.equity != null);
   }, [chartDataWithEquity]);
 
-  // Equity deltas for histogram
+  // Equity deltas for histogram (uses full data for chart)
   const equityPanelData = useMemo(() => {
     return chartDataWithEquity.map((pt, idx) => {
       const prev = idx > 0 ? chartDataWithEquity[idx - 1].equity : pt.equity;
@@ -1662,8 +1739,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [chartDataWithEquity]);
 
+  // Filtered equity panel data for Overview stats (respects date range selection)
+  const filteredEquityPanelData = useMemo(() => {
+    return filteredEquityData.map((pt, idx) => {
+      const prev = idx > 0 ? filteredEquityData[idx - 1].equity : pt.equity;
+      const delta = pt.equity != null && prev != null ? pt.equity - prev : null;
+      return { ...pt, equityDelta: delta };
+    });
+  }, [filteredEquityData]);
+
   const equityYDomain = useMemo(() => {
-    const equities = chartDataWithEquity
+    // Use filtered data for the equity chart Y domain in Overview
+    const equities = filteredEquityData
       .map((d) => d.equity)
       .filter((e): e is number => e !== null && e !== undefined);
 
@@ -1674,7 +1761,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const padding = (max - min) * 0.05 || max * 0.05;
 
     return [Math.max(0, min - padding), max + padding];
-  }, [chartDataWithEquity]);
+  }, [filteredEquityData]);
 
   const equityDeltaDomain = useMemo<[number, number]>(() => {
     const deltas = equityPanelData
@@ -1733,11 +1820,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [equityPanelData]);
 
-  // Fast lookup helpers for equity series
+  // Fast lookup helpers for equity series (filtered by date range)
   const equityLookup = useMemo(() => {
     const byDate = new Map<string, number>();
     const series: number[] = [];
-    chartDataWithEquity.forEach((pt) => {
+    filteredEquityData.forEach((pt) => {
       if (pt.date && pt.equity != null && Number.isFinite(pt.equity)) {
         byDate.set(pt.date, pt.equity);
         series.push(pt.equity);
@@ -1748,10 +1835,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       firstEquity: series.length ? series[0] : null,
       lastEquity: series.length ? series[series.length - 1] : null,
     };
-  }, [chartDataWithEquity]);
+  }, [filteredEquityData]);
 
   const equityStatsBase = useMemo(() => {
-    const series = chartDataWithEquity
+    // Use filtered data for Overview stats
+    const series = filteredEquityData
       .map((p) => p.equity)
       .filter((v): v is number => v != null && Number.isFinite(v));
 
@@ -1782,7 +1870,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       maxDrawdownAbs,
       maxDrawdownPct: maxDrawdown,
     };
-  }, [chartDataWithEquity]);
+  }, [filteredEquityData]);
 
   // Overview metrics (hover-aware P&L)
   const equitySummary = useMemo(() => {
@@ -1838,9 +1926,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return `${(v * 100).toFixed(precision)}%`;
   };
 
-  // Comprehensive trade summary for all tabs
+  // Comprehensive trade summary for all tabs (filtered by date range)
   const tradeSummary = useMemo(() => {
-    const allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
+    const startDate = dateRangeSpan.raw.start;
+    const endDate = dateRangeSpan.raw.end;
+    
+    // Get all trades and filter by date range
+    let allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
+    
+    // Filter trades to only include those within the date range
+    if (startDate && endDate) {
+      allTrades = allTrades.filter((t) => {
+        const entryDate = t.entryDate;
+        if (!entryDate) return false;
+        return entryDate >= startDate && entryDate <= endDate;
+      });
+    }
+    
     const longTrades = allTrades.filter((t) => t.side === "long");
     const shortTrades = allTrades.filter((t) => t.side === "short");
     
@@ -2016,7 +2118,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         return dateB.localeCompare(dateA);
       }),
     };
-  }, [tradeOverlays, t212AccountHistory]);
+  }, [tradeOverlays, t212AccountHistory, dateRangeSpan.raw.start, dateRangeSpan.raw.end]);
 
   // Additional derived stats for the insight tabs (buy & hold, size, risk ratios)
   const insightStats = useMemo(() => {
@@ -2161,6 +2263,37 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   };
   const perfAvgDrawdownValue = performanceSeriesStats.avgDrawdownValue != null ? -performanceSeriesStats.avgDrawdownValue : null;
   const perfMaxDrawdownValue = performanceSeriesStats.maxDrawdownValue != null ? -performanceSeriesStats.maxDrawdownValue : null;
+
+  // Derivations for List of trades table (net P&L %, cumulative P&L, excursions)
+  const tradeTableRows = useMemo(() => {
+    const initial = perfInitialEquity > 0 ? perfInitialEquity : null;
+    let cumulative = 0;
+    return tradeSummary.allTrades.map((trade, idx) => {
+      const tradeNum = tradeSummary.allTrades.length - idx;
+      const basis = (trade.entryPrice ?? 0) * (trade.quantity ?? 0);
+      const pnlAbs = trade.netPnl ?? 0;
+      const pnlPct = basis ? pnlAbs / basis : null;
+      cumulative += pnlAbs;
+      const cumulativePct = initial ? cumulative / initial : null;
+      const runUpAbs = trade.runUp ?? null;
+      const runUpPct = runUpAbs != null && basis ? runUpAbs / basis : null;
+      const drawdownAbs = trade.drawdown != null ? -Math.abs(trade.drawdown) : null;
+      const drawdownPct = drawdownAbs != null && basis ? drawdownAbs / basis : null;
+      return {
+        trade,
+        tradeNum,
+        pnlAbs,
+        pnlPct,
+        cumulativeAbs: cumulative,
+        cumulativePct,
+        basis,
+        runUpAbs,
+        runUpPct,
+        drawdownAbs,
+        drawdownPct,
+      };
+    });
+  }, [perfInitialEquity, tradeSummary.allTrades]);
 
   // Stable reference for ewma maximized state
   const ewmaIsMaximized = ewmaReactionMapDropdown?.isMaximized ?? false;
@@ -4235,11 +4368,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               <div className="flex items-center gap-1">
                 {/* CFD Button */}
                 <button
+                  onClick={onToggleCfd}
                   className={`
                     px-2 py-0.5 text-xs rounded-full transition-colors
-                    ${isDarkMode 
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ${isCfdEnabled
+                      ? 'bg-blue-500 text-white'
+                      : isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }
                   `}
                 >
@@ -4419,8 +4555,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         )}
       </div>
 
-      {/* TradingView-style Insights Panel */}
-      {hasEquityData && (
+      {/* TradingView-style Insights Panel - Always visible */}
+      {true && (
         <div className="mt-6">
           {/* Header Row: Insight Pills (left) + Date Range (right) */}
           <div className="flex items-center justify-between mb-4">
@@ -4631,7 +4767,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               <div className="mt-6">
                 <ResponsiveContainer width="100%" height={220}>
                   <ComposedChart
-                    data={equityPanelData}
+                    data={filteredEquityPanelData}
                     margin={{ top: 10, right: 0, left: 0, bottom: 10 }}
                     syncId="price-equity-sync"
                     onMouseMove={applyHoverFromRechartsState}
@@ -4670,7 +4806,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       animationDuration={0}
                       content={() => {
                         if (!hoveredDate) return null;
-                        const point = equityPanelData.find((p) => p.date === hoveredDate);
+                        const point = filteredEquityPanelData.find((p) => p.date === hoveredDate);
                         if (!point || point.equity == null) return null;
 
                         const deltaStr =
@@ -4733,7 +4869,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       radius={[2, 2, 0, 0]}
                       isAnimationActive={false}
                     >
-                      {equityPanelData.map((entry, index) => {
+                      {filteredEquityPanelData.map((entry, index) => {
                         const positive = (entry.equityDelta ?? 0) >= 0;
                         return (
                           <Cell
@@ -4768,13 +4904,100 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
+
+              {/* Simulation Comparison Table */}
+              {simulationRuns && simulationRuns.length > 0 && (
+                <div className="mt-6">
+                  <h4
+                    className={`text-[11px] font-semibold mb-2 ${
+                      isDarkMode ? "text-slate-300" : "text-gray-700"
+                    }`}
+                  >
+                    Simulation Comparison
+                  </h4>
+                  
+                  <div className={`p-4 rounded-xl border ${
+                    isDarkMode 
+                      ? 'bg-slate-900/60 border-slate-700/50' 
+                      : 'bg-gray-50 border-gray-200'
+                  }`}>
+                    <div className="overflow-x-auto">
+                      <table className={`min-w-full text-[11px] ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
+                        <thead className={`border-b ${isDarkMode ? 'text-slate-400 border-slate-700/70' : 'text-gray-500 border-gray-200'}`}>
+                          <tr>
+                            <th className="py-1 pr-3 text-left">Label</th>
+                            <th className="py-1 pr-3 text-right">λ</th>
+                            <th className="py-1 pr-3 text-right">Train%</th>
+                            <th className="py-1 pr-3 text-right">Return</th>
+                            <th className="py-1 pr-3 text-right">Max DD</th>
+                            <th className="py-1 pr-3 text-right">Trades</th>
+                            <th className="py-1 pr-3 text-right">Stop-outs</th>
+                            <th className="py-1 pr-3 text-right">Days</th>
+                            <th className="py-1 pr-3 text-right">First Date</th>
+                            <th className="py-1 pr-3 text-right">Last Date</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {simulationRuns.map((run) => (
+                            <tr
+                              key={run.id}
+                              className={`border-b transition-colors ${
+                                isDarkMode 
+                                  ? 'border-slate-800/60 hover:bg-slate-800/70'
+                                  : 'border-gray-100 hover:bg-gray-50'
+                              }`}
+                            >
+                              <td className="py-1.5 pr-3 font-medium">{run.label}</td>
+                              <td className="py-1.5 pr-3 text-right font-mono">
+                                {run.lambda != null ? run.lambda.toFixed(2) : "—"}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-mono">
+                                {run.trainFraction != null
+                                  ? `${(run.trainFraction * 100).toFixed(0)}%`
+                                  : "—"}
+                              </td>
+                              <td className={`py-1.5 pr-3 text-right font-mono ${
+                                run.returnPct >= 0 ? 'text-emerald-500' : 'text-rose-500'
+                              }`}>
+                                {(run.returnPct * 100).toFixed(1)}%
+                              </td>
+                              <td
+                                className={`py-1.5 pr-3 text-right font-mono ${
+                                  run.maxDrawdown * 100 > 50 ? "text-rose-400" : isDarkMode ? "text-slate-200" : "text-gray-700"
+                                }`}
+                              >
+                                {(run.maxDrawdown * 100).toFixed(1)}%
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-mono">
+                                {run.tradeCount}
+                              </td>
+                              <td className={`py-1.5 pr-3 text-right font-mono ${run.stopOutEvents > 0 ? 'text-rose-400' : ''}`}>
+                                {run.stopOutEvents}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-mono">
+                                {run.days}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-mono">
+                                {run.firstDate}
+                              </td>
+                              <td className="py-1.5 pr-3 text-right font-mono">
+                                {run.lastDate}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* Performance Tab */}
           {activeInsightTab === "Performance" && (
             <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <table className="w-full text-sm">
+              <table className="w-full text-xs">
                 <thead>
                   <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
                     <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
@@ -4785,39 +5008,39 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </thead>
                 <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Initial Capital</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="py-2 px-4">Initial Capital</td>
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(perfInitialEquity)} <span className="text-xs text-slate-500">USD</span>
                     </td>
-                    <td className="text-right py-2.5 px-4"></td>
-                    <td className="text-right py-2.5 px-4"></td>
+                    <td className="text-right py-2 px-4"></td>
+                    <td className="text-right py-2 px-4"></td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Open P&L</td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.openPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <td className="py-2 px-4">Open P&L</td>
+                    <td className={`text-right py-2 px-4 font-mono ${tradeSummary.openPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {formatUsd(tradeSummary.openPnl, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className={`text-xs ${tradeSummary.openPnl >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                         {pctOfPerfInitial(tradeSummary.openPnl)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4"></td>
-                    <td className="text-right py-2.5 px-4"></td>
+                    <td className="text-right py-2 px-4"></td>
+                    <td className="text-right py-2 px-4"></td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Net profit</td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.netProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <td className="py-2 px-4">Net profit</td>
+                    <td className={`text-right py-2 px-4 font-mono ${tradeSummary.netProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {formatUsd(tradeSummary.netProfit, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className={`text-xs ${tradeSummary.netProfit >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                         {pctOfPerfInitial(tradeSummary.netProfit)}
                       </div>
                     </td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.netProfitLong >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <td className={`text-right py-2 px-4 font-mono ${tradeSummary.netProfitLong >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {formatUsd(tradeSummary.netProfitLong, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className={`text-xs ${tradeSummary.netProfitLong >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                         {pctOfPerfInitial(tradeSummary.netProfitLong)}
                       </div>
                     </td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.netProfitShort >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <td className={`text-right py-2 px-4 font-mono ${tradeSummary.netProfitShort >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
                       {formatUsd(tradeSummary.netProfitShort, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className={`text-xs ${tradeSummary.netProfitShort >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
                         {pctOfPerfInitial(tradeSummary.netProfitShort)}
@@ -4825,20 +5048,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     </td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Gross profit</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="py-2 px-4">Gross profit</td>
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.grossProfit)} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(tradeSummary.grossProfit)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.grossProfitLong)} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(tradeSummary.grossProfitLong)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.grossProfitShort)} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(tradeSummary.grossProfitShort)}
@@ -4846,20 +5069,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     </td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Gross loss</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="py-2 px-4">Gross loss</td>
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.grossLoss, { sign: false })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(tradeSummary.grossLoss)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.grossLossLong, { sign: false })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(tradeSummary.grossLossLong)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.grossLossShort, { sign: false })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(tradeSummary.grossLossShort)}
@@ -4867,51 +5090,51 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     </td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Commission paid</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="py-2 px-4">Commission paid</td>
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(tradeSummary.swapFeesTotal ?? 0)} <span className="text-xs text-slate-500">USD</span>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono">0 <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono">0 <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2 px-4 font-mono">0 <span className="text-xs text-slate-500">USD</span></td>
+                    <td className="text-right py-2 px-4 font-mono">0 <span className="text-xs text-slate-500">USD</span></td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Buy &amp; hold return</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
+                    <td className="py-2 px-4">Buy &amp; hold return</td>
+                    <td className="text-right py-2 px-4 font-mono">
                       {formatUsd(insightStats.buyHoldAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {insightStats.buyHoldPct != null ? formatPct(insightStats.buyHoldPct) : "—"}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4"></td>
-                    <td className="text-right py-2.5 px-4"></td>
+                    <td className="text-right py-2 px-4"></td>
+                    <td className="text-right py-2 px-4"></td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Max contracts held</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.maxContractsHeld}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.maxContractsHeld}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.maxContractsHeld}</td>
+                    <td className="py-2 px-4">Max contracts held</td>
+                    <td className="text-right py-2 px-4 font-mono">{insightStats.maxContractsHeld.toFixed(2)}</td>
+                    <td className="text-right py-2 px-4 font-mono">{insightStats.maxContractsHeld.toFixed(2)}</td>
+                    <td className="text-right py-2 px-4 font-mono">{insightStats.maxContractsHeld.toFixed(2)}</td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg equity run-up duration</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
+                    <td className="py-2 px-4">Avg equity run-up duration</td>
+                    <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
+                    <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
+                    <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg equity run-up</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                    <td className="py-2 px-4">Avg equity run-up</td>
+                    <td className="text-right py-2 px-4 font-mono text-emerald-400">
                       {formatUsd(performanceSeriesStats.avgRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(performanceSeriesStats.avgRunUpValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                    <td className="text-right py-2 px-4 font-mono text-emerald-400">
                       {formatUsd(performanceSeriesStats.avgRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(performanceSeriesStats.avgRunUpValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                    <td className="text-right py-2 px-4 font-mono text-emerald-400">
                       {formatUsd(performanceSeriesStats.avgRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(performanceSeriesStats.avgRunUpValue)}
@@ -4919,20 +5142,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     </td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Max equity run-up</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                    <td className="py-2 px-4">Max equity run-up</td>
+                    <td className="text-right py-2 px-4 font-mono text-emerald-400">
                       {formatUsd(performanceSeriesStats.maxRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(performanceSeriesStats.maxRunUpValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                    <td className="text-right py-2 px-4 font-mono text-emerald-400">
                       {formatUsd(performanceSeriesStats.maxRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(performanceSeriesStats.maxRunUpValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">
+                    <td className="text-right py-2 px-4 font-mono text-emerald-400">
                       {formatUsd(performanceSeriesStats.maxRunUpValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-emerald-300">
                         {pctOfPerfInitial(performanceSeriesStats.maxRunUpValue)}
@@ -4940,26 +5163,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     </td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg equity drawdown duration</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
+                    <td className="py-2 px-4">Avg equity drawdown duration</td>
+                    <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
+                    <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
+                    <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg equity drawdown</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                    <td className="py-2 px-4">Avg equity drawdown</td>
+                    <td className="text-right py-2 px-4 font-mono text-rose-400">
                       {formatUsd(perfAvgDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(perfAvgDrawdownValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                    <td className="text-right py-2 px-4 font-mono text-rose-400">
                       {formatUsd(perfAvgDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(perfAvgDrawdownValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                    <td className="text-right py-2 px-4 font-mono text-rose-400">
                       {formatUsd(perfAvgDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(perfAvgDrawdownValue)}
@@ -4967,20 +5190,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     </td>
                   </tr>
                   <tr>
-                    <td className="py-2.5 px-4">Max equity drawdown</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                    <td className="py-2 px-4">Max equity drawdown</td>
+                    <td className="text-right py-2 px-4 font-mono text-rose-400">
                       {formatUsd(perfMaxDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(perfMaxDrawdownValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                    <td className="text-right py-2 px-4 font-mono text-rose-400">
                       {formatUsd(perfMaxDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(perfMaxDrawdownValue)}
                       </div>
                     </td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">
+                    <td className="text-right py-2 px-4 font-mono text-rose-400">
                       {formatUsd(perfMaxDrawdownValue, { sign: true })} <span className="text-xs text-slate-500">USD</span>
                       <div className="text-xs text-rose-300">
                         {pctOfPerfInitial(perfMaxDrawdownValue)}
@@ -4995,7 +5218,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           {/* Trades Analysis Tab */}
           {activeInsightTab === "Trades analysis" && (
             <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <table className="w-full text-sm">
+              <table className="w-full text-xs">
                 <thead>
                   <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
                     <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
@@ -5103,7 +5326,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           {/* Risk/Performance Ratios Tab */}
           {activeInsightTab === "Risk/performance ratios" && (
             <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <table className="w-full text-sm">
+              <table className="w-full text-xs">
                 <thead>
                   <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
                     <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
@@ -5151,53 +5374,86 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           {/* List of Trades Tab */}
           {activeInsightTab === "List of trades" && (
             <div className={`rounded-2xl border overflow-hidden ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <div className="max-h-[400px] overflow-y-auto">
-                <table className="w-full text-sm">
+              <div className="max-h-[500px] overflow-y-auto">
+                <table className="w-full text-xs">
                   <thead className={`sticky top-0 ${isDarkMode ? "bg-slate-900" : "bg-white"}`}>
                     <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
                       <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Trade #</th>
                       <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Type</th>
                       <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Date/Time</th>
+                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Signal</th>
                       <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Price</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Qty</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Position size</th>
                       <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Net P&L</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Run-up</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Drawdown</th>
+                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Cumulative P&L</th>
                     </tr>
                   </thead>
                   <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                    {tradeSummary.allTrades.map((trade, idx) => {
-                      const tradeNum = tradeSummary.allTrades.length - idx;
+                    {tradeTableRows.map((row, idx) => {
+                      const { trade, tradeNum, pnlAbs, pnlPct, cumulativeAbs, cumulativePct, basis } = row;
+                      const pnlPositive = (pnlAbs ?? 0) >= 0;
+                      const runUpAbs = trade.runUp ?? null;
+                      const runUpPct = runUpAbs != null ? (basis ? runUpAbs / basis : null) : null;
+                      const drawdownAbs = trade.drawdown != null ? -Math.abs(trade.drawdown) : null;
+                      const drawdownPct = trade.drawdown != null ? (basis ? -Math.abs(trade.drawdown) / basis : null) : null;
+                      const qtyDisplay =
+                        trade.quantity != null && Number.isFinite(trade.quantity) ? trade.quantity.toFixed(2) : "—";
+                      const formatCompactUsd = (v: number | null | undefined) => {
+                        if (v == null || !Number.isFinite(v)) return "—";
+                        return Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(v);
+                      };
                       return (
                         <React.Fragment key={`trade-${idx}`}>
                           {/* Exit row */}
                           <tr className={isDarkMode ? "border-b border-slate-800/30" : "border-b border-slate-50"}>
-                            <td className="py-2 px-3" rowSpan={2}>
+                            <td className="py-3 px-3" rowSpan={2}>
                               <span className="font-mono">{tradeNum}</span>{" "}
                               <span className={trade.side === "long" ? "text-emerald-400" : "text-rose-400"}>
                                 {trade.side === "long" ? "Long" : "Short"}
                               </span>
                             </td>
-                            <td className="py-2 px-3 text-slate-400">Exit</td>
-                            <td className="py-2 px-3">{trade.exitDate || "Open"}</td>
-                            <td className="text-right py-2 px-3 font-mono">{trade.exitPrice?.toFixed(2) || "—"} <span className="text-xs text-slate-500">USD</span></td>
-                            <td className="text-right py-2 px-3 font-mono">{trade.quantity}</td>
-                            <td className={`text-right py-2 px-3 font-mono ${(trade.netPnl ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                              {trade.netPnl != null ? `${trade.netPnl >= 0 ? "+" : ""}${trade.netPnl.toFixed(2)}` : "—"} <span className="text-xs text-slate-500">USD</span>
+                            <td className="py-3 px-3 text-slate-400">Exit</td>
+                            <td className="py-3 px-3">{trade.exitDate || "Open"}</td>
+                            <td className="py-3 px-3 text-slate-400">Open</td>
+                            <td className="text-right py-3 px-3 font-mono">{trade.exitPrice?.toFixed(2) || "—"} <span className="text-xs text-slate-500">USD</span></td>
+                            <td className="text-right py-3 px-3 font-mono">{qtyDisplay}</td>
+                            <td className={`text-right py-3 px-3 font-mono ${pnlPositive ? "text-emerald-400" : "text-rose-400"}`}>
+                              {formatUsd(pnlAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                              <div className={`text-xs ${pnlPositive ? "text-emerald-300" : "text-rose-300"}`}>{formatPct(pnlPct)}</div>
+                            </td>
+                            <td className={`text-right py-3 px-3 font-mono ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+                              {formatUsd(runUpAbs)} <span className="text-xs text-slate-500">USD</span>
+                              <div className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{formatPct(runUpPct)}</div>
+                            </td>
+                            <td className={`text-right py-3 px-3 font-mono ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+                              {formatUsd(drawdownAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                              <div className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{formatPct(drawdownPct)}</div>
+                            </td>
+                            <td className={`text-right py-3 px-3 font-mono ${cumulativeAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {formatUsd(cumulativeAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
+                              <div className={`text-xs ${cumulativeAbs >= 0 ? "text-emerald-300" : "text-rose-300"}`}>{formatPct(cumulativePct)}</div>
                             </td>
                           </tr>
                           {/* Entry row */}
                           <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-3 text-slate-400">Entry</td>
-                            <td className="py-2 px-3">{trade.entryDate}</td>
-                            <td className="text-right py-2 px-3 font-mono">{trade.entryPrice.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                            <td className="text-right py-2 px-3 font-mono">{trade.quantity}</td>
-                            <td className="text-right py-2 px-3"></td>
+                            <td className="py-3 px-3 text-slate-400">Entry</td>
+                            <td className="py-3 px-3">{trade.entryDate}</td>
+                            <td className="py-3 px-3">{trade.signal || "—"}</td>
+                            <td className="text-right py-3 px-3 font-mono">{trade.entryPrice?.toFixed(2) || "—"} <span className="text-xs text-slate-500">USD</span></td>
+                            <td className="text-right py-3 px-3 font-mono">{formatCompactUsd(basis)} <span className="text-xs text-slate-500">USD</span></td>
+                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
+                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
+                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
+                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
                           </tr>
                         </React.Fragment>
                       );
                     })}
                     {tradeSummary.allTrades.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-500">No trades to display</td>
+                        <td colSpan={10} className="py-8 text-center text-slate-500">No trades to display</td>
                       </tr>
                     )}
                   </tbody>
