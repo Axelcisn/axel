@@ -1624,8 +1624,60 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
   }
 
-  // Get model name for forecast overlay
-  const forecastModelName = forecastOverlay?.volModel || horizonCoverage?.volModel || 'Model';
+  const formatVolModelName = (
+    method?: string | null,
+    volModel?: string | null,
+    garchEstimator?: string | null,
+    rangeEstimator?: string | null
+  ): string => {
+    // Prefer method string when available (e.g., Range-P, GARCH11-t, GBM-CC)
+    if (method) {
+      if (method.startsWith("Range-")) {
+        const code = method.split("-")[1];
+        const label = code === "P"
+          ? "Parkinson"
+          : code === "GK"
+            ? "Garman-Klass"
+            : code === "RS"
+              ? "Rogers-Satchell"
+              : code === "YZ"
+                ? "Yang-Zhang"
+                : code;
+        return `Range - ${label}`;
+      }
+      if (method.startsWith("GARCH11")) {
+        return method.includes("-t") ? "GARCH (Student-t)" : "GARCH (Normal)";
+      }
+      if (method.startsWith("GBM")) return "GBM";
+      if (method === "HAR-RV") return "HAR-RV";
+    }
+
+    // Fallback: use current UI selections
+    if (volModel === "Range") {
+      const label = rangeEstimator === "P"
+        ? "Parkinson"
+        : rangeEstimator === "GK"
+          ? "Garman-Klass"
+          : rangeEstimator === "RS"
+            ? "Rogers-Satchell"
+            : rangeEstimator === "YZ"
+              ? "Yang-Zhang"
+              : "Range";
+      return `Range - ${label}`;
+    }
+    if (volModel === "GARCH") {
+      return garchEstimator === "Student-t" ? "GARCH (Student-t)" : "GARCH (Normal)";
+    }
+    return volModel || "Model";
+  };
+
+  // Get model name for forecast overlay (method-aware + estimator labels)
+  const forecastModelName = formatVolModelName(
+    typeof af?.method === "string" ? af.method : null,
+    forecastOverlay?.volModel || horizonCoverage?.volModel || null,
+    horizonCoverage?.garchEstimator || null,
+    horizonCoverage?.rangeEstimator || null
+  );
 
   // Create chart data with forecast band for rendering the connecting lines and filled area
   const chartDataWithForecastBand = useMemo(() => {

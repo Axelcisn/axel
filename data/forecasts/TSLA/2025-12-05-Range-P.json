@@ -1,14 +1,14 @@
 {
-  "symbol": "AAPL",
-  "method": "Range-RS",
+  "symbol": "TSLA",
+  "method": "Range-P",
   "date_t": "2025-12-05",
   "horizonTrading": 1,
   "h_eff_days": 3,
   "verifyDate": "2025-12-08",
   "domain": "log",
-  "created_at": "2025-12-06T15:20:56.827Z",
+  "created_at": "2025-12-07T11:54:56.687Z",
   "locked": true,
-  "y_hat": 278.7799987792969,
+  "y_hat": 455,
   "target": {
     "h": 1,
     "coverage": 0.95,
@@ -18,41 +18,41 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.012809111534249058,
+    "sigma_hat": 0.025470720074970924,
     "mu_star_used": 0,
     "window_start": "2021-12-13",
     "window_end": "2025-12-05",
     "n": 1256,
-    "S_t": 278.7799987792969,
-    "sigma_forecast": 0.012809111534249058,
-    "sigma2_forecast": 0.00016407333829683226,
+    "S_t": 455,
+    "sigma_forecast": 0.025470720074970924,
+    "sigma2_forecast": 0.0006487575811375268,
     "critical_value": 1.96,
     "window_span": {
       "start": "2021-12-13",
       "end": "2025-12-05"
     },
     "volatility_diagnostics": {
-      "estimator": "RS",
+      "estimator": "P",
       "window": 1000,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 21 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 6.53, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 28 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 4.26, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 271.86811498138337,
-    "U_h": 285.8676079933342,
-    "band_width_bp": 514.9369212682209
+    "L_h": 432.8428839794858,
+    "U_h": 478.29133309677263,
+    "band_width_bp": 1049.9987593521532
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
-      "model": "Range-RS",
+      "model": "Range-P",
       "h": 1,
       "coverage": 0.95,
       "range": {
-        "estimator": "RS",
+        "estimator": "P",
         "window": 1000,
         "ewma_lambda": 0.94
       }
@@ -61,9 +61,9 @@
     "conformal": null
   },
   "diagnostics": {
-    "method_source": "Range-RS",
-    "m_log": 5.630422935923008,
-    "s_scale": 0.012809111534249058,
+    "method_source": "Range-P",
+    "m_log": 6.12029741895095,
+    "s_scale": 0.025470720074970924,
     "critical_type": "normal"
   },
   "critical": {

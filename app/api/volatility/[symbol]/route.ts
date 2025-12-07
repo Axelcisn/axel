@@ -165,14 +165,25 @@ export async function POST(
 ) {
   try {
     const symbol = (params.symbol || "").toUpperCase();
-    const body: VolatilityRequest = await request.json();
+    const body: VolatilityRequest & {
+      horizon?: number;
+      horizonTrading?: number;
+      h?: number;
+      coverage?: number;
+    } = await request.json();
     const { model, params: volParams } = body;
+
+    // Request-supplied overrides for horizon/coverage take precedence over TargetSpec
+    const bodyH = (body as any).horizonTrading ?? (body as any).h ?? (body as any).horizon;
+    const bodyCoverage = (body as any).coverage;
 
     console.log("[VOL-API] Received request:", {
       symbol,
       model,
       params: volParams,
-      fullBody: body
+      fullBody: body,
+      bodyH,
+      bodyCoverage
     });
 
     // Debug logging for target spec path
@@ -184,6 +195,11 @@ export async function POST(
       return new Response(JSON.stringify({ error: "Target specification not found" }), { status: 400 });
     }
     const { h, coverage, exchange_tz } = specRes;
+
+    // Effective horizon/coverage: request override > stored target spec > defaults
+    const DEFAULT_H = 1;
+    const effectiveH = (bodyH ?? h ?? DEFAULT_H) as number;
+    const effectiveCoverage = (bodyCoverage ?? coverage ?? 0.95) as number;
 
     // Load canonical data to get latest price and determine date_t
     let canonicalData;
@@ -223,9 +239,9 @@ export async function POST(
     const date_t = latestRow.date;
     const S_t = latestRow.adj_close!;
 
-    // For volatility models, horizonTrading = h (trading days horizon)
-    const horizonTrading = h;
-    console.log(`[VOL-API] Initial values: date_t=${date_t}, h=${h}, horizonTrading=${horizonTrading}`);
+    // For volatility models, horizonTrading = effectiveH (trading days horizon)
+    const horizonTrading = effectiveH;
+    console.log(`[VOL-API] Initial values: date_t=${date_t}, h=${effectiveH}, horizonTrading=${horizonTrading}, coverage=${effectiveCoverage}`);
     
     // Compute calendar-based fields for consistency with GBM
     const tz = exchange_tz || 'America/New_York';
@@ -285,8 +301,8 @@ export async function POST(
             window: volParams.gbm.windowN,
             lambda_drift: volParams.gbm.lambdaDrift,
             canonicalData,
-            h,
-            coverage
+            h: effectiveH,
+            coverage: effectiveCoverage
           });
           
           // Activate the forecast
@@ -412,15 +428,15 @@ export async function POST(
     const df = (sigmaForecast.diagnostics?.nu ?? volParams.garch?.df);
 
     const critical = (dist === 'student-t' && typeof df === 'number' && df > 2)
-      ? { type: 't' as const, value: getStudentTCritical(df, coverage), df }
-      : { type: 'normal' as const, value: getNormalCritical(coverage) };
+      ? { type: 't' as const, value: getStudentTCritical(df, effectiveCoverage), df }
+      : { type: 'normal' as const, value: getNormalCritical(effectiveCoverage) };
 
     // Compose prediction interval using TRADING DAYS ONLY
     const piComposeInput: PiComposeInput = {
       symbol,
       date_t,
       h: horizonTrading,  // Use trading days, NOT calendar days
-      coverage: coverage,
+      coverage: effectiveCoverage,
       mu_star_used,
       S_t,
       sigma_forecast: sigmaForecast,
@@ -457,8 +473,8 @@ export async function POST(
       locked: true,
       y_hat, // Add explicit predicted price
       target: {
-        h: h,
-        coverage: coverage,
+        h: effectiveH,
+        coverage: effectiveCoverage,
         window_requirements: {
           min_days: nObs
         }
@@ -494,8 +510,8 @@ export async function POST(
         rng_seed: null, // Most volatility models don't use randomness (except EnbPI)
         params_snapshot: {
           model: method,
-          h: h,
-          coverage: coverage,
+          h: effectiveH,
+          coverage: effectiveCoverage,
           ...volParams // Include all model-specific parameters
         },
         regime_tag: null, // TODO: Add regime detection from backtest

@@ -1,14 +1,14 @@
 {
-  "symbol": "AAPL",
+  "symbol": "AMZN",
   "method": "Range-P",
   "date_t": "2025-12-05",
   "horizonTrading": 5,
   "h_eff_days": 7,
   "verifyDate": "2025-12-12",
   "domain": "log",
-  "created_at": "2025-12-07T11:38:21.151Z",
+  "created_at": "2025-12-07T11:38:21.298Z",
   "locked": true,
-  "y_hat": 278.7799987792969,
+  "y_hat": 229.52999877929688,
   "target": {
     "h": 5,
     "coverage": 0.99,
@@ -18,14 +18,14 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.01228205075630625,
+    "sigma_hat": 0.014587636071100626,
     "mu_star_used": 0,
     "window_start": "2025-06-09",
     "window_end": "2025-12-05",
     "n": 1256,
-    "S_t": 278.7799987792969,
-    "sigma_forecast": 0.01228205075630625,
-    "sigma2_forecast": 0.00015084877078048293,
+    "S_t": 229.52999877929688,
+    "sigma_forecast": 0.014587636071100626,
+    "sigma2_forecast": 0.00021279912614287613,
     "critical_value": 2.576,
     "window_span": {
       "start": "2025-06-09",
@@ -36,14 +36,14 @@
       "window": 126,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 2 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 2.66, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 3 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 8.70, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 259.7389164255764,
-    "U_h": 299.2169551983698,
-    "band_width_bp": 653.2202622293325
+    "L_h": 211.03148281320586,
+    "U_h": 249.6500504915525,
+    "band_width_bp": 780.5177602187574
   },
   "provenance": {
     "rng_seed": null,
@@ -62,8 +62,8 @@
   },
   "diagnostics": {
     "method_source": "Range-P",
-    "m_log": 5.630422935923008,
-    "s_scale": 0.02746350039420348,
+    "m_log": 5.436033734593598,
+    "s_scale": 0.03261894588600896,
     "critical_type": "normal"
   },
   "critical": {

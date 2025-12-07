@@ -44,7 +44,6 @@ import {
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import TrendSection from '@/components/trend/TrendSection';
-import CompanySubnav from '@/components/company/CompanySubnav';
 
 /**
  * Data flow (Timing/Trend):
@@ -2986,6 +2985,10 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const handleModelChange = useCallback((newModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range') => {
     setVolModel(newModel);
+    // Clear stale overlays so tooltip/chart doesn't show previous model while new one is loading
+    setActiveForecast(null);
+    setBaseForecast(null);
+    setVolForecast(null);
     // Auto-triggers volatility forecast via useEffect (for Inspector)
     // Conformal calibration only runs when user clicks "Generate"
   }, []);
@@ -4234,16 +4237,15 @@ export default function TimingPage({ params }: TimingPageProps) {
       isDarkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
     }`}>
       <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-6">
-          <div>
-            <h1 className={`text-3xl font-bold ${
-              isDarkMode ? 'text-white' : 'text-gray-900'
-            }`}>{companyName || companyTicker}</h1>
-            <div className="flex items-center gap-2">
-              <span className={`text-sm ${
-                isDarkMode ? 'text-gray-400' : 'text-gray-500'
-              }`}>{companyTicker} · {companyExchange}</span>
-              <MarketSessionBadge symbol={params.ticker} />
+        <div>
+          <h1 className={`text-3xl font-bold ${
+            isDarkMode ? 'text-white' : 'text-gray-900'
+          }`}>{companyName || companyTicker}</h1>
+          <div className="flex items-center gap-2">
+            <span className={`text-sm ${
+              isDarkMode ? 'text-gray-400' : 'text-gray-500'
+            }`}>{companyTicker} · {companyExchange}</span>
+            <MarketSessionBadge symbol={params.ticker} />
             </div>
             {/* Current price under title (Google Finance style) */}
             {headerPrice.price != null && (
@@ -4263,8 +4265,6 @@ export default function TimingPage({ params }: TimingPageProps) {
               </div>
             )}
           </div>
-          <CompanySubnav ticker={params.ticker} />
-        </div>
         <div className="flex items-center gap-3">
           {watchlistSuccess && (
             <span className={`text-sm font-medium ${
@@ -4501,146 +4501,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         />
       </div>
 
-      {/* Real Trading212 Trades Table */}
-      <div className="mb-8">
-        <section className={`rounded-xl border p-4 ${
-          isDarkMode 
-            ? 'bg-slate-900/60 border-slate-700/50' 
-            : 'bg-white border-gray-200'
-        }`}>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className={`text-sm font-semibold ${
-              isDarkMode ? 'text-slate-200' : 'text-gray-800'
-            }`}>
-              Real Trading212 Trades
-            </h3>
-            <div className="flex items-center gap-3">
-              {/* Toggle for show/hide real trades on chart */}
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showRealTrades}
-                  onChange={(e) => setShowRealTrades(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
-                />
-                <span className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                  Show on chart
-                </span>
-              </label>
-              <p className={`text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
-                {realT212TradeRows.length} trade{realT212TradeRows.length === 1 ? '' : 's'}
-                {realT212Summary && realT212Summary.openTrades > 0 && (
-                  <span className="text-amber-500 ml-1">
-                    ({realT212Summary.openTrades} open)
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-
-          {realTradesLoading ? (
-            <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
-              Loading trades from Trading212...
-            </p>
-          ) : !mapSymbolToT212Ticker(params.ticker.toUpperCase()) ? (
-            <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
-              No Trading212 mapping for this symbol.
-            </p>
-          ) : realT212TradeRows.length === 0 ? (
-            <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
-              No paired trades found for this instrument.
-            </p>
-          ) : (
-            <>
-              {/* Summary stats row */}
-              {realT212Summary && (
-                <div className={`flex flex-wrap gap-4 mb-3 text-[11px] ${
-                  isDarkMode ? 'text-slate-400' : 'text-gray-600'
-                }`}>
-                  <span>
-                    P&L: <span className={realT212Summary.totalPnl >= 0 ? 'text-emerald-500' : 'text-red-500'}>
-                      {realT212Summary.totalPnl >= 0 ? '+' : ''}{realT212Summary.totalPnl.toFixed(2)}
-                    </span>
-                  </span>
-                  <span>
-                    Win Rate: <span className="text-slate-200">{(realT212Summary.winRate * 100).toFixed(1)}%</span>
-                    <span className="text-slate-500 ml-1">
-                      ({realT212Summary.winningTrades}W / {realT212Summary.losingTrades}L)
-                    </span>
-                  </span>
-                  {realT212Summary.profitFactor !== Infinity && (
-                    <span>
-                      PF: <span className="text-slate-200">{realT212Summary.profitFactor.toFixed(2)}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {/* Table */}
-              <div className="overflow-x-auto">
-                <table className={`min-w-full text-xs ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
-                  <thead className={`border-b ${isDarkMode ? 'border-slate-700 text-slate-500' : 'border-gray-200 text-gray-500'}`}>
-                    <tr>
-                      <th className="py-1.5 pr-3 text-left font-medium">Entry</th>
-                      <th className="py-1.5 pr-3 text-left font-medium">Exit</th>
-                      <th className="py-1.5 pr-3 text-left font-medium">Side</th>
-                      <th className="py-1.5 pr-3 text-right font-medium">Qty</th>
-                      <th className="py-1.5 pr-3 text-right font-medium">Entry Px</th>
-                      <th className="py-1.5 pr-3 text-right font-medium">Exit Px</th>
-                      <th className="py-1.5 pr-3 text-right font-medium">P&L</th>
-                      <th className="py-1.5 pr-0 text-right font-medium">Days</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {realT212TradeRows.map((t) => (
-                      <tr key={t.id} className={`border-b ${isDarkMode ? 'border-slate-800/60' : 'border-gray-100'}`}>
-                        <td className="py-1.5 pr-3 font-mono text-[11px]">
-                          {t.entryDate}
-                        </td>
-                        <td className={`py-1.5 pr-3 font-mono text-[11px] ${
-                          !t.exitDate ? (isDarkMode ? 'text-amber-500' : 'text-amber-600') : ''
-                        }`}>
-                          {t.exitDate ?? 'OPEN'}
-                        </td>
-                        <td className={`py-1.5 pr-3 ${
-                          t.side === 'long'
-                            ? (isDarkMode ? 'text-emerald-400' : 'text-emerald-600')
-                            : (isDarkMode ? 'text-red-400' : 'text-red-600')
-                        }`}>
-                          {t.side === 'long' ? 'Long' : 'Short'}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right font-mono">
-                          {t.quantity.toLocaleString()}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right font-mono">
-                          {t.entryPrice.toFixed(2)}
-                        </td>
-                        <td className="py-1.5 pr-3 text-right font-mono">
-                          {t.exitPrice != null ? t.exitPrice.toFixed(2) : '—'}
-                        </td>
-                        <td className={`py-1.5 pr-3 text-right font-mono ${
-                          t.realisedPnl == null
-                            ? ''
-                            : t.realisedPnl >= 0
-                              ? (isDarkMode ? 'text-emerald-400' : 'text-emerald-600')
-                              : (isDarkMode ? 'text-red-400' : 'text-red-600')
-                        }`}>
-                          {t.realisedPnl != null
-                            ? `${t.realisedPnl >= 0 ? '+' : ''}${t.realisedPnl.toFixed(2)}`
-                            : '—'}
-                        </td>
-                        <td className="py-1.5 pr-0 text-right font-mono">
-                          {t.holdingDays != null ? t.holdingDays : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </section>
-      </div>
 
       {/* EWMA Reaction Map Card */}
       <div className="mb-8">
