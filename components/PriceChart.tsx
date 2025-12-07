@@ -4685,11 +4685,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
           {/* Overview Tab - Stats + Equity Chart */}
           {activeInsightTab === "Overview" && (
-            <div>
+            <div className="flex flex-col gap-6">
               {/* Stats Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
                 {/* Total P&L */}
-                <div>
+                <div className="flex flex-col gap-1">
                   <div className="text-sm">
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total P&L</span>
                   </div>
@@ -4707,7 +4707,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
 
                 {/* Max equity drawdown */}
-                <div>
+                <div className="flex flex-col gap-1">
                   <div className="text-sm">
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Max equity drawdown</span>
                   </div>
@@ -4722,7 +4722,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
 
                 {/* Total trades */}
-                <div>
+                <div className="flex flex-col gap-1">
                   <div className="text-sm">
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total trades</span>
                   </div>
@@ -4732,7 +4732,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
 
                 {/* Profitable trades */}
-                <div>
+                <div className="flex flex-col gap-1">
                   <div className="text-sm">
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profitable trades</span>
                   </div>
@@ -4749,7 +4749,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
 
                 {/* Profit factor */}
-                <div>
+                <div className="flex flex-col gap-1">
                   <div className="text-sm">
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profit factor</span>
                   </div>
@@ -4764,7 +4764,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               </div>
 
               {/* Equity Chart inside Overview tab */}
-              <div className="mt-6">
+              <div className="w-full">
                 <ResponsiveContainer width="100%" height={220}>
                   <ComposedChart
                     data={filteredEquityPanelData}
@@ -4907,7 +4907,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
               {/* Simulation Comparison Table */}
               {simulationRuns && simulationRuns.length > 0 && (
-                <div className="mt-6">
+                <div className="w-full -mt-4">
                   <h4
                     className={`text-[11px] font-semibold mb-2 ${
                       isDarkMode ? "text-slate-300" : "text-gray-700"

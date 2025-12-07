@@ -31,6 +31,16 @@ import {
   Trading212AccountSnapshot,
   simulateTrading212Cfd,
 } from '@/lib/backtest/trading212Cfd';
+import {
+  fetchT212Trades,
+  fetchT212PairedTrades,
+  convertSimpleTradesToOverlay,
+  mapSymbolToT212Ticker,
+  T212SimpleTrade,
+  T212PairedTrade,
+  PairedTradesSummary,
+  RealTradesOverlay,
+} from '@/lib/trading212/tradesClient';
 
 // Badge component interface and implementation
 interface BadgeProps {
@@ -223,7 +233,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
     
     return forecast;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeForecast, currentForecast, gbmForecast, params.ticker]);
+  // Note: 'window' is a browser global, not a React dependency
 
   // Use useState for localStorage fallback to handle SSR properly
   const [storedForecast, setStoredForecast] = useState<any>(null);
@@ -242,7 +254,9 @@ export default function TimingPage({ params }: TimingPageProps) {
         // Ignore localStorage errors
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.ticker]);
+  // Note: 'window' is a browser global, not a React dependency
 
   // Fallback overlay forecast 
   const fallbackOverlayForecast = useMemo(() => {
@@ -406,6 +420,17 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
   const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
 
+  // State for real Trading212 trades (from actual account history)
+  const [realT212Trades, setRealT212Trades] = useState<T212SimpleTrade[]>([]);
+  const [realT212PairedTrades, setRealT212PairedTrades] = useState<T212PairedTrade[]>([]);
+  const [realT212Summary, setRealT212Summary] = useState<PairedTradesSummary | null>(null);
+  const [realTradesLoading, setRealTradesLoading] = useState(false);
+  const [showRealTrades, setShowRealTrades] = useState(true); // Toggle visibility of real trades
+
+  // State for Yahoo Finance sync
+  const [isYahooSyncing, setIsYahooSyncing] = useState(false);
+  const [yahooSyncError, setYahooSyncError] = useState<string | null>(null);
+
   // Toggle visibility of a T212 run on the chart (solo mode: only one run visible at a time)
   const toggleT212RunVisibility = useCallback((runId: T212RunId) => {
     setT212VisibleRunIds((prev) => {
@@ -421,6 +446,18 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
   }, []);
 
+  // Build overlay for real trades (if enabled and available)
+  const realTradesOverlay: RealTradesOverlay | null = useMemo(() => {
+    if (!showRealTrades || realT212Trades.length === 0) {
+      return null;
+    }
+    return convertSimpleTradesToOverlay(realT212Trades, {
+      runId: "real-trades",
+      label: "Real Trades",
+      color: "#10B981", // emerald-500
+    });
+  }, [showRealTrades, realT212Trades]);
+
   // Build trade overlays for visible runs to pass to PriceChart
   const t212TradeOverlays: Trading212TradeOverlay[] = useMemo(() => {
     const runColors: Record<T212RunId, string> = {
@@ -428,7 +465,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       "ewma-biased": "#3B82F6",       // blue-500
       "ewma-biased-max": "#F59E0B",   // amber-500
     };
-    return t212Runs
+    const simOverlays = t212Runs
       .filter((run) => t212VisibleRunIds.has(run.id))
       .map((run) => ({
         runId: run.id,
@@ -436,7 +473,22 @@ export default function TimingPage({ params }: TimingPageProps) {
         color: runColors[run.id],
         trades: run.result.trades,
       }));
-  }, [t212Runs, t212VisibleRunIds]);
+    
+    // Include real trades overlay if available and enabled
+    if (realTradesOverlay) {
+      return [
+        ...simOverlays,
+        {
+          runId: realTradesOverlay.runId as T212RunId, // cast for compatibility
+          label: realTradesOverlay.label,
+          color: realTradesOverlay.color,
+          trades: realTradesOverlay.trades,
+        },
+      ];
+    }
+    
+    return simOverlays;
+  }, [t212Runs, t212VisibleRunIds, realTradesOverlay]);
 
   // Get the account history for the currently visible T212 run (for equity chart)
   const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
@@ -444,6 +496,66 @@ export default function TimingPage({ params }: TimingPageProps) {
     const visibleRun = t212Runs.find((run) => t212VisibleRunIds.has(run.id));
     return visibleRun?.result.accountHistory ?? null;
   }, [t212Runs, t212VisibleRunIds]);
+
+  // Prepare table rows for real T212 paired trades (with holding period)
+  const realT212TradeRows = useMemo(() => {
+    if (!realT212PairedTrades || realT212PairedTrades.length === 0) return [];
+
+    return realT212PairedTrades.map((t) => {
+      // Compute holding period in days if both dates exist
+      let holdingDays: number | null = null;
+      if (t.entryDate && t.exitDate) {
+        const start = new Date(t.entryDate);
+        const end = new Date(t.exitDate);
+        const diffMs = end.getTime() - start.getTime();
+        holdingDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+      }
+
+      return {
+        ...t,
+        holdingDays,
+      };
+    });
+  }, [realT212PairedTrades]);
+
+  // Fetch real Trading212 trades for this symbol on mount
+  useEffect(() => {
+    const canonicalSymbol = params.ticker.toUpperCase();
+    const t212Ticker = mapSymbolToT212Ticker(canonicalSymbol);
+
+    if (!t212Ticker) {
+      // No T212 mapping for this symbol
+      return;
+    }
+
+    let cancelled = false;
+    setRealTradesLoading(true);
+
+    // Fetch both raw trades (for overlay) and paired trades (for table)
+    Promise.all([
+      fetchT212Trades(t212Ticker, { maxPages: 5, pageSize: 100 }),
+      fetchT212PairedTrades(t212Ticker, { maxPages: 10, pageSize: 100 }),
+    ])
+      .then(([rawTrades, pairedResponse]) => {
+        if (!cancelled) {
+          setRealT212Trades(rawTrades);
+          setRealT212PairedTrades(pairedResponse.pairedTrades);
+          setRealT212Summary(pairedResponse.summary);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load Trading212 trades for", t212Ticker, err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRealTradesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [params.ticker]);
 
   // Filter t212Runs by date range for table display
   type FilteredStats = {
@@ -1009,7 +1121,8 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.error('Failed to load active forecast:', error);
       return null;
     }
-  }, [params.ticker]); // Removed gbmForecast dependency to avoid race conditions with pipeline
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.ticker]); // gbmForecast intentionally omitted to avoid race conditions with pipeline
 
   const loadServerTargetSpec = useCallback(async () => {
     try {
@@ -2785,6 +2898,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       setForecastStatus("error");
       setForecastError(error instanceof Error ? error.message : 'Failed to complete forecast pipeline');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     h,
     coverage,
@@ -2800,6 +2914,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     canonicalCount,
     baseForecast,
     conformalState,
+    // Note: activeForecast intentionally omitted - only used for debug logging, not logic
   ]);
 
   // Handlers for parameter changes - auto-trigger volatility forecast for Inspector
@@ -3974,6 +4089,37 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   };
 
+  // Function to sync canonical history from Yahoo Finance
+  const handleYahooSync = async () => {
+    if (!params?.ticker) return;
+    const symbol = params.ticker.toUpperCase();
+    setIsYahooSyncing(true);
+    setYahooSyncError(null);
+
+    try {
+      const res = await fetch(`/api/history/sync/${encodeURIComponent(symbol)}`, {
+        method: "GET",
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Sync failed: ${res.status} ${res.statusText} ${text}`);
+      }
+
+      // After a successful sync, clear the cached canonical rows so they get re-fetched
+      setT212CanonicalRows(null);
+      
+      // Show success briefly (the new data will load when T212 sim is run next)
+      console.log(`Yahoo sync complete for ${symbol}`);
+    } catch (err: unknown) {
+      console.error("Yahoo sync error", err);
+      const message = err instanceof Error ? err.message : "Yahoo sync failed";
+      setYahooSyncError(message);
+    } finally {
+      setIsYahooSyncing(false);
+    }
+  };
+
   // Load repairs when uploadResult is available
   useEffect(() => {
     const loadRepairsForSymbol = async () => {
@@ -4059,50 +4205,99 @@ export default function TimingPage({ params }: TimingPageProps) {
               ✓ Added to Watchlist
             </span>
           )}
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className={`flex items-center justify-center w-9 h-9 font-medium rounded-full shadow-sm transition-all duration-200 border-2 ${
-              isDarkMode 
-                ? 'bg-gray-800 hover:bg-gray-700 text-white hover:text-gray-300 border-gray-600 hover:border-gray-500'
-                : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700'
-            }`}
-            title="Upload Data"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-            </svg>
-          </button>
-          <button
-            onClick={() => setShowDataQualityModal(true)}
-            className={`flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 ${
-              isDarkMode 
-                ? 'bg-gray-700/80 hover:bg-gray-600 text-gray-300 hover:text-white border border-gray-600/50 hover:border-gray-500'
-                : 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 border border-slate-300/50 hover:border-slate-400'
-            }`}
-            title="Data Quality Information"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-              <path d="M12 17h.01"/>
-            </svg>
-          </button>
-          <button
-            onClick={addToWatchlist}
-            disabled={isAddingToWatchlist || isInWatchlist}
-            className={`flex items-center justify-center w-9 h-9 font-medium rounded-full shadow-sm transition-all duration-200 border-2 ${
-              isInWatchlist 
-                ? isDarkMode
-                  ? 'bg-gray-800 text-white border-gray-600 cursor-default'
-                  : 'bg-white text-black border-black cursor-default'
-                : isDarkMode
-                  ? 'bg-gray-800 hover:bg-gray-700 text-white hover:text-gray-300 border-gray-600 hover:border-gray-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none'
-                  : 'bg-white hover:bg-gray-50 text-black hover:text-gray-700 border-black hover:border-gray-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none'
-            }`}
-            title={isInWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
-          >
-            <span className="text-xl font-bold">{isInWatchlist ? '✓' : '+'}</span>
-          </button>
+          
+          {/* Header Action Buttons - Icon-only, consistent styling */}
+          <div className="flex items-center gap-2">
+            {/* Upload Data Button */}
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+                isDarkMode 
+                  ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50'
+                  : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md'
+              }`}
+              title="Upload Data"
+            >
+              <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </button>
+
+            {/* Yahoo Finance Sync Button */}
+            <div className="relative">
+              <button
+                onClick={handleYahooSync}
+                disabled={isYahooSyncing}
+                className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+                  isDarkMode 
+                    ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800/80 disabled:hover:text-slate-400 disabled:hover:border-slate-700/60 disabled:hover:shadow-none'
+                    : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-slate-500 disabled:hover:border-slate-200 disabled:hover:shadow-none'
+                }`}
+                title="Sync from Yahoo Finance"
+              >
+                {isYahooSyncing ? (
+                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 transition-transform group-hover:scale-110 group-hover:rotate-180 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
+              </button>
+              {yahooSyncError && (
+                <div className={`absolute top-full right-0 mt-2 px-2 py-1 text-[10px] rounded-md whitespace-nowrap z-10 ${
+                  isDarkMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-50 text-red-600 border border-red-200'
+                }`}>
+                  {yahooSyncError}
+                </div>
+              )}
+            </div>
+
+            {/* Data Quality / Help Button */}
+            <button
+              onClick={() => setShowDataQualityModal(true)}
+              className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+                isDarkMode 
+                  ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50'
+                  : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md'
+              }`}
+              title="Data Quality Information"
+            >
+              <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+              </svg>
+            </button>
+
+            {/* Add to Watchlist Button */}
+            <button
+              onClick={addToWatchlist}
+              disabled={isAddingToWatchlist || isInWatchlist}
+              className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+                isInWatchlist 
+                  ? isDarkMode
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 cursor-default'
+                    : 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
+                  : isDarkMode
+                    ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50 disabled:opacity-40 disabled:cursor-not-allowed'
+                    : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+              title={isInWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
+            >
+              {isInWatchlist ? (
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
       
@@ -4230,6 +4425,147 @@ export default function TimingPage({ params }: TimingPageProps) {
           forecastStatus={forecastStatus}
           volatilityError={volatilityError}
         />
+      </div>
+
+      {/* Real Trading212 Trades Table */}
+      <div className="mb-8">
+        <section className={`rounded-xl border p-4 ${
+          isDarkMode 
+            ? 'bg-slate-900/60 border-slate-700/50' 
+            : 'bg-white border-gray-200'
+        }`}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className={`text-sm font-semibold ${
+              isDarkMode ? 'text-slate-200' : 'text-gray-800'
+            }`}>
+              Real Trading212 Trades
+            </h3>
+            <div className="flex items-center gap-3">
+              {/* Toggle for show/hide real trades on chart */}
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showRealTrades}
+                  onChange={(e) => setShowRealTrades(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500 focus:ring-offset-0"
+                />
+                <span className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                  Show on chart
+                </span>
+              </label>
+              <p className={`text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
+                {realT212TradeRows.length} trade{realT212TradeRows.length === 1 ? '' : 's'}
+                {realT212Summary && realT212Summary.openTrades > 0 && (
+                  <span className="text-amber-500 ml-1">
+                    ({realT212Summary.openTrades} open)
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+
+          {realTradesLoading ? (
+            <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
+              Loading trades from Trading212...
+            </p>
+          ) : !mapSymbolToT212Ticker(params.ticker.toUpperCase()) ? (
+            <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
+              No Trading212 mapping for this symbol.
+            </p>
+          ) : realT212TradeRows.length === 0 ? (
+            <p className={`text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
+              No paired trades found for this instrument.
+            </p>
+          ) : (
+            <>
+              {/* Summary stats row */}
+              {realT212Summary && (
+                <div className={`flex flex-wrap gap-4 mb-3 text-[11px] ${
+                  isDarkMode ? 'text-slate-400' : 'text-gray-600'
+                }`}>
+                  <span>
+                    P&L: <span className={realT212Summary.totalPnl >= 0 ? 'text-emerald-500' : 'text-red-500'}>
+                      {realT212Summary.totalPnl >= 0 ? '+' : ''}{realT212Summary.totalPnl.toFixed(2)}
+                    </span>
+                  </span>
+                  <span>
+                    Win Rate: <span className="text-slate-200">{(realT212Summary.winRate * 100).toFixed(1)}%</span>
+                    <span className="text-slate-500 ml-1">
+                      ({realT212Summary.winningTrades}W / {realT212Summary.losingTrades}L)
+                    </span>
+                  </span>
+                  {realT212Summary.profitFactor !== Infinity && (
+                    <span>
+                      PF: <span className="text-slate-200">{realT212Summary.profitFactor.toFixed(2)}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className={`min-w-full text-xs ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
+                  <thead className={`border-b ${isDarkMode ? 'border-slate-700 text-slate-500' : 'border-gray-200 text-gray-500'}`}>
+                    <tr>
+                      <th className="py-1.5 pr-3 text-left font-medium">Entry</th>
+                      <th className="py-1.5 pr-3 text-left font-medium">Exit</th>
+                      <th className="py-1.5 pr-3 text-left font-medium">Side</th>
+                      <th className="py-1.5 pr-3 text-right font-medium">Qty</th>
+                      <th className="py-1.5 pr-3 text-right font-medium">Entry Px</th>
+                      <th className="py-1.5 pr-3 text-right font-medium">Exit Px</th>
+                      <th className="py-1.5 pr-3 text-right font-medium">P&L</th>
+                      <th className="py-1.5 pr-0 text-right font-medium">Days</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {realT212TradeRows.map((t) => (
+                      <tr key={t.id} className={`border-b ${isDarkMode ? 'border-slate-800/60' : 'border-gray-100'}`}>
+                        <td className="py-1.5 pr-3 font-mono text-[11px]">
+                          {t.entryDate}
+                        </td>
+                        <td className={`py-1.5 pr-3 font-mono text-[11px] ${
+                          !t.exitDate ? (isDarkMode ? 'text-amber-500' : 'text-amber-600') : ''
+                        }`}>
+                          {t.exitDate ?? 'OPEN'}
+                        </td>
+                        <td className={`py-1.5 pr-3 ${
+                          t.side === 'long'
+                            ? (isDarkMode ? 'text-emerald-400' : 'text-emerald-600')
+                            : (isDarkMode ? 'text-red-400' : 'text-red-600')
+                        }`}>
+                          {t.side === 'long' ? 'Long' : 'Short'}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right font-mono">
+                          {t.quantity.toLocaleString()}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right font-mono">
+                          {t.entryPrice.toFixed(2)}
+                        </td>
+                        <td className="py-1.5 pr-3 text-right font-mono">
+                          {t.exitPrice != null ? t.exitPrice.toFixed(2) : '—'}
+                        </td>
+                        <td className={`py-1.5 pr-3 text-right font-mono ${
+                          t.realisedPnl == null
+                            ? ''
+                            : t.realisedPnl >= 0
+                              ? (isDarkMode ? 'text-emerald-400' : 'text-emerald-600')
+                              : (isDarkMode ? 'text-red-400' : 'text-red-600')
+                        }`}>
+                          {t.realisedPnl != null
+                            ? `${t.realisedPnl >= 0 ? '+' : ''}${t.realisedPnl.toFixed(2)}`
+                            : '—'}
+                        </td>
+                        <td className="py-1.5 pr-0 text-right font-mono">
+                          {t.holdingDays != null ? t.holdingDays : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </section>
       </div>
 
       {/* EWMA Reaction Map Card */}

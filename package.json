@@ -9,7 +9,8 @@
     "lint": "next lint",
     "backtest:pi": "tsx generate-pi-backtests.ts",
     "test:ewma-reaction": "tsx ./test-ewma-reaction.ts",
-    "test:ewma-tilt": "tsx ./test-ewma-tilt.ts"
+    "test:ewma-tilt": "tsx ./test-ewma-tilt.ts",
+    "smoke:test": "bash scripts/smoke-test.sh"
   },
   "dependencies": {
     "next": "14.2.33",

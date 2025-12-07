@@ -133,7 +133,20 @@
     "Coeff",
     "behaviour",
     "Pnls",
-    "optimisation"
+    "optimisation",
+    "realised",
+    "Realised",
+    "unrealised",
+    "Unrealised",
+    "Pairer",
+    "ABNB",
+    "CRWD",
+    "PANW",
+    "isin",
+    "ISIN",
+    "FOREX",
+    "FINRA",
+    "TOTV"
   ],
   "flagWords": []
 }

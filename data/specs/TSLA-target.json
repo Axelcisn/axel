@@ -1,9 +1,9 @@
 {
-  "symbol": "PLTR",
+  "symbol": "TSLA",
   "h": 1,
   "coverage": 0.95,
   "exchange_tz": "America/New_York",
   "variable": "NEXT_CLOSE_ADJ",
   "cutoff_note": "compute at t close; verify at t+1 close",
-  "updated_at": "2025-12-07T05:32:44.113Z"
+  "updated_at": "2025-12-07T06:48:00.015Z"
 }
