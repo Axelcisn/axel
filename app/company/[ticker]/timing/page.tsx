@@ -43,6 +43,16 @@ import {
 } from '@/lib/trading212/tradesClient';
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
+import TrendSection from '@/components/trend/TrendSection';
+import CompanySubnav from '@/components/company/CompanySubnav';
+
+/**
+ * Data flow (Timing/Trend):
+ * UI controls (Horizon, Coverage, Vol Model, EWMA mode, Window) → local state in this page
+ * → request bodies/queries to /api/volatility/[symbol] and EWMA routes (h/coverage/window/model/λ)
+ * → server model functions (GBM/GARCH/HAR/Range/ewmaWalker) compute intervals
+ * → responses update active/base forecasts and EWMA paths → passed into PriceChart for rendering.
+ */
 
 // Badge component interface and implementation
 interface BadgeProps {
@@ -1324,8 +1334,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       const query = new URLSearchParams({
         lambda: '0.94',
         h: String(h),
+        coverage: coverage.toString(),
       });
 
+      console.debug("[EWMA] Loading unbiased walker", { symbol: params.ticker, h, coverage });
       const res = await fetch(
         `/api/volatility/ewma/${encodeURIComponent(params.ticker)}?${query.toString()}`
       );
@@ -1404,7 +1416,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingEwma(false);
     }
-  }, [params?.ticker, h]);
+  }, [params?.ticker, h, coverage]);
 
   // Load EWMA Walker on mount/ticker change/horizon change
   useEffect(() => {
@@ -2406,7 +2418,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log("[VOL][handler] POST -> /api/volatility", {
         url: `/api/volatility/${encodeURIComponent(tickerParam)}`,
         model: selectedModel,
-        windowN: volWindow,
+        windowN: selectedModel === 'GBM-CC' ? gbmWindow : volWindow,
         dist: resolvedDist,
         requestBody: {
           model: selectedModel,
@@ -2416,6 +2428,14 @@ export default function TimingPage({ params }: TimingPageProps) {
           coverage: persistedCoverage,
           tz: persistedTZ
         }
+      });
+      console.debug("[VOL] POST payload (UI-driven)", {
+        model: selectedModel,
+        horizon: h,
+        coverage: persistedCoverage,
+        windowForModel: selectedModel === 'GBM-CC' ? gbmWindow : volWindow,
+        gbmWindow,
+        volWindow
       });
 
       const resp = await fetch(`/api/volatility/${encodeURIComponent(tickerParam)}`, {
@@ -2472,6 +2492,8 @@ export default function TimingPage({ params }: TimingPageProps) {
         // NOTE: DO NOT touch gbmForecast here – we keep the baseline
       }
       
+      // Always update active forecast so chart reflects the latest model selection
+      setActiveForecast(data);
       setCurrentForecast(data);        // keep for legacy compatibility if needed elsewhere
       console.log("[VOL][handler] setForecast", { 
         volModel,
@@ -4212,33 +4234,36 @@ export default function TimingPage({ params }: TimingPageProps) {
       isDarkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
     }`}>
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className={`text-3xl font-bold ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>{companyName || companyTicker}</h1>
-          <div className="flex items-center gap-2">
-            <span className={`text-sm ${
-              isDarkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>{companyTicker} · {companyExchange}</span>
-            <MarketSessionBadge symbol={params.ticker} />
-          </div>
-          {/* Current price under title (Google Finance style) */}
-          {headerPrice.price != null && (
-            <div className="mt-1 flex items-baseline gap-2">
-              <span className={`text-2xl font-semibold ${
-                isDarkMode ? 'text-white' : 'text-gray-900'
-              }`}>
-                {headerPrice.price.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
-              </span>
-              {headerPrice.date && (
-                <span className={`text-xs ${
-                  isDarkMode ? 'text-gray-500' : 'text-gray-400'
-                }`}>
-                  as of {headerPrice.date}
-                </span>
-              )}
+        <div className="flex items-center gap-6">
+          <div>
+            <h1 className={`text-3xl font-bold ${
+              isDarkMode ? 'text-white' : 'text-gray-900'
+            }`}>{companyName || companyTicker}</h1>
+            <div className="flex items-center gap-2">
+              <span className={`text-sm ${
+                isDarkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>{companyTicker} · {companyExchange}</span>
+              <MarketSessionBadge symbol={params.ticker} />
             </div>
-          )}
+            {/* Current price under title (Google Finance style) */}
+            {headerPrice.price != null && (
+              <div className="mt-1 flex items-baseline gap-2">
+                <span className={`text-2xl font-semibold ${
+                  isDarkMode ? 'text-white' : 'text-gray-900'
+                }`}>
+                  {headerPrice.price.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+                </span>
+                {headerPrice.date && (
+                  <span className={`text-xs ${
+                    isDarkMode ? 'text-gray-500' : 'text-gray-400'
+                  }`}>
+                    as of {headerPrice.date}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <CompanySubnav ticker={params.ticker} />
         </div>
         <div className="flex items-center gap-3">
           {watchlistSuccess && (
@@ -4404,8 +4429,14 @@ export default function TimingPage({ params }: TimingPageProps) {
             rangeEstimator,
             onRangeEstimatorChange: handleEstimatorChange,
             recommendedModel: recommendedModel ? parseMethodToUIState(recommendedModel) : null,
-            windowSize: volWindow,
-            onWindowSizeChange: setVolWindow,
+            windowSize: volModel === 'GBM' ? gbmWindow : volWindow,
+            onWindowSizeChange: (n) => {
+              if (volModel === 'GBM') {
+                setGbmWindow(n);
+              } else {
+                setVolWindow(n);
+              }
+            },
             ewmaLambda: rangeEwmaLambda,
             onEwmaLambdaChange: setRangeEwmaLambda,
             degreesOfFreedom: garchDf,
@@ -4831,6 +4862,15 @@ export default function TimingPage({ params }: TimingPageProps) {
           </div>
         )}
       </div>
+
+      {/* Trend Analysis Section */}
+      <TrendSection
+        ticker={params.ticker}
+        ewmaPath={ewmaPath}
+        ewmaSummary={ewmaSummary}
+        horizon={h}
+        coverage={coverage}
+      />
 
       {/* Unified Forecast Bands Card - Full Width */}
       <div className="mb-8">
