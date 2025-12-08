@@ -209,6 +209,8 @@ export default function TrendSection({
   } = useTrendIndicators(ticker, {
     momentumPeriod,
     adxPeriod,
+    macdShortWindow: 12,
+    macdLongWindow: 26,
   });
 
   const {
@@ -229,6 +231,9 @@ export default function TrendSection({
   const rocMetrics = momentum?.roc ?? null;
   const rsiMetrics = momentum?.rsi ?? null;
   const macdMetrics = momentum?.macd ?? null;
+  const rocDivergence = momentum?.rocDivergence ?? null;
+  const rsiDivergence = momentum?.rsiDivergence ?? null;
+  const macdDivergence = momentum?.macdDivergence ?? null;
 
   // Fetch EWMA data if not provided externally
   const fetchEwmaData = useCallback(async () => {
@@ -829,13 +834,58 @@ export default function TrendSection({
                             <span className="text-slate-400">Zero-cross</span>
                             <span className="font-mono text-slate-100 text-right">
                               {zeroCross
-                                ? `${zeroCross.direction === 'neg_to_pos' ? 'Negative → Positive' : 'Positive → Negative'} (${zeroCross.barsAgo} bars ago)`
+                                ? `${zeroCross.direction === 'neg_to_pos' ? 'Positive' : 'Negative'} (${zeroCross.barsAgo} bars ago)`
                                 : '—'}
                             </span>
-                            <span className="text-slate-400">Divergence</span>
-                            <span className="font-mono text-slate-300 text-right">
-                              None detected (TODO)
-                            </span>
+                            
+                            {/* ROC Divergence */}
+                            {rocDivergence && (
+                              <>
+                                <span className="text-slate-400">ROC</span>
+                                <span className="font-mono text-right">
+                                  <span
+                                    className={
+                                      rocDivergence.type === 'bullish' ? 'text-emerald-400' : 'text-rose-400'
+                                    }
+                                  >
+                                    {rocDivergence.type === 'bullish' ? 'Bullish' : 'Bearish'} ({rocDivergence.barsAgo} bars ago)
+                                  </span>
+                                </span>
+                              </>
+                            )}
+                            
+                            {/* RSI Divergence */}
+                            {rsiDivergence && (
+                              <>
+                                <span className="text-slate-400">RSI</span>
+                                <span className="font-mono text-right">
+                                  <span
+                                    className={
+                                      rsiDivergence.type === 'bullish' ? 'text-emerald-400' : 'text-rose-400'
+                                    }
+                                  >
+                                    {rsiDivergence.type === 'bullish' ? 'Bullish' : 'Bearish'} ({rsiDivergence.barsAgo} bars ago)
+                                  </span>
+                                </span>
+                              </>
+                            )}
+                            
+                            {/* MACD Divergence */}
+                            {macdDivergence && (
+                              <>
+                                <span className="text-slate-400">MACD</span>
+                                <span className="font-mono text-right">
+                                  <span
+                                    className={
+                                      macdDivergence.type === 'bullish' ? 'text-emerald-400' : 'text-rose-400'
+                                    }
+                                  >
+                                    {macdDivergence.type === 'bullish' ? 'Bullish' : 'Bearish'} ({macdDivergence.barsAgo} bars ago)
+                                  </span>
+                                </span>
+                              </>
+                            )}
+                            
                             {/* ROC */}
                             <div className="mt-2 flex items-center gap-1.5 text-slate-400">
                               <span>ROC</span>
@@ -980,6 +1030,21 @@ export default function TrendSection({
                     const adxThresholdCross = adx?.lastThresholdCross ?? null;
                     const adxExtreme = adx?.extreme ?? null;
 
+                    const adxPillLabel =
+                      adx?.regime === 'range'
+                        ? 'Range'
+                        : adx?.regime === 'threshold_zone'
+                          ? 'Threshold'
+                          : adx?.regime === 'strong'
+                            ? 'Strong'
+                            : adx?.regime === 'very_strong'
+                              ? 'Very strong'
+                              : adx?.regime === 'extreme'
+                                ? 'Extreme'
+                                : adx?.regime === 'climax'
+                                  ? 'Climax'
+                                  : '—';
+
                     const regimeLabel = (() => {
                       switch (adxRegime) {
                         case 'range':
@@ -1011,25 +1076,16 @@ export default function TrendSection({
                     const infoCopy = (
                       <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-80 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
                         <p className="mb-1">
-                          ADX measures <span className="font-semibold">trend strength, not direction</span>. It is derived from Wilder&apos;s Directional Movement (+DI and -DI) and ranges from 0 to 100.
+                          ADX measures <span className="font-semibold">trend strength, not direction</span>. It is built from Wilder&apos;s Directional Movement system (+DI/-DI) and ranges from 0 to 100.
                         </p>
                         <p className="mb-1">
                           Values below ~20 indicate a flat, choppy market; above ~25 a trending environment; 40–50+ means a very strong trend.
                         </p>
                         <p>
-                          ADX rising = trend strength increasing; ADX falling = trend weakening (even if price still drifts up or down). We use ADX as a filter: EWMA/Momentum trend signals are more reliable when ADX is high enough.
+                          ADX rising = trend strength increasing; ADX falling = trend weakening (even if price still drifts up or down). We use ADX as a filter: only trust EWMA/Momentum trend signals when ADX is high enough.
                         </p>
                       </div>
                     );
-
-                    const regimeDescription =
-                      adxValue != null
-                        ? `ADX(${adx?.period ?? adxPeriod}) = ${adxValue.toFixed(1)} → ${
-                            adxRegime === 'range'
-                              ? 'flat, range-bound market. Trend-following signals are prone to false breakouts.'
-                              : 'solid trending environment. Trend-following signals (EWMA, Momentum) are more likely to work.'
-                          }`
-                        : 'Not enough data to compute ADX.';
 
                     return (
                       <>
@@ -1044,14 +1100,12 @@ export default function TrendSection({
                                 </span>
                                 {infoCopy}
                               </div>
-                              {/* Removed inline period descriptor to simplify header per request */}
                             </div>
                             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium ${regimeColor}`}>
-                              {regimeLabel}
+                              {adxPillLabel}
                             </span>
                           </div>
 
-                          {/* moved the period buttons below the title */}
                           <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
                             {[7, 14, 21, 28].map((p) => (
                               <button
@@ -1080,9 +1134,9 @@ export default function TrendSection({
                               </dd>
                             </div>
                             <div className="contents">
-                              <dt className="text-slate-400">ADX change (5 bars)</dt>
+                              <dt className="text-slate-400">ADX change ({adxSlope?.window ?? 5} bars)</dt>
                               <dd className="font-mono text-slate-100">
-                                {adxSlope
+                                {adxSlope?.change != null
                                   ? `${adxSlope.change >= 0 ? '+' : ''}${adxSlope.change.toFixed(1)}`
                                   : '—'}
                               </dd>
@@ -1100,12 +1154,20 @@ export default function TrendSection({
                               </dd>
                             </div>
                             <div className="contents">
-                              <dt className="text-slate-400">DMI Direction</dt>
+                              <dt className="flex items-center gap-1 text-slate-400">
+                                DMI Direction
+                                <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                  i
+                                  <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-64 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                    Uptrend when +DI &gt; −DI, downtrend when −DI &gt; +DI.
+                                  </div>
+                                </span>
+                              </dt>
                               <dd className="font-mono">
                                 {adx?.latest
                                   ? adx.latest.plusDI > adx.latest.minusDI
-                                    ? <span className="text-emerald-400">Uptrend (+DI &gt; -DI)</span>
-                                    : <span className="text-rose-400">Downtrend (-DI &gt; +DI)</span>
+                                    ? <span className="text-emerald-400">Uptrend</span>
+                                    : <span className="text-rose-400">Downtrend</span>
                                   : '—'}
                               </dd>
                             </div>
@@ -1118,15 +1180,21 @@ export default function TrendSection({
                             Signals
                           </h4>
                           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
-                            <span className="text-slate-400">Environment</span>
+                            <span className="flex items-center gap-1 text-slate-400">
+                              Environment
+                              <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                i
+                                <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-72 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                  Trending when ADX is at or above 25. Below that the market is range-bound / non-trending and breakouts are less reliable.
+                                </div>
+                              </span>
+                            </span>
                             <span className="font-mono text-slate-100 text-right max-w-[260px] leading-snug">
-                              {adxValue != null && adxValue >= 25
-                                ? 'Trend trading favoured (ADX > 25)'
-                                : 'Range environment – beware false breakouts (ADX < 20–25)'}
+                              {adxValue == null ? '—' : adxValue >= 25 ? 'Trending' : 'Range-bound'}
                             </span>
                             <span className="text-slate-400">Threshold (25)</span>
                             <span className="font-mono text-slate-100 text-right">
-                              {adxValue != null && adxValue >= 25 ? 'Above threshold' : 'Below threshold'}
+                              {adxValue == null ? '—' : adxValue >= 25 ? 'Above' : 'Below'}
                             </span>
                             <span className="text-slate-400">ADX slope</span>
                             <span className="font-mono text-slate-100 text-right">
@@ -1134,22 +1202,34 @@ export default function TrendSection({
                                 ? adxSlope.direction === 'rising'
                                   ? 'Rising (strength increasing)'
                                   : adxSlope.direction === 'falling'
-                                    ? 'Falling (weakening)'
+                                    ? 'Falling (trend weakening)'
                                     : 'Flat'
                                 : '—'}
                             </span>
-                            <span className="text-slate-400">Last threshold cross</span>
-                            <span className="font-mono text-slate-100 text-right">
-                              {adxThresholdCross
-                                ? `${adxThresholdCross.direction === 'cross_above' ? 'Crossed above' : 'Crossed below'} ${adxThresholdCross.level} (${adxThresholdCross.barsAgo} bars ago)`
-                                : '—'}
+                            <span className="flex items-center gap-1 text-slate-400">
+                              Last threshold cross
+                              <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                i
+                                <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-64 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                  Last cross above/below 25; value shows how many bars ago.
+                                </div>
+                              </span>
                             </span>
-                            <span className="text-slate-400">Extreme state</span>
+                            <span className="font-mono text-slate-100 text-right">
+                              {adxThresholdCross ? `${adxThresholdCross.barsAgo} bars ago` : '—'}
+                            </span>
+                            <span className="flex items-center gap-1 text-slate-400">
+                              Extreme state
+                              <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                i
+                                <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-64 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                  Extreme now shows peak ADX if currently extreme; otherwise last peak.
+                                </div>
+                              </span>
+                            </span>
                             <span className="font-mono text-slate-100 text-right max-w-[260px] leading-snug">
                               {adxExtreme
-                                ? adxExtreme.isExtremeNow
-                                  ? `Extreme: peaked at ${adxExtreme.peakAdx.toFixed(1)}`
-                                  : `Last peak ${adxExtreme.peakAdx.toFixed(1)} on ${adxExtreme.peakDate}`
+                                ? `${adxExtreme.peakAdx.toFixed(1)} on ${adxExtreme.peakDate}`
                                 : 'None'}
                             </span>
                           </div>

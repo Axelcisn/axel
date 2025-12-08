@@ -46,6 +46,7 @@ import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import TrendSection from '@/components/trend/TrendSection';
 import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
+import { buildIndicatorCache, type IndicatorCache } from '@/lib/strategy/indicatorCache';
 
 /**
  * Data flow (Timing/Trend):
@@ -422,6 +423,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
   const [t212Error, setT212Error] = useState<string | null>(null);
   const [t212CanonicalRows, setT212CanonicalRows] = useState<CanonicalRow[] | null>(null);
+  const [t212Indicators, setT212Indicators] = useState<IndicatorCache | null>(null);
 
   // Trading212 Simulation Runs - multiple scenarios for comparison
   type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
@@ -1815,6 +1817,27 @@ export default function TimingPage({ params }: TimingPageProps) {
         let rowsForSim = rows;
         if (simStartDate) {
           rowsForSim = rows.filter((row) => row.date && row.date >= simStartDate);
+        }
+
+        // Build shared indicator cache (for future strategies)
+        try {
+          const simBars = rowsForSim.map((row) => ({
+            date: row.date,
+            open: row.open,
+            high: row.high,
+            low: row.low,
+            close: row.close,
+            volume: (row as any).volume ?? 0,
+          }));
+          const indicators = buildIndicatorCache({
+            bars: simBars,
+            fastWindow: 14,
+            slowWindow: 50,
+            momentumPeriod: 10,
+          });
+          setT212Indicators(indicators);
+        } catch (err) {
+          console.warn('[T212] Failed to build indicator cache (non-blocking)', err);
         }
 
         // Debug: Log sim window

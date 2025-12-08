@@ -31,6 +31,11 @@ import {
   findLastMacdCenterCross,
   classifyMacdHistSlope,
 } from '@/lib/indicators/momentum';
+import {
+  findLatestDivergence,
+  type DivergenceSignal,
+  type SeriesPoint,
+} from '@/lib/indicators/divergence';
 import type {
   AdxPoint,
   AdxTrendStrength,
@@ -49,6 +54,8 @@ import {
 export interface UseTrendIndicatorsOptions {
   momentumPeriod?: number;
   adxPeriod?: number;
+  macdShortWindow?: number;
+  macdLongWindow?: number;
 }
 
 export interface UseTrendMomentum {
@@ -64,6 +71,9 @@ export interface UseTrendMomentum {
   roc: RocMetrics | null;
   rsi: RsiMetrics | null;
   macd: MacdMetrics | null;
+  rocDivergence: DivergenceSignal | null;
+  rsiDivergence: DivergenceSignal | null;
+  macdDivergence: DivergenceSignal | null;
 }
 
 export interface UseTrendIndicatorsResult {
@@ -88,6 +98,8 @@ export function useTrendIndicators(
 ): UseTrendIndicatorsResult {
   const momentumPeriod = options?.momentumPeriod ?? 10;
   const adxPeriod = options?.adxPeriod ?? 14;
+  const macdShortWindow = options?.macdShortWindow ?? 12;
+  const macdLongWindow = options?.macdLongWindow ?? 26;
 
   const [momentum, setMomentum] = useState<UseTrendIndicatorsResult['momentum']>(null);
   const [adx, setAdx] = useState<UseTrendIndicatorsResult['adx']>(null);
@@ -148,6 +160,9 @@ export function useTrendIndicators(
         let rocMetrics: RocMetrics | null = null;
         let rsiMetrics: RsiMetrics | null = null;
         let macdMetrics: MacdMetrics | null = null;
+        let rocDivergence: DivergenceSignal | null = null;
+        let rsiDivergence: DivergenceSignal | null = null;
+        let macdDivergence: DivergenceSignal | null = null;
 
         if (latest && Number.isFinite(latest.momentumPct)) {
           score = momentumPctToScore(latest.momentumPct);
@@ -183,6 +198,7 @@ export function useTrendIndicators(
         }
 
         const priceRows = momentumPoints.map((p) => ({ date: p.date, close: p.close }));
+        const priceSeries: SeriesPoint[] = priceRows.map((r) => ({ date: r.date, value: r.close }));
 
         // RSI (default 14)
         const { points: rsiPoints, latest: rsiLatest } = computeRsi(priceRows, 14);
@@ -201,7 +217,7 @@ export function useTrendIndicators(
         }
 
         // MACD (12/26/9)
-        const { points: macdPoints, latest: macdLatest } = computeMacd(priceRows, 12, 26, 9);
+        const { points: macdPoints, latest: macdLatest } = computeMacd(priceRows, macdShortWindow, macdLongWindow, 9);
         if (macdLatest) {
           const macdRegime = classifyMacdRegime(macdLatest.macdLine, macdLatest.macdNorm);
           const signalCross = findLastMacdSignalCross(macdPoints);
@@ -219,6 +235,22 @@ export function useTrendIndicators(
           };
         }
 
+        // Divergence detection (price vs oscillator)
+        const rocSeries: SeriesPoint[] = momentumPoints.map((p) => ({ date: p.date, value: p.momentumPct }));
+        if (rocSeries.length) {
+          rocDivergence = findLatestDivergence(priceSeries, rocSeries);
+        }
+
+        const rsiSeries: SeriesPoint[] = rsiPoints.map((p) => ({ date: p.date, value: p.rsi }));
+        if (rsiSeries.length) {
+          rsiDivergence = findLatestDivergence(priceSeries, rsiSeries);
+        }
+
+        const macdSeries: SeriesPoint[] = macdPoints.map((p) => ({ date: p.date, value: p.macdLine }));
+        if (macdSeries.length) {
+          macdDivergence = findLatestDivergence(priceSeries, macdSeries);
+        }
+
         setMomentum({
           mode: 'roc',
           latest,
@@ -232,6 +264,9 @@ export function useTrendIndicators(
           roc: rocMetrics,
           rsi: rsiMetrics,
           macd: macdMetrics,
+          rocDivergence,
+          rsiDivergence,
+          macdDivergence,
         });
 
         const adxPoints = (adxJson.points ?? []) as AdxPoint[];

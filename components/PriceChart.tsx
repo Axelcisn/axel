@@ -4449,7 +4449,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             <div className="flex flex-col gap-0.5">
               <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>EWMA</span>
               <div className="flex items-center gap-1">
-                {/* EWMA Unbiased Button */}
+                {/* EWMA Unbiased Button - clicking also resets maximized state */}
                 <div className="relative group">
                   <button
                     onClick={() => {
@@ -4467,6 +4467,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       // Toggle T212 run visibility
                       if (onToggleT212Run) {
                         onToggleT212Run("ewma-unbiased");
+                      }
+                      // Always reset the maximized state when clicking Unbiased (to restore default λ and train%)
+                      if (ewmaReactionMapDropdown) {
+                        ewmaReactionMapDropdown.onReset();
                       }
                     }}
                     disabled={!ewmaPath || ewmaPath.length === 0}
@@ -4570,6 +4574,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         if (onToggleT212Run) {
                           onToggleT212Run("ewma-biased");
                         }
+                        // Reset the maximized state when clicking Biased (to restore default λ and train%)
+                        if (ewmaReactionMapDropdown) {
+                          ewmaReactionMapDropdown.onReset();
+                        }
                       }}
                       disabled={isLoadingEwmaBiased}
                       className={`
@@ -4652,7 +4660,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </div>
                 )}
 
-                {/* Max Button */}
+                {/* Max Button - clicking triggers maximize optimization */}
                 <button
                   onClick={() => {
                     // Radio behavior: turn off all other EWMA overlays
@@ -4662,20 +4670,27 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     if (onToggleT212Run) {
                       onToggleT212Run("ewma-biased-max");
                     }
+                    // Trigger maximize when clicking Max button
+                    if (ewmaReactionMapDropdown && ewmaReactionMapDropdown.hasOptimizationResults && !ewmaReactionMapDropdown.isMaximized) {
+                      ewmaReactionMapDropdown.onMaximize();
+                    }
                   }}
+                  disabled={ewmaReactionMapDropdown?.isOptimizingReaction}
                   className={`
                     px-2 py-0.5 text-xs rounded-full transition-colors
                     ${activeT212RunId === "ewma-biased-max"
                       ? isDarkMode
                         ? 'bg-orange-600 text-white'
                         : 'bg-orange-500 text-white'
-                      : isDarkMode 
-                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      : ewmaReactionMapDropdown?.isOptimizingReaction
+                        ? 'bg-gray-300 text-gray-500 cursor-wait'
+                        : isDarkMode 
+                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }
                   `}
                 >
-                  Max
+                  {ewmaReactionMapDropdown?.isOptimizingReaction ? '...' : 'Max'}
                 </button>
 
                 {/* EWMA Settings Button (⋯) with Dropdown */}
@@ -4752,53 +4767,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                   : 'border-gray-300 text-gray-900 focus:border-amber-500'
                               }`}
                             />
-                          </div>
-
-                          {/* Buttons Row */}
-                          <div className="flex gap-1.5 mt-1">
-                            {/* Reset Button */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                ewmaReactionMapDropdown.onReset();
-                              }}
-                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction}
-                              className={`flex-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors ${
-                                ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction
-                                  ? 'bg-gray-500/30 text-gray-500 cursor-not-allowed'
-                                  : isDarkMode
-                                    ? 'bg-gray-600/50 hover:bg-gray-600 text-gray-300'
-                                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                              }`}
-                            >
-                              Reset
-                            </button>
-
-                            {/* Maximize Button - applies best optimization config */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                ewmaReactionMapDropdown.onMaximize();
-                              }}
-                              disabled={ewmaReactionMapDropdown.isOptimizingReaction || ewmaReactionMapDropdown.isLoadingReaction || !ewmaReactionMapDropdown.hasOptimizationResults}
-                              className={`flex-1 rounded-full px-2 py-1 text-[10px] font-medium transition-colors ${
-                                ewmaReactionMapDropdown.isOptimizingReaction
-                                  ? 'bg-gray-500/50 text-gray-400 cursor-not-allowed'
-                                  : ewmaReactionMapDropdown.isMaximized
-                                    ? 'bg-amber-600 text-white cursor-default'
-                                    : ewmaReactionMapDropdown.hasOptimizationResults
-                                      ? 'bg-amber-500/90 hover:bg-amber-500 text-white'
-                                      : 'bg-gray-500/50 text-gray-400 cursor-wait'
-                              }`}
-                            >
-                              {ewmaReactionMapDropdown.isOptimizingReaction 
-                                ? 'Optimizing...' 
-                                : ewmaReactionMapDropdown.isMaximized
-                                  ? 'Maximized ✓'
-                                  : ewmaReactionMapDropdown.hasOptimizationResults
-                                    ? 'Maximize'
-                                    : 'Loading...'}
-                            </button>
                           </div>
 
                           {/* Loading indicator */}
@@ -6240,7 +6208,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         : 'bg-white/60 border-gray-200/50 text-gray-900'
     }`}>
       {/* Date Header */}
-      <div className={`px-3 py-1.5 border-b ${
+      <div className={`px-3 py-1 border-b ${
         isDarkMode ? 'border-slate-600/30' : 'border-gray-200/50'
       }`}>
         <div className={`text-[11px] font-semibold tracking-wide ${
@@ -6253,9 +6221,9 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
       <div className={`flex ${isDarkMode ? 'divide-x divide-slate-600/30' : 'divide-x divide-gray-200/50'}`}>
         {/* Model Forecast Section - Blue themed (only for future forecast points) */}
         {hasForecastData && (
-          <div className="px-4 py-3">
+          <div className="px-3 py-2">
             {/* Section Header */}
-            <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex items-center gap-1.5 mb-1">
               <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-blue-500'}`} />
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-blue-400' : 'text-blue-600'
@@ -6354,8 +6322,8 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         
         {/* OHLCV Data - only show for historical points */}
         {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
-          <div className="px-4 py-3">
-            <div className={`text-[9px] font-semibold uppercase tracking-wider mb-2 ${
+          <div className="px-3 py-2">
+            <div className={`text-[9px] font-semibold uppercase tracking-wider mb-1 ${
               isDarkMode ? 'text-slate-400' : 'text-gray-500'
             }`}>
               OHLCV
@@ -6402,39 +6370,51 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         )}
 
         {/* EWMA trend block */}
-        {showEwmaTrend && (
-          <div className="px-4 py-3">
-            <div className="mb-1 font-semibold text-[11px] text-slate-300">
-              EWMA ({ewmaShortWindow} vs {ewmaLongWindow} days)
+        {showEwmaTrend && (() => {
+          // Derive the term label from window values
+          let termLabel = 'Custom';
+          if (ewmaShortWindow === 5 && ewmaLongWindow === 20) {
+            termLabel = 'Short-term';
+          } else if (ewmaShortWindow === 14 && ewmaLongWindow === 50) {
+            termLabel = 'Medium-term';
+          } else if (ewmaShortWindow === 50 && ewmaLongWindow === 200) {
+            termLabel = 'Long-term';
+          }
+          
+          return (
+            <div className="px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex flex-col">
+                  <span className="font-semibold text-[11px] text-slate-300">EWMA</span>
+                  <span className={`text-[9px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>{termLabel}</span>
+                </div>
+                <span className={`font-mono text-[10px] ${trendClass}`}>{trendLabel}</span>
+              </div>
+              <div className="flex items-baseline justify-between text-[10px] mt-1">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
+                  Short ({ewmaShortWindow})
+                </span>
+                <span className="font-mono text-slate-100">
+                  {formatPrice(shortValue)}
+                </span>
+              </div>
+              <div className="flex items-baseline justify-between text-[10px]">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
+                  Long ({ewmaLongWindow})
+                </span>
+                <span className="font-mono text-slate-100">
+                  {formatPrice(longValue)}
+                </span>
+              </div>
             </div>
-            <div className="flex items-baseline justify-between text-[10px]">
-              <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
-                Short EWMA ({ewmaShortWindow})
-              </span>
-              <span className="font-mono text-slate-100">
-                {formatPrice(shortValue)}
-              </span>
-            </div>
-            <div className="flex items-baseline justify-between text-[10px] mt-1">
-              <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
-                Long EWMA ({ewmaLongWindow})
-              </span>
-              <span className="font-mono text-slate-100">
-                {formatPrice(longValue)}
-              </span>
-            </div>
-            <div className="mt-1 flex items-baseline justify-between text-[10px]">
-              <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Trend</span>
-              <span className={`font-mono ${trendClass}`}>{trendLabel}</span>
-            </div>
-          </div>
-        )}
+          );
+        })()}
         
         {/* EWMA Unbiased Section */}
         {(data.ewma_past_forecast != null || data.ewma_future_forecast != null) && (
-          <div className="px-4 py-3">
+          <div className="px-3 py-2">
             {/* Section Header */}
-            <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex items-center gap-1.5 mb-1">
               <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-purple-400' : 'bg-purple-500'}`} />
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-purple-400' : 'text-purple-600'
@@ -6519,10 +6499,9 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         
         {/* EWMA Biased Section */}
         {(data.ewma_biased_past_forecast != null || data.ewma_biased_future_forecast != null) && (
-          <div className="px-4 py-3">
-            {/* Section Header */}
-            <div className="flex items-center gap-1.5 mb-2">
-              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-amber-400' : 'bg-amber-500'}`} />
+          <div className="px-3 py-2">
+            {/* Section Header - no dot */}
+            <div className="mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-amber-400' : 'text-amber-600'
               }`}>
@@ -6530,99 +6509,75 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               </span>
             </div>
             
-            {/* Two-column table */}
-            <table className="w-full text-[9px]">
-              <tbody className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>
-                {/* Made on (origin date) */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Made on</td>
-                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_past_origin_date ? formatDateShort(data.ewma_biased_past_origin_date) : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_future_origin_date ? formatDateShort(data.ewma_biased_future_origin_date) : '—'}
-                  </td>
-                </tr>
-                {/* Target (target date) */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Target</td>
-                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_past_target_date ? formatDateShort(data.ewma_biased_past_target_date) : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_future_target_date ? formatDateShort(data.ewma_biased_future_target_date) : '—'}
-                  </td>
-                </tr>
-                {/* Forecast Price */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Forecast</td>
-                  <td className={`text-right px-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
-                    {data.ewma_biased_past_forecast != null ? `$${data.ewma_biased_past_forecast.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
-                    {data.ewma_biased_future_forecast != null ? `$${data.ewma_biased_future_forecast.toFixed(2)}` : '—'}
-                  </td>
-                </tr>
-                {/* Upper Band */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Upper</td>
-                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_past_upper != null ? `$${data.ewma_biased_past_upper.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_future_upper != null ? `$${data.ewma_biased_future_upper.toFixed(2)}` : '—'}
-                  </td>
-                </tr>
-                {/* Lower Band */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Lower</td>
-                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_past_lower != null ? `$${data.ewma_biased_past_lower.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_biased_future_lower != null ? `$${data.ewma_biased_future_lower.toFixed(2)}` : '—'}
-                  </td>
-                </tr>
-                {/* Error row */}
-                {!data.isFuture && data.close != null && (
-                  <tr>
-                    <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Error</td>
-                    <td className="text-right px-1 font-mono tabular-nums">
-                      {data.ewma_biased_past_forecast != null ? (
-                        <span className={(data.ewma_biased_past_forecast - data.close) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                          {(data.ewma_biased_past_forecast - data.close) >= 0 ? '+' : ''}{(data.ewma_biased_past_forecast - data.close).toFixed(2)}
-                        </span>
-                      ) : <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>—</span>}
-                    </td>
-                    <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      —
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+            {/* Single column layout */}
+            <div className="text-[9px]">
+              {/* E[Price] - the forecasted price for current date (from past forecast) */}
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>E[Price]</span>
+                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                  {data.ewma_biased_past_forecast != null ? `$${data.ewma_biased_past_forecast.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              {/* Upper Band */}
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Upper</span>
+                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                  {data.ewma_biased_past_upper != null ? `$${data.ewma_biased_past_upper.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              {/* Lower Band */}
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Lower</span>
+                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                  {data.ewma_biased_past_lower != null ? `$${data.ewma_biased_past_lower.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              {/* Realized - the actual price at t */}
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Realized</span>
+                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                  {!data.isFuture && data.close != null ? `$${data.close.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              {/* Error row */}
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Error</span>
+                <span className="font-mono tabular-nums">
+                  {!data.isFuture && data.close != null && data.ewma_biased_past_forecast != null ? (
+                    <span className={(data.ewma_biased_past_forecast - data.close) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {(data.ewma_biased_past_forecast - data.close) >= 0 ? '+' : ''}{(data.ewma_biased_past_forecast - data.close).toFixed(2)}
+                    </span>
+                  ) : <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>—</span>}
+                </span>
+              </div>
+              
+              {/* Separator line */}
+              <div className={`border-t my-1 ${isDarkMode ? 'border-slate-600/50' : 'border-gray-300/50'}`} />
+              
+              {/* Forecast - the price forecasted for Horizon (future forecast) */}
+              <div className="flex justify-between">
+                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Forecast</span>
+                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                  {data.ewma_biased_future_forecast != null ? `$${data.ewma_biased_future_forecast.toFixed(2)}` : '—'}
+                </span>
+              </div>
+            </div>
           </div>
         )}
         
         {/* Trading212 Events Section (opens AND closes) */}
         {t212Events.length > 0 && (
-          <div className="px-4 py-3">
-            {/* Section Header - derive run label from first event (solo mode) */}
-            {(() => {
-              const headerRunLabel = t212Events.length > 0 ? t212Events[0].runLabel : 'EWMA';
-              return (
-                <div className="flex items-center gap-1.5 mb-2">
-                  <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-sky-400' : 'bg-sky-500'}`} />
-                  <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                    isDarkMode ? 'text-sky-400' : 'text-sky-600'
-                  }`}>
-                    {`Portfolio – ${headerRunLabel}`}
-                  </span>
-                </div>
-              );
-            })()}
+          <div className="px-3 py-2">
+            {/* Section Header - no dot, renamed to Trade */}
+            <div className="mb-1">
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
+                isDarkMode ? 'text-sky-400' : 'text-sky-600'
+              }`}>
+                Trade
+              </span>
+            </div>
             
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               {t212Events.map((e, idx) => {
                 const isShort = e.side === 'short';
                 const openLabel = e.side === 'long' ? 'Open Long' : 'Open Short';
@@ -6631,7 +6586,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 if (e.type === 'open') {
                   // Open event - just show the open line
                   return (
-                    <div key={idx} className="flex justify-between text-[11px]">
+                    <div key={idx} className="flex justify-between text-[10px]">
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -6662,9 +6617,9 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 };
 
                 return (
-                  <div key={idx} className="flex flex-col text-[11px]">
+                  <div key={idx} className="flex flex-col text-[10px]">
                     {/* Open row for this CLOSED position */}
-                    <div className="flex justify-between mb-0.5">
+                    <div className="flex justify-between">
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -6673,12 +6628,6 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                           }
                         />
                         {openLabel}
-                        {/* show entryDate if different than the hovered date */}
-                        {labelStr !== e.entryDate && (
-                          <span className="ml-1 text-[9px] text-slate-500">
-                            {formatDayMonth(e.entryDate)}
-                          </span>
-                        )}
                       </span>
                       <span className="font-mono tabular-nums text-slate-200">
                         ${e.entryPrice.toFixed(2)}
@@ -6701,7 +6650,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                       </span>
                     </div>
 
-                    {/* P&L $ row */}
+                    {/* P&L row - combined $ and % */}
                     <div className="flex justify-between ml-3">
                       <span className="text-slate-400">P&amp;L</span>
                       <span
@@ -6711,23 +6660,13 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                         }
                       >
                         {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(2)}
+                        {e.margin != null && (
+                          <span className="text-[9px] ml-1">
+                            ({pct >= 0 ? '+' : '-'}{Math.abs(pct).toFixed(1)}%)
+                          </span>
+                        )}
                       </span>
                     </div>
-
-                    {/* P&L % row (if margin available) */}
-                    {e.margin != null && (
-                      <div className="flex justify-between ml-3">
-                        <span className="text-slate-400"></span>
-                        <span
-                          className={
-                            'font-mono tabular-nums text-[10px] ' +
-                            (isGain ? 'text-emerald-400' : 'text-rose-400')
-                          }
-                        >
-                          ({pct >= 0 ? '+' : '-'}{Math.abs(pct).toFixed(1)}%)
-                        </span>
-                      </div>
-                    )}
                   </div>
                 );
               })}
