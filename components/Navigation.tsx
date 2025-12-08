@@ -18,7 +18,7 @@ export default function Navigation() {
   const [isHoveringPanel, setIsHoveringPanel] = useState(false);
   const timeoutRef = useRef<number | null>(null);
   const hoverTimeoutRef = useRef<number | null>(null);
-  const CLOSE_ANIM_MS = 220; // should match .animate-slideUpFade duration
+  const CLOSE_ANIM_MS = 360; // should match .animate-searchPanelExit duration
   const HOVER_CLOSE_MS = 220; // delay after mouse leaves panel before closing
 
   const navItems = [
@@ -100,7 +100,13 @@ export default function Navigation() {
   }, []);
 
   return (
-    <nav className={`shadow-sm app-bg ${!isSearchOpen ? 'border-b app-border' : ''}`}>
+    <nav
+      className={`shadow-sm app-bg transition-all duration-300 ${
+        !isSearchOpen
+          ? 'border-b app-border'
+          : `border-b ${isDarkMode ? 'border-white/10' : 'border-gray-200/80'} supports-[backdrop-filter]:backdrop-blur-md`
+      }`}
+    >
       <div className="w-full px-[5%]">
         <div className="flex justify-between items-center h-12">
           <div className="flex items-center gap-6">
@@ -124,7 +130,6 @@ export default function Navigation() {
               </Link>
             ))}
 
-            {/* Search icon placed to the right of Watchlist */}
             <button
               type="button"
               aria-label="Open search"
@@ -142,84 +147,153 @@ export default function Navigation() {
         </div>
       </div>
 
-      {/* Search panel - appears when search icon is clicked */}
       {panelMounted && (
         <>
-          {/* Backdrop with blur, starts below navbar so navbar remains visible */}
           <div
-            className={`fixed inset-x-0 top-12 bottom-0 z-40 bg-black/20 backdrop-blur-sm transition-opacity duration-300 ${isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+            className={`fixed inset-0 z-40 bg-[radial-gradient(circle_at_20%_20%,rgba(59,130,246,0.08),transparent_35%),radial-gradient(circle_at_80%_0%,rgba(139,92,246,0.08),transparent_30%)] ${
+              isDarkMode ? 'bg-black/70' : 'bg-slate-900/60'
+            } backdrop-blur-[18px] transition-opacity duration-500 ${
+              isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'
+            }`}
             onClick={() => setIsSearchOpen(false)}
             onMouseEnter={() => {
-              // If the pointer moves into the backdrop and the panel is not hovered,
-              // close the search panel immediately as a fallback.
               if (!isHoveringPanel) setIsSearchOpen(false);
             }}
           />
 
-          <div
-            className={`fixed inset-x-0 top-12 z-50 ${isClosing ? 'animate-slideUpFade' : 'animate-slideDownFade'} app-bg border-b app-border`}
-            onMouseEnter={() => {
-              // Cancel any pending close when user re-enters the panel
-              if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-              }
-              setIsHoveringPanel(true);
-            }}
-            onMouseLeave={() => {
-              setIsHoveringPanel(false);
-              // schedule a close after a small delay so quick mouse passes don't immediately close
-              if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-              }
-              hoverTimeoutRef.current = window.setTimeout(() => {
-                hoverTimeoutRef.current = null;
-                setIsSearchOpen(false);
-              }, HOVER_CLOSE_MS);
-            }}
-          >
-            <div className="w-full px-[5%] py-3">
-                <div className="max-w-6xl">
-                  <div className="grid grid-cols-12 gap-4 items-start">
-                  {/* Main left area: search box on top, last searched below */}
-                  <div className="col-span-9">
-                      <div className="mb-3">
-                        <div className="flex items-center gap-3 mb-4 text-3xl md:text-4xl">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className={`w-[1em] h-[1em] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35" />
-                            <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" />
+          <div className="fixed inset-0 z-50 flex justify-center px-[5%] pt-16 pb-12 pointer-events-none">
+            <div
+              className={`w-full max-w-5xl pointer-events-auto rounded-3xl border app-border ${
+                isDarkMode ? 'bg-slate-950/70' : 'bg-white/80'
+              } shadow-2xl shadow-black/25 backdrop-blur-2xl ring-1 ring-white/5 transition-transform duration-500 ${
+                isClosing ? 'animate-searchPanelExit' : 'animate-searchPanelEnter'
+              }`}
+              onMouseEnter={() => {
+                if (hoverTimeoutRef.current) {
+                  clearTimeout(hoverTimeoutRef.current);
+                  hoverTimeoutRef.current = null;
+                }
+                setIsHoveringPanel(true);
+              }}
+              onMouseLeave={() => {
+                setIsHoveringPanel(false);
+                if (hoverTimeoutRef.current) {
+                  clearTimeout(hoverTimeoutRef.current);
+                  hoverTimeoutRef.current = null;
+                }
+                hoverTimeoutRef.current = window.setTimeout(() => {
+                  hoverTimeoutRef.current = null;
+                  setIsSearchOpen(false);
+                }, HOVER_CLOSE_MS);
+              }}
+            >
+              <div
+                className={`px-6 pt-6 pb-5 border-b ${isDarkMode ? 'border-white/10' : 'border-gray-200/70'}`}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={`p-3 rounded-2xl shadow-inner ${isDarkMode ? 'bg-slate-800/80 text-slate-200' : 'bg-slate-100 text-gray-700'}`}>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35" />
+                      <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <TickerSearch
+                      initialSymbol={currentTicker}
+                      isDarkMode={isDarkMode}
+                      compact={false}
+                      autoFocus={true}
+                      variant="panel"
+                      placeholder="Search Momentum"
+                      className="w-full"
+                    />
+                    <p className={`mt-2 text-sm ${isDarkMode ? 'text-slate-400' : 'text-gray-600'}`}>
+                      Find tickers, companies, or revisit a recent search. Press Enter to jump straight to a symbol.
+                    </p>
+                  </div>
+                  <div className={`hidden md:inline-flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-full border app-border ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>
+                    <span className="text-[11px] uppercase tracking-wide">Esc</span>
+                    <span className="opacity-70">to close</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid md:grid-cols-12 gap-8 px-6 py-6">
+                <div className="md:col-span-5 space-y-4">
+                  <div className="space-y-2">
+                    <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                      Quick Links
+                    </p>
+                    <div className="space-y-3">
+                      {[{ href: '/', label: 'Home' }, { href: '/analysis', label: 'Analysis' }, { href: '/memory', label: 'Memory' }, { href: '/watchlist', label: 'Watchlist' }].map((item) => (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={`flex items-center justify-between rounded-2xl px-4 py-3 transition ${
+                            isDarkMode
+                              ? 'bg-white/5 hover:bg-white/10 text-slate-100'
+                              : 'bg-slate-50 hover:bg-slate-100 text-gray-900'
+                          }`}
+                          onClick={() => setIsSearchOpen(false)}
+                        >
+                          <span className="text-sm font-medium">{item.label}</span>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.4}
+                            className="w-4 h-4 opacity-70"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                           </svg>
-                          <div className="flex-1">
-                            <TickerSearch initialSymbol={currentTicker} isDarkMode={isDarkMode} compact={false} autoFocus={true} variant="panel" className="w-full" />
-                          </div>
-                        </div>
-                      </div>
-                    <div className="mt-3">
-                      {/* Show 'Suggested' with static picks when no recent searches, otherwise 'Last searched' */}
-                      <h3 className={`text-sm font-medium mb-3 ${isDarkMode ? 'text-slate-400' : 'text-gray-600'}`}>{lastSearches.length === 0 ? 'Suggested' : 'Last searched'}</h3>
-                      <ul className="space-y-3">
-                        { (lastSearches.length === 0 ? ['AAPL','MSFT','AMZN','GOOGL','TSLA'] : lastSearches).map((s) => (
-                          <li key={s}>
-                            <Link
-                              href={`/company/${encodeURIComponent(s)}/timing`}
-                              className={`flex items-center gap-2 py-1.5 text-sm ${isDarkMode ? 'text-slate-200 hover:text-white' : 'text-gray-800 hover:text-gray-900'}`}
-                              onClick={() => setIsSearchOpen(false)}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.2} className="w-4 h-4 text-slate-400">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5l7 7-7 7" />
-                              </svg>
-                              <span className="font-medium leading-none">{s}</span>
-                            </Link>
-                          </li>
-                        ))}
-                      </ul>
+                        </Link>
+                      ))}
                     </div>
                   </div>
+                </div>
 
-                  {/* Right area: (intentionally left blank — close button removed) */}
-                  <div className="col-span-3" />
+                <div className="md:col-span-7 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className={`text-xs font-semibold uppercase tracking-[0.2em] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                      {lastSearches.length === 0 ? 'Suggested' : 'Recent Searches'}
+                    </p>
+                  </div>
+                  <ul className={`divide-y ${isDarkMode ? 'divide-white/5' : 'divide-gray-200'}`}>
+                    {(lastSearches.length === 0 ? ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'TSLA'] : lastSearches).map((s) => (
+                      <li key={s}>
+                        <Link
+                          href={`/company/${encodeURIComponent(s)}/timing`}
+                          className={`flex items-center justify-between py-3 px-2 rounded-xl transition ${
+                            isDarkMode
+                              ? 'text-slate-100 hover:bg-white/5'
+                              : 'text-gray-900 hover:bg-slate-50'
+                          }`}
+                          onClick={() => setIsSearchOpen(false)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
+                              isDarkMode ? 'bg-white/5 text-slate-200' : 'bg-slate-100 text-gray-800'
+                            }`}>
+                              {s.slice(0, 3)}
+                            </div>
+                            <span className="text-sm font-medium leading-none">{s}</span>
+                          </div>
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth={1.5}
+                            className="w-4 h-4 opacity-70"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 5l7 7-7 7" />
+                          </svg>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
             </div>
