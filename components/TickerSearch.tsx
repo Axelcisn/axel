@@ -11,9 +11,23 @@ interface TickerSearchProps {
   autoFocus?: boolean;
   variant?: 'panel' | 'default';
   placeholder?: string;
+  /**
+   * Adjusts the visual density of the panel input. "expanded" keeps the large hero
+   * input, while "bar" renders a compact search field suitable for top nav bars.
+   */
+  panelStyle?: 'expanded' | 'bar';
 }
 
-export function TickerSearch({ initialSymbol, className, isDarkMode = true, compact = false, autoFocus = false, variant = 'default', placeholder }: TickerSearchProps) {
+export function TickerSearch({
+  initialSymbol,
+  className,
+  isDarkMode = true,
+  compact = false,
+  autoFocus = false,
+  variant = 'default',
+  placeholder,
+  panelStyle = 'expanded',
+}: TickerSearchProps) {
   const router = useRouter();
   const [value, setValue] = useState(initialSymbol ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -71,7 +85,7 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
           <span className="mr-2">Search ticker:</span>
         </label>
       )}
-      <div className={`flex items-center gap-1 w-full`}> 
+      <div className={`flex items-center gap-1 w-full`}>
         <input
           type="text"
           value={value}
@@ -79,10 +93,14 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
           onKeyDown={handleKeyDown}
           ref={inputRef}
           placeholder={placeholder ?? (variant === 'panel' ? "Search" : (compact ? "Search ticker…" : "AAPL, MSFT, SPY…"))}
-          className={`${variant === 'panel' ? 'w-full text-3xl md:text-4xl pl-0 pr-4 py-3 rounded-md' : (compact ? 'w-32' : 'w-28')} ${
+          className={`${
             variant === 'panel'
-              ? (isDarkMode ? 'border-transparent bg-transparent text-slate-100 placeholder:text-slate-400 focus:outline-none' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none')
-              : (isDarkMode
+              ? `${panelStyle === 'bar' ? 'w-full text-base leading-6 pl-0 pr-0 py-2' : 'w-full text-3xl md:text-4xl pl-0 pr-4 py-3 rounded-md'} ` +
+                (isDarkMode
+                  ? 'border-transparent bg-transparent text-slate-100 placeholder:text-slate-400 focus:outline-none'
+                  : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none')
+              : `${compact ? 'w-32' : 'w-28'} ` +
+                (isDarkMode
                   ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
                   : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500")
           }`}
