@@ -12,6 +12,18 @@ export interface EwmaCrossoverEvent {
   daysAgo: number;
 }
 
+export type EwmaGapDirection = 'bullish' | 'bearish' | 'flat';
+
+export interface EwmaGapStats {
+  gap: number;
+  gapPct: number;
+  meanGap: number;
+  stdGap: number;
+  zScore: number;
+  direction: EwmaGapDirection;
+  sampleSize: number;
+}
+
 /**
  * Compute an EWMA series for a given window over close prices.
  * Rows are assumed sorted ascending by date.
@@ -97,3 +109,67 @@ export function findLastEwmaCrossover(
   return { date, direction: lastDirection, index: lastIndex, daysAgo };
 }
 
+/**
+ * Compute normalized gap stats between aligned short/long EWMA series.
+ * Uses the last `lookback` aligned points (or fewer if not available).
+ */
+export function computeEwmaGapStats(
+  shortSeries: EwmaPoint[],
+  longSeries: EwmaPoint[],
+  lookback: number = 60
+): EwmaGapStats | null {
+  const { dates, short, long } = alignByDate(shortSeries, longSeries);
+  const n = dates.length;
+  if (n === 0) return null;
+
+  const windowSize = Math.min(lookback, n);
+  const start = n - windowSize;
+
+  const gaps: number[] = [];
+  for (let i = start; i < n; i++) {
+    const s = short[i];
+    const l = long[i];
+    if (!Number.isFinite(s) || !Number.isFinite(l)) continue;
+    gaps.push(s - l);
+  }
+
+  if (gaps.length === 0) return null;
+
+  const latestShort = short[n - 1];
+  const latestLong = long[n - 1];
+
+  const gap = latestShort - latestLong;
+  const gapPct = Number.isFinite(latestLong) && latestLong !== 0 ? gap / latestLong : 0;
+
+  const sampleSize = gaps.length;
+  let meanGap = 0;
+  for (const g of gaps) meanGap += g;
+  meanGap /= sampleSize;
+
+  let varGap = 0;
+  for (const g of gaps) {
+    const d = g - meanGap;
+    varGap += d * d;
+  }
+  varGap /= sampleSize;
+  const stdGap = Math.sqrt(varGap);
+
+  let zScore = 0;
+  if (stdGap > 1e-8) {
+    zScore = (gap - meanGap) / stdGap;
+  }
+
+  let direction: EwmaGapDirection = 'flat';
+  if (gap > 0) direction = 'bullish';
+  else if (gap < 0) direction = 'bearish';
+
+  return {
+    gap,
+    gapPct,
+    meanGap,
+    stdGap,
+    zScore,
+    direction,
+    sampleSize,
+  };
+}

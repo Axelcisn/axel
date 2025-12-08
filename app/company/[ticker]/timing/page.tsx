@@ -4369,14 +4369,13 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   return (
     <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-6 bg-background text-foreground">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between mb-8">
-        <div className="flex items-start gap-4 lg:gap-5">
-          <div className="flex flex-col justify-between min-h-[140px]">
-            <div className="h-20 w-20 rounded-full bg-gradient-to-br from-orange-500 via-rose-500 to-amber-400 shadow-xl ring-1 ring-white/10 flex items-center justify-center text-3xl font-semibold text-white">
-              {logoLetter}
-            </div>
+      <div className="grid grid-cols-[auto_1fr_auto] gap-5 items-center mb-8">
+        <div className="flex items-center">
+          <div className="w-32 h-32 rounded-full bg-gradient-to-br from-orange-500 via-rose-500 to-amber-400 shadow-xl ring-1 ring-white/10 flex items-center justify-center text-3xl font-semibold text-white">
+            {logoLetter}
           </div>
-          <div className="space-y-3">
+        </div>
+        <div className="space-y-3">
             <h1 className="text-4xl font-semibold tracking-tight text-white">
               {companyName || tickerDisplay}
             </h1>
@@ -4411,20 +4410,16 @@ export default function TimingPage({ params }: TimingPageProps) {
                 At close at {headerPrice.date}
               </p>
             )}
-          </div>
+            {watchlistSuccess && (
+              <span className={`text-sm font-medium ${
+                isDarkMode ? 'text-green-400' : 'text-green-600'
+              }`}>
+                ✓ Added to Watchlist
+              </span>
+            )}
         </div>
-
-        <div className="flex flex-col items-end gap-3">
-          {watchlistSuccess && (
-            <span className={`text-sm font-medium ${
-              isDarkMode ? 'text-green-400' : 'text-green-600'
-            }`}>
-              ✓ Added to Watchlist
-            </span>
-          )}
-          <div className="flex flex-wrap items-center gap-2">
-            {actionButtons}
-          </div>
+        <div className="flex items-center gap-2">
+          {actionButtons}
         </div>
       </div>
       {/* Price Chart Section */}

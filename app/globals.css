@@ -43,6 +43,15 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+.page-content {
+  transition: filter 220ms ease;
+}
+
+.search-blur .page-content {
+  filter: blur(18px) saturate(140%);
+  transform: translateZ(0);
+}
+
 /* Helper classes that map to the CSS variables so components can
    consistently use the project's theme colors. Changing the
    variables above will update all components that use these. */

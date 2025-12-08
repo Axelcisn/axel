@@ -70,13 +70,11 @@ export function MarketSessionBadge({ symbol }: MarketSessionBadgeProps) {
       : "border-sky-400 text-sky-200";
 
   return (
-    <div className="flex items-center gap-2 text-xs text-slate-300">
-      <span className="text-slate-400">Session:</span>
-      <span
-        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] ${colorClass}`}
-      >
-        {label}
-      </span>
-    </div>
+    <span
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${colorClass}`}
+      aria-label={`Session ${label}`}
+    >
+      {label}
+    </span>
   );
 }

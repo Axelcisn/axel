@@ -7,6 +7,10 @@ import type {
   MomentumZone,
   MomentumRegime,
   MomentumZeroCross,
+  MomentumMode,
+  RocMetrics,
+  RsiMetrics,
+  MacdMetrics,
 } from '@/lib/indicators/momentum';
 import {
   buildMomentumScoreSeries,
@@ -14,29 +18,65 @@ import {
   findLastMomentumZeroCross,
   momentumPctToScore,
   momentumZoneFromScore,
+  computeRocZScore,
+  classifyRocRegime,
+  computeRsi,
+  classifyRsiRegime,
+  rsiBand,
+  findLastRsiCenterCross,
+  findLastRsiBandCross,
+  computeMacd,
+  classifyMacdRegime,
+  findLastMacdSignalCross,
+  findLastMacdCenterCross,
+  classifyMacdHistSlope,
 } from '@/lib/indicators/momentum';
-import type { AdxPoint, AdxTrendStrength } from '@/lib/indicators/adx';
+import type {
+  AdxPoint,
+  AdxTrendStrength,
+  AdxRegime,
+  AdxSlope,
+  AdxThresholdCross,
+  AdxExtremeState,
+} from '@/lib/indicators/adx';
+import {
+  classifyAdxRegime,
+  computeAdxSlope,
+  findLastAdxThresholdCross,
+  computeAdxExtremeState,
+} from '@/lib/indicators/adx';
 
 export interface UseTrendIndicatorsOptions {
   momentumPeriod?: number;
   adxPeriod?: number;
 }
 
+export interface UseTrendMomentum {
+  mode: MomentumMode;
+  latest: MomentumPoint | null;
+  period: number;
+  series: MomentumPoint[] | null;
+  score: number | null;
+  zone: MomentumZone | null;
+  regime: MomentumRegime | null;
+  scoreSeries: MomentumScorePoint[] | null;
+  lastZeroCross: MomentumZeroCross | null;
+  roc: RocMetrics | null;
+  rsi: RsiMetrics | null;
+  macd: MacdMetrics | null;
+}
+
 export interface UseTrendIndicatorsResult {
-  momentum: {
-    latest: MomentumPoint | null;
-    period: number;
-    series: MomentumPoint[] | null;
-    score: number | null;
-    zone: MomentumZone | null;
-    regime: MomentumRegime | null;
-    scoreSeries: MomentumScorePoint[] | null;
-    lastZeroCross: MomentumZeroCross | null;
-  } | null;
+  momentum: UseTrendMomentum | null;
   adx: {
     latest: AdxPoint | null;
     period: number;
     trendStrength: AdxTrendStrength | null;
+    series: AdxPoint[] | null;
+    regime: AdxRegime | null;
+    slope: AdxSlope | null;
+    lastThresholdCross: AdxThresholdCross | null;
+    extreme: AdxExtremeState | null;
   } | null;
   isLoading: boolean;
   error: string | null;
@@ -105,6 +145,9 @@ export function useTrendIndicators(
         let regime: MomentumRegime | null = null;
         let scoreSeries: MomentumScorePoint[] | null = null;
         let lastZeroCross: MomentumZeroCross | null = null;
+        let rocMetrics: RocMetrics | null = null;
+        let rsiMetrics: RsiMetrics | null = null;
+        let macdMetrics: MacdMetrics | null = null;
 
         if (latest && Number.isFinite(latest.momentumPct)) {
           score = momentumPctToScore(latest.momentumPct);
@@ -117,7 +160,67 @@ export function useTrendIndicators(
           lastZeroCross = findLastMomentumZeroCross(momentumPoints);
         }
 
+        // ROC metrics (z-score, regime, extremes)
+        if (latest && Number.isFinite(latest.momentumPct)) {
+          const { zScore } = computeRocZScore(momentumPoints);
+          const rocRegime = classifyRocRegime(latest.momentumPct, zScore);
+          let extreme: RocMetrics['extreme'] = 'none';
+          if (Math.abs(zScore) >= 2) {
+            extreme = zScore > 0 ? 'positive' : 'negative';
+          }
+          rocMetrics = {
+            roc: latest.momentumPct,
+            zScore,
+            regime: rocRegime,
+            zeroCross: lastZeroCross
+              ? {
+                  direction: lastZeroCross.direction === 'neg_to_pos' ? 'up' : 'down',
+                  barsAgo: lastZeroCross.barsAgo,
+                }
+              : undefined,
+            extreme,
+          };
+        }
+
+        const priceRows = momentumPoints.map((p) => ({ date: p.date, close: p.close }));
+
+        // RSI (default 14)
+        const { points: rsiPoints, latest: rsiLatest } = computeRsi(priceRows, 14);
+        if (rsiLatest) {
+          const rsiRegime = classifyRsiRegime(rsiLatest.rsi);
+          const band = rsiBand(rsiLatest.rsi);
+          const centerCross = findLastRsiCenterCross(rsiPoints);
+          const bandCross = findLastRsiBandCross(rsiPoints);
+          rsiMetrics = {
+            rsi: rsiLatest.rsi,
+            regime: rsiRegime,
+            band,
+            centerCross,
+            bandCross,
+          };
+        }
+
+        // MACD (12/26/9)
+        const { points: macdPoints, latest: macdLatest } = computeMacd(priceRows, 12, 26, 9);
+        if (macdLatest) {
+          const macdRegime = classifyMacdRegime(macdLatest.macdLine, macdLatest.macdNorm);
+          const signalCross = findLastMacdSignalCross(macdPoints);
+          const centerCross = findLastMacdCenterCross(macdPoints);
+          const histSlope = classifyMacdHistSlope(macdPoints);
+          macdMetrics = {
+            macdLine: macdLatest.macdLine,
+            signal: macdLatest.signal,
+            hist: macdLatest.hist,
+            macdNorm: macdLatest.macdNorm,
+            regime: macdRegime,
+            signalCross,
+            centerCross,
+            histSlope,
+          };
+        }
+
         setMomentum({
+          mode: 'roc',
           latest,
           period,
           series: momentumPoints.length ? momentumPoints : null,
@@ -126,12 +229,40 @@ export function useTrendIndicators(
           regime,
           scoreSeries,
           lastZeroCross,
+          roc: rocMetrics,
+          rsi: rsiMetrics,
+          macd: macdMetrics,
         });
 
+        const adxPoints = (adxJson.points ?? []) as AdxPoint[];
+        const adxLatest = adxJson.latest ?? null;
+        const adxPeriodValue = adxJson.period ?? adxPeriod;
+        const adxStrength = (adxJson.trendStrength ?? null) as AdxTrendStrength | null;
+
+        let adxRegime: AdxRegime | null = null;
+        let adxSlope: AdxSlope | null = null;
+        let adxThresholdCross: AdxThresholdCross | null = null;
+        let adxExtreme: AdxExtremeState | null = null;
+
+        if (adxLatest && Number.isFinite(adxLatest.adx)) {
+          adxRegime = classifyAdxRegime(adxLatest.adx);
+        }
+
+        if (adxPoints.length > 0) {
+          adxSlope = computeAdxSlope(adxPoints);
+          adxThresholdCross = findLastAdxThresholdCross(adxPoints);
+          adxExtreme = computeAdxExtremeState(adxPoints);
+        }
+
         setAdx({
-          latest: adxJson.latest ?? null,
-          period: adxJson.period ?? adxPeriod,
-          trendStrength: adxJson.trendStrength ?? null,
+          latest: adxLatest,
+          period: adxPeriodValue,
+          trendStrength: adxStrength,
+          series: adxPoints.length ? adxPoints : null,
+          regime: adxRegime,
+          slope: adxSlope,
+          lastThresholdCross: adxThresholdCross,
+          extreme: adxExtreme,
         });
       } catch (err: any) {
         if (err?.name === 'AbortError') return;

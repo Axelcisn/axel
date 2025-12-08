@@ -7,6 +7,8 @@ import {
   findLastEwmaCrossover,
   type EwmaPoint,
   type EwmaCrossoverEvent,
+  type EwmaGapStats,
+  computeEwmaGapStats,
 } from '@/lib/indicators/ewmaCrossover';
 
 export interface UseEwmaCrossoverResult {
@@ -16,6 +18,7 @@ export interface UseEwmaCrossoverResult {
   lastEvent: EwmaCrossoverEvent | null;
   latestShort: number | null;
   latestLong: number | null;
+  gapStats: EwmaGapStats | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -30,7 +33,7 @@ export function useEwmaCrossover(
 ): UseEwmaCrossoverResult {
   const { data, isLoading, error } = usePriceHistory(symbol);
 
-  const { shortEwma, longEwma, lastEvent, latestShort, latestLong } = useMemo(() => {
+  const { shortEwma, longEwma, lastEvent, latestShort, latestLong, gapStats } = useMemo(() => {
     if (!data || data.length === 0) {
       return {
         shortEwma: null,
@@ -38,6 +41,7 @@ export function useEwmaCrossover(
         lastEvent: null,
         latestShort: null,
         latestLong: null,
+        gapStats: null,
       };
     }
 
@@ -51,12 +55,14 @@ export function useEwmaCrossover(
         lastEvent: null,
         latestShort: shortSeries.length ? shortSeries[shortSeries.length - 1].value : null,
         latestLong: longSeries.length ? longSeries[longSeries.length - 1].value : null,
+        gapStats: null,
       };
     }
 
     const event = findLastEwmaCrossover(shortSeries, longSeries);
     const latestShortValue = shortSeries[shortSeries.length - 1].value;
     const latestLongValue = longSeries[longSeries.length - 1].value;
+    const stats = computeEwmaGapStats(shortSeries, longSeries);
 
     return {
       shortEwma: shortSeries,
@@ -64,6 +70,7 @@ export function useEwmaCrossover(
       lastEvent: event,
       latestShort: latestShortValue,
       latestLong: latestLongValue,
+      gapStats: stats,
     };
   }, [data, shortWindow, longWindow]);
 
@@ -74,6 +81,7 @@ export function useEwmaCrossover(
     lastEvent,
     latestShort,
     latestLong,
+    gapStats,
     isLoading,
     error,
   };

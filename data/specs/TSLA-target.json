@@ -5,5 +5,5 @@
   "exchange_tz": "America/New_York",
   "variable": "NEXT_CLOSE_ADJ",
   "cutoff_note": "compute at t close; verify at t+1 close",
-  "updated_at": "2025-12-08T00:43:49.106Z"
+  "updated_at": "2025-12-08T05:34:49.056Z"
 }

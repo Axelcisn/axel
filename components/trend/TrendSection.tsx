@@ -226,6 +226,10 @@ export default function TrendSection({
   const isLoadingAny = isLoading || indicatorsLoading || ewmaCrossoverLoading;
   const combinedError = error || indicatorsError || ewmaCrossoverError;
 
+  const rocMetrics = momentum?.roc ?? null;
+  const rsiMetrics = momentum?.rsi ?? null;
+  const macdMetrics = momentum?.macd ?? null;
+
   // Fetch EWMA data if not provided externally
   const fetchEwmaData = useCallback(async () => {
     if (externalEwmaPath) return; // Don't fetch if parent provides data
@@ -344,15 +348,10 @@ export default function TrendSection({
             <h3 className={`text-lg font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
               Trend Analysis
             </h3>
-            <p className={`text-xs mt-1 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-              {activeTab === 'traditional' && `EWMA-based trend classification · H(d): ${horizon} · λ: 0.94`}
-              {activeTab === 'ml' && 'Machine learning trend detection'}
-              {activeTab === 'ai' && 'AI-powered trend insights'}
-            </p>
           </div>
           
           {/* Tab Navigation */}
-          <div className={`flex items-center gap-3 rounded-full p-1 ${
+          <div className={`flex items-center gap-1 rounded-full p-1 ${
             isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100'
           }`}>
             {(['traditional', 'ml', 'ai'] as TrendTab[]).map((tab) => (
@@ -360,7 +359,7 @@ export default function TrendSection({
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={`
-                  px-3 py-1.5 text-xs font-medium rounded-full transition-all
+                  px-2.5 py-1 text-xs font-medium rounded-full transition-all
                   ${activeTab === tab
                     ? isDarkMode 
                       ? 'bg-slate-700 text-white shadow-sm' 
@@ -400,75 +399,6 @@ export default function TrendSection({
           {/* Content */}
           {!isLoadingAny && ewmaPath && ewmaPath.length > 0 && trendClassification && (
             <>
-              {/* Indicator Status Bar */}
-              <div className={`mb-4 px-4 py-2 rounded-lg flex flex-wrap items-center gap-4 text-xs ${
-                isDarkMode ? 'bg-slate-800/50 border border-slate-700/50' : 'bg-gray-100 border border-gray-200'
-              }`}>
-                {/* Momentum summary */}
-                <div className="flex items-center gap-2">
-                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>
-                    Momentum({momentum?.period ?? momentumPeriod}):
-                  </span>
-                  {momentum?.latest ? (
-                    <span className={`font-mono font-medium ${
-                      momentum.latest.momentumPct > 0 
-                        ? 'text-emerald-500' 
-                        : momentum.latest.momentumPct < 0 
-                          ? 'text-rose-500' 
-                          : isDarkMode ? 'text-slate-300' : 'text-gray-600'
-                    }`}>
-                      {momentum.latest.momentumPct >= 0 ? '+' : ''}
-                      {(momentum.latest.momentumPct * 100).toFixed(2)}%
-                    </span>
-                  ) : (
-                    <span className={isDarkMode ? 'text-slate-600' : 'text-gray-400'}>—</span>
-                  )}
-                </div>
-
-                {/* ADX summary */}
-                <div className="flex items-center gap-2">
-                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>ADX(14):</span>
-                  {adx?.latest ? (
-                    <>
-                      <span className={`font-mono font-medium ${
-                        adx.latest.adx >= 40 
-                          ? 'text-emerald-500' 
-                          : adx.latest.adx >= 20 
-                            ? isDarkMode ? 'text-slate-200' : 'text-gray-700'
-                            : isDarkMode ? 'text-slate-500' : 'text-gray-400'
-                      }`}>
-                        {adx.latest.adx.toFixed(1)}
-                      </span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide ${
-                        adx.trendStrength === 'very-strong' 
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : adx.trendStrength === 'strong'
-                            ? 'bg-emerald-500/10 text-emerald-500'
-                            : adx.trendStrength === 'normal'
-                              ? isDarkMode ? 'bg-slate-700 text-slate-300' : 'bg-gray-200 text-gray-600'
-                              : isDarkMode ? 'bg-slate-800 text-slate-500' : 'bg-gray-100 text-gray-400'
-                      }`}>
-                        {adx.trendStrength?.replace('-', ' ')}
-                      </span>
-                    </>
-                  ) : (
-                    <span className={isDarkMode ? 'text-slate-600' : 'text-gray-400'}>—</span>
-                  )}
-                </div>
-
-                {/* DI direction */}
-                {adx?.latest && (
-                  <div className="flex items-center gap-2">
-                    <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>Direction:</span>
-                    <span className={`font-medium ${
-                      adx.latest.plusDI > adx.latest.minusDI ? 'text-emerald-500' : 'text-rose-500'
-                    }`}>
-                      {adx.latest.plusDI > adx.latest.minusDI ? '+DI > -DI (Bullish)' : '-DI > +DI (Bearish)'}
-                    </span>
-                  </div>
-                )}
-              </div>
-
               {/* Three Indicator Cards Grid */}
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 
@@ -533,19 +463,25 @@ export default function TrendSection({
                           </div>
                         </div>
 
-                        {/* Trend badge: Bullish / Bearish / Neutral */}
+                        {/* Trend badge: Bullish / Bearish / Sideways */}
                         {(() => {
-                          const trendLabel =
-                            trendClassification?.regime === 'up'
-                              ? 'Bullish'
-                              : trendClassification?.regime === 'down'
-                              ? 'Bearish'
-                              : 'Neutral';
+                          const tol = 1e-6;
+                          const s = latestShort ?? shortEwma?.[shortEwma.length - 1]?.value ?? null;
+                          const l = latestLong ?? longEwma?.[longEwma.length - 1]?.value ?? null;
+                          let trendLabel: 'Bullish' | 'Bearish' | 'Sideways' = 'Sideways';
+                          if (s != null && l != null) {
+                            if (s > l + tol) trendLabel = 'Bullish';
+                            else if (s < l - tol) trendLabel = 'Bearish';
+                          } else if (trendClassification?.regime === 'up') {
+                            trendLabel = 'Bullish';
+                          } else if (trendClassification?.regime === 'down') {
+                            trendLabel = 'Bearish';
+                          }
 
                           const badgeClasses =
-                            trendClassification?.regime === 'up'
+                            trendLabel === 'Bullish'
                               ? 'px-2 py-1 rounded-full text-[10px] font-medium bg-emerald-500/10 text-emerald-400'
-                              : trendClassification?.regime === 'down'
+                              : trendLabel === 'Bearish'
                               ? 'px-2 py-1 rounded-full text-[10px] font-medium bg-rose-500/10 text-rose-400'
                               : 'px-2 py-1 rounded-full text-[10px] font-medium bg-slate-500/10 text-slate-400';
 
@@ -692,32 +628,6 @@ export default function TrendSection({
                             {(priceBiasPct * 100).toFixed(2)}%
                           </dd>
                         </div>
-                        {ewmaSummary && (
-                          <>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Coverage ({(ewmaSummary.targetCoverage * 100).toFixed(0)}%)</dt>
-                              <dd className={`font-mono ${
-                                Math.abs(ewmaSummary.coverage - ewmaSummary.targetCoverage) < 0.02
-                                  ? 'text-emerald-400'
-                                  : 'text-amber-400'
-                              }`}>
-                                {(ewmaSummary.coverage * 100).toFixed(1)}%
-                              </dd>
-                            </div>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Direction Hit Rate</dt>
-                              <dd className={`font-mono ${
-                                ewmaSummary.directionHitRate > 0.52
-                                  ? 'text-emerald-400'
-                                  : ewmaSummary.directionHitRate < 0.48
-                                    ? 'text-rose-400'
-                                    : 'text-slate-300'
-                              }`}>
-                                {(ewmaSummary.directionHitRate * 100).toFixed(1)}%
-                              </dd>
-                            </div>
-                          </>
-                        )}
                       </dl>
 
                     </div>
@@ -845,21 +755,12 @@ export default function TrendSection({
                           </div>
                         </div>
 
-                        {/* Primary Regime Block */}
-                        <div className="mb-5">
-                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Momentum regime</p>
-                          <p className={`mt-1 text-2xl font-semibold ${regimeColor}`}>
-                            {regimeLabel}
-                          </p>
-                          {/* Removed descriptive sentence under regime per request */}
-                        </div>
-
                         {/* Metrics */}
-                        <div className="mt-4 text-sm">
-                          <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2.5">
+                        <div className="mt-4">
+                          <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2.5 text-xs">
                             <div className="contents">
                               <dt className="text-slate-400">Momentum ({momentum?.period ?? momentumPeriod}D)</dt>
-                              <dd className={`font-mono text-[15px] ${
+                              <dd className={`font-mono ${
                                 momentumAbs != null
                                   ? momentumAbs > 0
                                     ? 'text-emerald-400'
@@ -873,7 +774,7 @@ export default function TrendSection({
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">ROC ({momentum?.period ?? momentumPeriod}D)</dt>
-                              <dd className={`font-mono text-[15px] ${
+                              <dd className={`font-mono ${
                                 momentumPct != null
                                   ? momentumPct > 0
                                     ? 'text-emerald-400'
@@ -887,25 +788,25 @@ export default function TrendSection({
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">Momentum Score</dt>
-                              <dd className="font-mono text-[15px] text-slate-200">
+                              <dd className="font-mono text-slate-200">
                                 {formatScore(score)}
                               </dd>
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">Zone</dt>
-                              <dd className={`font-mono text-[15px] ${zoneColor}`}>
+                              <dd className={`font-mono ${zoneColor}`}>
                                 {zoneLabel}
                               </dd>
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">Current Close</dt>
-                              <dd className="font-mono text-[15px] text-slate-300">
+                              <dd className="font-mono text-slate-300">
                                 {latestMomentum ? `$${latestMomentum.close.toFixed(2)}` : '—'}
                               </dd>
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">Recent EWMA Momentum</dt>
-                              <dd className={`font-mono text-[15px] font-medium ${
+                              <dd className={`font-mono font-medium ${
                                 trendClassification.recentMomentum > 0 
                                   ? 'text-emerald-400' 
                                   : trendClassification.recentMomentum < 0 
@@ -924,28 +825,140 @@ export default function TrendSection({
                           <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                             Signals
                           </h4>
-                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-sm">
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
                             <span className="text-slate-400">Zero-cross</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                            <span className="font-mono text-slate-100 text-right">
                               {zeroCross
                                 ? `${zeroCross.direction === 'neg_to_pos' ? 'Negative → Positive' : 'Positive → Negative'} (${zeroCross.barsAgo} bars ago)`
                                 : '—'}
                             </span>
-                            <span className="text-slate-400">Band</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right">
-                              {zoneLabel}
-                            </span>
                             <span className="text-slate-400">Divergence</span>
-                            <span className="font-mono text-[15px] text-slate-300 text-right">
+                            <span className="font-mono text-slate-300 text-right">
                               None detected (TODO)
+                            </span>
+                            {/* ROC */}
+                            <div className="mt-2 flex items-center gap-1.5 text-slate-400">
+                              <span>ROC</span>
+                              <span className="group relative inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                i
+                                <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-64 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                  ROC measures the percentage change over the selected look-back. ROC = Pₜ / Pₜ₋ₙ − 1. Above 0 implies bullish bias; below 0 bearish. We normalize ROC by its volatility to classify neutral vs strong moves.
+                                </div>
+                              </span>
+                            </div>
+                            <span className="font-mono text-right">
+                              {rocMetrics ? (
+                                <>
+                                  <span
+                                    className={
+                                      rocMetrics.regime === 'strong_up' || rocMetrics.regime === 'up'
+                                        ? 'text-emerald-400'
+                                        : rocMetrics.regime === 'strong_down' || rocMetrics.regime === 'down'
+                                          ? 'text-rose-400'
+                                          : 'text-slate-300'
+                                    }
+                                  >
+                                    {rocMetrics.regime === 'strong_up'
+                                      ? 'Strong Upward'
+                                      : rocMetrics.regime === 'up'
+                                        ? 'Upward'
+                                        : rocMetrics.regime === 'strong_down'
+                                          ? 'Strong Downward'
+                                          : rocMetrics.regime === 'down'
+                                            ? 'Downward'
+                                            : 'Neutral'}
+                                  </span>
+                                  {Number.isFinite(rocMetrics.zScore) && (
+                                    <span className="ml-1 text-slate-400">
+                                      ({rocMetrics.zScore >= 0 ? '+' : ''}
+                                      {rocMetrics.zScore.toFixed(2)}σ)
+                                    </span>
+                                  )}
+                                </>
+                              ) : (
+                                '—'
+                              )}
+                            </span>
+                            {/* RSI */}
+                            <div className="flex items-center gap-1.5 text-slate-400">
+                              <span>RSI (14)</span>
+                              <span className="group relative inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                i
+                                <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-72 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                  RSI is Wilder&apos;s 0–100 oscillator of gains vs losses over the last 14 bars. Above 70 is overbought, below 30 oversold, and 50 is the centerline. Crossing above 50 confirms bullish momentum; crossing below 50 confirms bearish momentum.
+                                </div>
+                              </span>
+                            </div>
+                            <span className="font-mono text-right">
+                              {rsiMetrics ? (
+                                <>
+                                  <span
+                                    className={
+                                      rsiMetrics.band === 'overbought'
+                                        ? 'text-amber-300'
+                                        : rsiMetrics.band === 'oversold'
+                                          ? 'text-sky-300'
+                                          : 'text-slate-300'
+                                    }
+                                  >
+                                    {rsiMetrics.band === 'overbought'
+                                      ? 'Overbought'
+                                      : rsiMetrics.band === 'oversold'
+                                        ? 'Oversold'
+                                        : 'Neutral'}
+                                  </span>
+                                  <span className="ml-1 text-slate-400">
+                                    ({rsiMetrics.rsi.toFixed(1)})
+                                  </span>
+                                </>
+                              ) : (
+                                '—'
+                              )}
+                            </span>
+                            {/* MACD */}
+                            <div className="flex items-center gap-1.5 text-slate-400">
+                              <span>MACD (12,26,9)</span>
+                              <span className="group relative inline-flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                i
+                                <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-72 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                  MACD compares the 12- and 26-period EMAs of price. MACD above 0 implies a bullish bias, below 0 a bearish bias. The signal line is a 9-period EMA of MACD; crossovers are timing signals. We normalize MACD by price (≈ % distance between the two EMAs) to classify neutral vs strong moves.
+                                </div>
+                              </span>
+                            </div>
+                            <span className="font-mono text-right">
+                              {macdMetrics ? (
+                                <>
+                                  <span
+                                    className={
+                                      macdMetrics.regime === 'strong_up' || macdMetrics.regime === 'up'
+                                        ? 'text-emerald-400'
+                                        : macdMetrics.regime === 'strong_down' || macdMetrics.regime === 'down'
+                                          ? 'text-rose-400'
+                                          : 'text-slate-300'
+                                    }
+                                  >
+                                    {macdMetrics.regime === 'strong_up'
+                                      ? 'Strong Upward'
+                                      : macdMetrics.regime === 'up'
+                                        ? 'Upward'
+                                        : macdMetrics.regime === 'strong_down'
+                                          ? 'Strong Downward'
+                                          : macdMetrics.regime === 'down'
+                                            ? 'Downward'
+                                            : 'Neutral'}
+                                  </span>
+                                  <span className="ml-1 text-slate-400">
+                                    (norm {macdMetrics.macdNorm >= 0 ? '+' : ''}
+                                    {(macdMetrics.macdNorm * 100).toFixed(2)}%)
+                                  </span>
+                                </>
+                              ) : (
+                                '—'
+                              )}
                             </span>
                           </div>
                         </div>
 
-                        <p className="mt-2 text-[10px] text-slate-500">
-                          Momentum score is mapped to 0–100 with <span className="font-semibold">50</span> as the neutral
-                          center line (30/70 as oversold/overbought bands).
-                        </p>
                       </>
                     );
                   })()}
@@ -1057,25 +1070,18 @@ export default function TrendSection({
                           </div>
                         </div>
 
-                        {/* Regime block */}
-                        <div className="mb-5">
-                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Trend strength regime</p>
-                          <p className="mt-1 text-2xl font-semibold text-slate-50">{regimeLabel}</p>
-                          {/* Removed descriptive sentence under regime per request */}
-                        </div>
-
                         {/* Metrics */}
                         <div className="mt-4">
-                          <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2.5 text-sm">
+                          <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2.5 text-xs">
                             <div className="contents">
                               <dt className="text-slate-400">ADX ({adx?.period ?? adxPeriod}D)</dt>
-                              <dd className="font-mono text-[15px] text-slate-100">
+                              <dd className="font-mono text-slate-100">
                                 {adxValue != null ? adxValue.toFixed(1) : '—'}
                               </dd>
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">ADX change (5 bars)</dt>
-                              <dd className="font-mono text-[15px] text-slate-100">
+                              <dd className="font-mono text-slate-100">
                                 {adxSlope
                                   ? `${adxSlope.change >= 0 ? '+' : ''}${adxSlope.change.toFixed(1)}`
                                   : '—'}
@@ -1083,19 +1089,19 @@ export default function TrendSection({
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">+DI ({adx?.period ?? adxPeriod}D)</dt>
-                              <dd className="font-mono text-[15px] text-emerald-400">
+                              <dd className="font-mono text-emerald-400">
                                 {adx?.latest ? adx.latest.plusDI.toFixed(1) : '—'}
                               </dd>
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">-DI ({adx?.period ?? adxPeriod}D)</dt>
-                              <dd className="font-mono text-[15px] text-rose-400">
+                              <dd className="font-mono text-rose-400">
                                 {adx?.latest ? adx.latest.minusDI.toFixed(1) : '—'}
                               </dd>
                             </div>
                             <div className="contents">
                               <dt className="text-slate-400">DMI Direction</dt>
-                              <dd className="font-mono text-[15px]">
+                              <dd className="font-mono">
                                 {adx?.latest
                                   ? adx.latest.plusDI > adx.latest.minusDI
                                     ? <span className="text-emerald-400">Uptrend (+DI &gt; -DI)</span>
@@ -1111,19 +1117,19 @@ export default function TrendSection({
                           <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
                             Signals
                           </h4>
-                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-sm">
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
                             <span className="text-slate-400">Environment</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right max-w-[260px] leading-snug">
+                            <span className="font-mono text-slate-100 text-right max-w-[260px] leading-snug">
                               {adxValue != null && adxValue >= 25
                                 ? 'Trend trading favoured (ADX > 25)'
                                 : 'Range environment – beware false breakouts (ADX < 20–25)'}
                             </span>
                             <span className="text-slate-400">Threshold (25)</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                            <span className="font-mono text-slate-100 text-right">
                               {adxValue != null && adxValue >= 25 ? 'Above threshold' : 'Below threshold'}
                             </span>
                             <span className="text-slate-400">ADX slope</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                            <span className="font-mono text-slate-100 text-right">
                               {adxSlope
                                 ? adxSlope.direction === 'rising'
                                   ? 'Rising (strength increasing)'
@@ -1133,13 +1139,13 @@ export default function TrendSection({
                                 : '—'}
                             </span>
                             <span className="text-slate-400">Last threshold cross</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                            <span className="font-mono text-slate-100 text-right">
                               {adxThresholdCross
                                 ? `${adxThresholdCross.direction === 'cross_above' ? 'Crossed above' : 'Crossed below'} ${adxThresholdCross.level} (${adxThresholdCross.barsAgo} bars ago)`
                                 : '—'}
                             </span>
                             <span className="text-slate-400">Extreme state</span>
-                            <span className="font-mono text-[15px] text-slate-100 text-right max-w-[260px] leading-snug">
+                            <span className="font-mono text-slate-100 text-right max-w-[260px] leading-snug">
                               {adxExtreme
                                 ? adxExtreme.isExtremeNow
                                   ? `Extreme: peaked at ${adxExtreme.peakAdx.toFixed(1)}`
@@ -1149,9 +1155,6 @@ export default function TrendSection({
                           </div>
                         </div>
 
-                        <p className="mt-2 text-[10px] text-slate-500">
-                          ADX rises as trend strength builds and falls as trend momentum fades, even if price continues drifting in the same direction.
-                        </p>
                       </>
                     );
                   })()}

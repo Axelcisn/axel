@@ -5,9 +5,20 @@
  * Components: +DI (Plus Directional Indicator), -DI (Minus Directional Indicator), ADX
  * 
  * Standard period: 14
+ *
+ * Wilder flow we follow:
+ * 1) Build raw arrays (start at bar 1): TR_raw, +DM_raw, -DM_raw using prev/cur OHLC.
+ *    - TR = max(high-low, |high-prevClose|, |low-prevClose|)
+ *    - +DM = upMove if upMove > downMove and upMove > 0 else 0
+ *    - -DM = downMove if downMove > upMove and downMove > 0 else 0
+ * 2) Wilder-smooth TR/+DM/-DM (first value = SMA over first period raws, rest = prev - prev/period + raw).
+ * 3) +DI/-DI: 100 * smoothedDM / smoothedTR.
+ * 4) DX: 100 * |+DI - -DI| / (+DI + -DI).
+ * 5) ADX: Wilder-smooth DX (first ADX = SMA of first period DX values, then prev - prev/period + dx).
+ * 6) Emit AdxPoint for bars where ADX and DI are finite; trendStrength via thresholds below.
  */
 
-import { trueRange, wilderSmooth } from '@/lib/indicators/utils';
+import { trueRange, wilderSmooth } from './utils';
 
 export interface AdxPoint {
   date: string;
@@ -25,6 +36,34 @@ export interface AdxResult {
   trendStrength: AdxTrendStrength | null;
 }
 
+export type AdxRegime =
+  | 'range'
+  | 'threshold_zone'
+  | 'strong'
+  | 'very_strong'
+  | 'extreme'
+  | 'climax';
+
+export interface AdxSlope {
+  change: number;           // adx_t - adx_{t-window}
+  window: number;           // bars used, default 5
+  direction: 'rising' | 'falling' | 'flat';
+}
+
+export interface AdxThresholdCross {
+  date: string;
+  level: number;            // e.g. 25
+  direction: 'cross_above' | 'cross_below';
+  index: number;
+  barsAgo: number;
+}
+
+export interface AdxExtremeState {
+  peakAdx: number;
+  peakDate: string;
+  isExtremeNow: boolean;
+}
+
 /**
  * Determine trend strength label from ADX value
  */
@@ -33,6 +72,89 @@ function getTrendStrength(adx: number): AdxTrendStrength {
   if (adx < 40) return 'normal';
   if (adx < 60) return 'strong';
   return 'very-strong';
+}
+
+export function classifyAdxRegime(adxValue: number): AdxRegime {
+  if (!Number.isFinite(adxValue)) return 'range';
+  if (adxValue < 20) return 'range';
+  if (adxValue < 25) return 'threshold_zone';
+  if (adxValue < 40) return 'strong';
+  if (adxValue < 50) return 'very_strong';
+  if (adxValue < 70) return 'extreme';
+  return 'climax';
+}
+
+export function computeAdxSlope(
+  points: AdxPoint[],
+  window: number = 5
+): AdxSlope | null {
+  const n = points.length;
+  if (n === 0) return null;
+  const latest = points[n - 1].adx;
+  const idxPrev = Math.max(0, n - 1 - window);
+  const prev = points[idxPrev].adx;
+  if (!Number.isFinite(latest) || !Number.isFinite(prev)) {
+    return null;
+  }
+  const change = latest - prev;
+  let direction: AdxSlope['direction'] = 'flat';
+  const eps = 1;
+  if (change > eps) direction = 'rising';
+  else if (change < -eps) direction = 'falling';
+
+  return { change, window: n - 1 - idxPrev, direction };
+}
+
+export function findLastAdxThresholdCross(
+  points: AdxPoint[],
+  level: number = 25
+): AdxThresholdCross | null {
+  const n = points.length;
+  if (n < 2) return null;
+  let last: AdxThresholdCross | null = null;
+
+  for (let i = 1; i < n; i++) {
+    const prev = points[i - 1].adx;
+    const curr = points[i].adx;
+    if (!Number.isFinite(prev) || !Number.isFinite(curr)) continue;
+
+    if (prev <= level && curr > level) {
+      last = {
+        date: points[i].date,
+        level,
+        direction: 'cross_above',
+        index: i,
+        barsAgo: n - 1 - i,
+      };
+    } else if (prev >= level && curr < level) {
+      last = {
+        date: points[i].date,
+        level,
+        direction: 'cross_below',
+        index: i,
+        barsAgo: n - 1 - i,
+      };
+    }
+  }
+
+  return last;
+}
+
+export function computeAdxExtremeState(
+  points: AdxPoint[],
+  extremeLevel: number = 50
+): AdxExtremeState | null {
+  if (!points.length) return null;
+  let peak = points[0];
+  for (const p of points) {
+    if (p.adx > peak.adx) peak = p;
+  }
+  const latest = points[points.length - 1];
+  return {
+    peakAdx: peak.adx,
+    peakDate: peak.date,
+    isExtremeNow: latest.adx >= extremeLevel,
+  };
 }
 
 /**
@@ -141,12 +263,24 @@ export function computeAdx(
   
   // Extract only valid DX values for smoothing
   const validDx = dx.slice(firstValidDxIndex);
-  const adxSmoothedValid = wilderSmooth(validDx, period);
-  
-  // Map back to original indices
   const adxSmoothed = new Array(dx.length).fill(NaN);
-  for (let i = 0; i < adxSmoothedValid.length; i++) {
-    adxSmoothed[firstValidDxIndex + i] = adxSmoothedValid[i];
+  if (validDx.length >= period) {
+    // First ADX = simple average of first `period` DX values
+    const firstAdx =
+      validDx.slice(0, period).reduce((sum, v) => sum + v, 0) / period;
+    const firstAdxIndex = firstValidDxIndex + period - 1;
+    adxSmoothed[firstAdxIndex] = firstAdx;
+
+    // Wilder smoothing for ADX: prev - prev/period + currentDx/period
+    for (let i = firstAdxIndex + 1; i < dx.length; i++) {
+      const prev = adxSmoothed[i - 1];
+      const currDx = dx[i];
+      if (!isFinite(prev) || !isFinite(currDx)) {
+        adxSmoothed[i] = NaN;
+        continue;
+      }
+      adxSmoothed[i] = prev - prev / period + currDx / period;
+    }
   }
   
   // Step 5: Build result points (only where ADX is valid)

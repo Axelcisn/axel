@@ -27,6 +27,7 @@ import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailC
 import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
 import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
 import type { MomentumScorePoint } from "@/lib/indicators/momentum";
+import type { AdxPoint } from "@/lib/indicators/adx";
 
 // Professional cool palette for EWMA overlays
 const SHORT_EWMA_COLOR = '#F22973'; // pink (updated)
@@ -307,6 +308,8 @@ interface PriceChartProps {
   ewmaLongWindow?: number;
   momentumScoreSeries?: MomentumScorePoint[];
   momentumPeriod?: number;
+  adxSeries?: AdxPoint[];
+  adxPeriod?: number;
   onLoadEwmaUnbiased?: () => void;
   onLoadEwmaBiased?: () => void;
   isLoadingEwmaBiased?: boolean;
@@ -348,6 +351,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   ewmaLongWindow,
   momentumScoreSeries,
   momentumPeriod,
+  adxSeries,
+  adxPeriod,
   onLoadEwmaUnbiased,
   onLoadEwmaBiased,
   isLoadingEwmaBiased,
@@ -367,12 +372,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const shortSeries = ewmaShortSeries ?? [];
   const longSeries = ewmaLongSeries ?? [];
   const momentumSeries = momentumScoreSeries ?? [];
+  const adxSeriesSafe = adxSeries ?? [];
   const hasEwmaShort = shortSeries.length > 0;
   const hasEwmaLong = longSeries.length > 0;
   const shortWindowLabel = ewmaShortWindow;
   const longWindowLabel = ewmaLongWindow;
   const hasMomentumScore = momentumSeries.length > 0;
-  const hasMomentumScorePane = hasMomentumScore;
+  const hasMomentumScorePane = hasMomentumScore || adxSeriesSafe.length > 0;
   
   // EWMA overlay toggles - sync with activeT212RunId
   const [showEwmaOverlay, setShowEwmaOverlay] = useState(false);
@@ -1192,6 +1198,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return map;
   }, [momentumSeries]);
 
+  const adxMap = useMemo(() => {
+    const map = new Map<string, number>();
+    adxSeriesSafe.forEach((p) => {
+      if (!Number.isFinite(p.adx)) return;
+      map.set(normalizeDateString(p.date), p.adx);
+    });
+    return map;
+  }, [adxSeriesSafe]);
+
   // Create extended chartData with future placeholders
   const chartData: ChartPoint[] = React.useMemo(() => {
     // Historical portion: same as rangeData, but mark as not future
@@ -1209,6 +1224,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         ewma_short: ewmaShortMap.get(chartDate) ?? null,
         ewma_long: ewmaLongMap.get(chartDate) ?? null,
         momentumScore: momentumMap.get(chartDate),
+        adxValue: adxMap.get(chartDate),
         // Determine volume color based on price movement (modern glass palette with borders)
         volumeColor: isBullish ? "rgba(52, 211, 153, 0.35)" : "rgba(251, 113, 133, 0.35)",
         volumeStroke: isBullish ? "rgba(16, 185, 129, 0.8)" : "rgba(244, 63, 94, 0.8)",
@@ -3790,7 +3806,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
                   <Tooltip
                     cursor={false}
-                    content={<MomentumTooltip momentumPeriod={momentumPeriod} />}
+                    content={
+                      <MomentumTooltip
+                        momentumPeriod={momentumPeriod}
+                        adxPeriod={adxPeriod}
+                      />
+                    }
                   />
 
                   <Area
@@ -3805,6 +3826,19 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     isAnimationActive={false}
                     connectNulls
                   />
+
+                  {adxSeriesSafe.length > 0 && (
+                    <Line
+                      type="monotone"
+                      dataKey="adxValue"
+                      yAxisId="momentum"
+                      stroke="#a855f7"
+                      strokeWidth={1.4}
+                      dot={false}
+                      isAnimationActive={false}
+                      connectNulls
+                    />
+                  )}
 
                   {hoveredDate && (
                     <ReferenceLine
@@ -6011,17 +6045,20 @@ interface MomentumTooltipProps {
   payload?: any[];
   label?: string | number;
   momentumPeriod?: number;
+  adxPeriod?: number;
 }
 
 const MomentumTooltip: React.FC<MomentumTooltipProps> = ({
   active,
   payload,
   momentumPeriod,
+  adxPeriod,
 }) => {
   if (!active || !payload || payload.length === 0) return null;
 
   const data = payload[0]?.payload;
   const score: number | undefined = data?.momentumScore;
+  const adxValue: number | undefined = data?.adxValue;
 
   if (score == null || momentumPeriod == null) return null;
 
@@ -6034,6 +6071,25 @@ const MomentumTooltip: React.FC<MomentumTooltipProps> = ({
   } else if (score <= 30) {
     zoneLabel = "Oversold (≤30)";
     zoneClass = "text-sky-300";
+  }
+
+  let adxBandLabel = "—";
+  let adxBandClass = "text-slate-300";
+
+  if (adxValue != null) {
+    if (adxValue < 20) {
+      adxBandLabel = "Weak (<20)";
+      adxBandClass = "text-slate-300";
+    } else if (adxValue < 40) {
+      adxBandLabel = "Normal (20–40)";
+      adxBandClass = "text-emerald-300";
+    } else if (adxValue < 60) {
+      adxBandLabel = "Strong (40–60)";
+      adxBandClass = "text-emerald-400";
+    } else {
+      adxBandLabel = "Very Strong (≥60)";
+      adxBandClass = "text-amber-300";
+    }
   }
 
   return (
@@ -6049,6 +6105,26 @@ const MomentumTooltip: React.FC<MomentumTooltipProps> = ({
         <span className="text-slate-400">Zone</span>
         <span className={`font-mono ${zoneClass}`}>{zoneLabel}</span>
       </div>
+
+      {adxPeriod && adxValue != null && (
+        <div className="mt-2 border-t border-slate-800 pt-2">
+          <div className="mb-1 font-semibold text-slate-300">
+            ADX ({adxPeriod}D)
+          </div>
+          <div className="flex items-baseline justify-between">
+            <span className="text-slate-400">Value</span>
+            <span className="font-mono text-slate-100">
+              {adxValue.toFixed(1)}
+            </span>
+          </div>
+          <div className="mt-1 flex items-baseline justify-between">
+            <span className="text-slate-400">Strength</span>
+            <span className={`font-mono ${adxBandClass}`}>
+              {adxBandLabel}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

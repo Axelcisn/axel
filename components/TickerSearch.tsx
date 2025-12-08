@@ -62,7 +62,7 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
   return (
     <form
       onSubmit={handleSubmit}
-      className={`flex items-center gap-2 ${variant === 'panel' ? '' : 'text-xs'} ${className ?? ""}`}
+      className={`${variant === 'panel' ? 'flex w-full items-center gap-3' : 'flex items-center gap-2 text-xs'} ${className ?? ""}`}
     >
       {/* Panel variant: hide the small label and show a large full-width input */}
       {variant !== 'panel' && !compact && (
@@ -70,7 +70,7 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
           <span className="mr-2">Search ticker:</span>
         </label>
       )}
-      <div className={`flex items-center gap-1 w-full`}> 
+      <div className="flex w-full items-center gap-1"> 
         <input
           type="text"
           value={value}
@@ -78,9 +78,11 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
           onKeyDown={handleKeyDown}
           ref={inputRef}
           placeholder={variant === 'panel' ? "Search" : (compact ? "Search ticker…" : "AAPL, MSFT, SPY…")}
-          className={`${variant === 'panel' ? 'w-full text-3xl md:text-4xl pl-0 pr-4 py-3 rounded-md' : (compact ? 'w-32' : 'w-28')} ${
+          className={`${variant === 'panel' ? 'w-full rounded-none border-0 bg-transparent pl-0 pr-3 text-4xl md:text-[42px] font-semibold tracking-tight leading-tight' : (compact ? 'w-32' : 'w-28')} ${
             variant === 'panel'
-              ? (isDarkMode ? 'border-transparent bg-transparent text-slate-100 placeholder:text-slate-400 focus:outline-none' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none')
+              ? (isDarkMode
+                ? 'text-slate-100 placeholder:text-slate-500 focus:outline-none'
+                : 'text-gray-900 placeholder:text-gray-500 focus:outline-none')
               : (isDarkMode
                   ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
                   : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500")
