@@ -122,3 +122,40 @@ body {
   animation: slideUpFade 220ms cubic-bezier(0.4, 0.0, 0.2, 1) both;
   will-change: transform, opacity;
 }
+
+/* Enhanced search panel entrance inspired by Apple's search reveal */
+@keyframes searchPanelEnter {
+  0% {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.985);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(0) scale(1.004);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-searchPanelEnter {
+  animation: searchPanelEnter 520ms cubic-bezier(0.23, 1, 0.32, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes searchPanelExit {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.985);
+  }
+}
+
+.animate-searchPanelExit {
+  animation: searchPanelExit 320ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  will-change: transform, opacity;
+}
