@@ -46,8 +46,6 @@ import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import TrendSection from '@/components/trend/TrendSection';
 import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
-import { buildIndicatorCache, type IndicatorCache } from '@/lib/strategy/indicatorCache';
-import { runEwmaTrend, runEwmaTrendMax } from '@/lib/strategy/ewmaTrend';
 
 /**
  * Data flow (Timing/Trend):
@@ -401,7 +399,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isOptimizingReaction, setIsOptimizingReaction] = useState(false);
   const [isReactionMaximized, setIsReactionMaximized] = useState(false);  // Track if Biased has been optimized
   const [reactionOptimizeError, setReactionOptimizeError] = useState<string | null>(null);
-  type EwmaMode = 'unbiased' | 'biased' | 'trend' | 'max' | 'trendMax';
+  type EwmaMode = 'unbiased' | 'biased' | 'max';
   const [activeEwmaMode, setActiveEwmaMode] = useState<EwmaMode>('max');
 
   // Trading212 CFD Simulation state
@@ -426,19 +424,14 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
   const [t212Error, setT212Error] = useState<string | null>(null);
   const [t212CanonicalRows, setT212CanonicalRows] = useState<CanonicalRow[] | null>(null);
-  const [t212Indicators, setT212Indicators] = useState<IndicatorCache | null>(null);
   const modeToRunId = useCallback((mode: EwmaMode): T212RunId => {
     switch (mode) {
       case 'unbiased':
         return 'ewma-unbiased';
       case 'biased':
         return 'ewma-biased';
-      case 'trend':
-        return 'ewma-trend';
       case 'max':
         return 'ewma-biased-max';
-      case 'trendMax':
-        return 'ewma-trend-max';
     }
   }, []);
   const runIdToMode = useCallback((runId: T212RunId): EwmaMode | null => {
@@ -447,24 +440,20 @@ export default function TimingPage({ params }: TimingPageProps) {
         return 'unbiased';
       case 'ewma-biased':
         return 'biased';
-      case 'ewma-trend':
-        return 'trend';
       case 'ewma-biased-max':
         return 'max';
-      case 'ewma-trend-max':
-        return 'trendMax';
       default:
         return null;
     }
   }, []);
 
   // Trading212 Simulation Runs - multiple scenarios for comparison
-  type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max" | "ewma-trend" | "ewma-trend-max";
+  type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
 
   type Trading212SimRun = {
     id: T212RunId;
     label: string;
-    signalSource: "unbiased" | "biased" | "trend";
+    signalSource: "unbiased" | "biased";
     result: Trading212SimulationResult;
     lambda?: number;
     trainFraction?: number;
@@ -522,8 +511,6 @@ export default function TimingPage({ params }: TimingPageProps) {
       "ewma-unbiased": "#9CA3AF",     // gray-400
       "ewma-biased": "#3B82F6",       // blue-500
       "ewma-biased-max": "#F59E0B",   // amber-500
-      "ewma-trend": "#22C55E",        // emerald-500
-      "ewma-trend-max": "#A855F7",    // violet-500
     };
     const simOverlays = t212Runs
       .filter((run) => t212VisibleRunIds.has(run.id))
@@ -1826,7 +1813,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       source: "unbiased" | "biased",
       runId: T212RunId,
       label: string,
-      opts?: { autoSelect?: boolean; applyTrendFilters?: boolean }
+      opts?: { autoSelect?: boolean }
     ) => {
       setT212Error(null);
       setIsRunningT212Sim(true);
@@ -1884,28 +1871,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           });
         }
 
-        // Build shared indicator cache (for future strategies)
-        let indicators: IndicatorCache | null = null;
-        try {
-          const simBars = rowsForSim.map((row) => ({
-            date: row.date,
-            open: row.open,
-            high: row.high,
-            low: row.low,
-            close: row.close,
-            volume: (row as any).volume ?? 0,
-          }));
-          indicators = buildIndicatorCache({
-            bars: simBars,
-            fastWindow: trendShortWindow,
-            slowWindow: trendLongWindow,
-            momentumPeriod: trendMomentumPeriod,
-          });
-          setT212Indicators(indicators);
-        } catch (err) {
-          console.warn('[T212] Failed to build indicator cache (non-blocking)', err);
-        }
-
         // Debug: Log sim window
         console.log("[T212] Sim window", {
           simStartDate,
@@ -1928,52 +1893,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           throw new Error('No overlapping bars between canonical data and EWMA path');
         }
 
-        let barsForSim = bars;
-
-        if (opts?.applyTrendFilters) {
-          const cache = indicators ?? t212Indicators;
-          if (!cache) {
-            console.warn('[T212] Trend filters requested but indicator cache missing; falling back to raw signals');
-          } else {
-            const simBarMap = new Map(cache.bars.map((b) => [b.date, b]));
-            const strategyBars = bars.map((bar) => {
-              const mapped = simBarMap.get(bar.date);
-              if (mapped) return mapped;
-              return {
-                date: bar.date,
-                open: bar.price,
-                high: bar.price,
-                low: bar.price,
-                close: bar.price,
-                volume: 0,
-              };
-            });
-            const baseSignals = bars.map((b) => b.signal);
-            const trendParams = {
-              symbol: params.ticker,
-              momentumMode: 'roc' as const,
-              fastWindow: trendShortWindow,
-              slowWindow: trendLongWindow,
-              momentumPeriod: trendMomentumPeriod,
-            };
-            const trendResult = runId === "ewma-trend-max"
-              ? runEwmaTrendMax(strategyBars, cache, baseSignals, trendParams)
-              : runEwmaTrend(strategyBars, cache, baseSignals, trendParams);
-
-            if (trendResult.signals.length !== bars.length) {
-              console.warn('[T212] Trend signals length mismatch', {
-                expected: bars.length,
-                got: trendResult.signals.length,
-              });
-            }
-
-            barsForSim = bars.map((bar, idx) => ({
-              ...bar,
-              signal: trendResult.signals[idx] ?? bar.signal,
-            }));
-          }
-        }
-
         const config: Trading212CfdConfig = {
           leverage: t212Leverage,
           fxFeeRate: 0.005,
@@ -1985,7 +1904,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           positionFraction: t212PositionFraction,
         };
 
-        const result = simulateTrading212Cfd(barsForSim, t212InitialEquity, config);
+        const result = simulateTrading212Cfd(bars, t212InitialEquity, config);
 
         // Debug: Log sim run stored
         console.log("[T212] Sim run stored", {
@@ -2003,14 +1922,14 @@ export default function TimingPage({ params }: TimingPageProps) {
 
         // Store the run in our collection
         // For max runs, use optimizer best values when available; otherwise use current state
-        const isMaxRun = runId === "ewma-biased-max" || runId === "ewma-trend-max";
+        const isMaxRun = runId === "ewma-biased-max";
         const storedLambda = isMaxRun && reactionOptimizationBest
           ? reactionOptimizationBest.lambda
           : reactionLambda;
         const storedTrainFraction = isMaxRun && reactionOptimizationBest
           ? reactionOptimizationBest.trainFraction
           : reactionTrainFraction;
-        const signalSource: Trading212SimRun['signalSource'] = opts?.applyTrendFilters ? "trend" : source;
+        const signalSource: Trading212SimRun['signalSource'] = source;
 
         setT212Runs((prev) => {
           const other = prev.filter((r) => r.id !== runId);
@@ -2053,10 +1972,6 @@ export default function TimingPage({ params }: TimingPageProps) {
       reactionTrainFraction,
       reactionOptimizationBest,
       buildTrading212SimBarsFromEwmaPath,
-      trendShortWindow,
-      trendLongWindow,
-      trendMomentumPeriod,
-      t212Indicators,
       t212DateRange,
     ]
   );
@@ -2169,10 +2084,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     runTrading212SimForSource("biased", "ewma-biased", "EWMA Biased", {
       autoSelect: false,
     });
-    runTrading212SimForSource("biased", "ewma-trend", "EWMA Trend", {
-      autoSelect: false,
-      applyTrendFilters: true,
-    });
 
     // Biased (Max): only if we have an optimisation best config
     if (reactionOptimizationBest) {
@@ -2182,12 +2093,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         "EWMA Biased (Max)",
         { autoSelect: false }
       );
-      runTrading212SimForSource(
-        "biased",
-        "ewma-trend-max",
-        "EWMA Trend (Max)",
-        { autoSelect: false, applyTrendFilters: true }
-      );
     }
   }, [
     isCfdEnabled,
@@ -2196,9 +2101,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     ewmaBiasedPath,
     reactionMapSummary,
     reactionOptimizationBest,
-    trendShortWindow,
-    trendLongWindow,
-    trendMomentumPeriod,
     runTrading212SimForSource,
   ]);
 
@@ -2214,7 +2116,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     
     // Check if we already have a Biased (Max) run
     const hasMaxRun = t212Runs.some(r => r.id === "ewma-biased-max");
-    const hasTrendMaxRun = t212Runs.some(r => r.id === "ewma-trend-max");
     if (!hasMaxRun) {
       console.log("[T212 Auto-Run] Adding EWMA Biased (Max) after optimization completed...");
       runTrading212SimForSource(
@@ -2222,15 +2123,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         "ewma-biased-max",
         "EWMA Biased (Max)",
         { autoSelect: false }
-      );
-    }
-    if (!hasTrendMaxRun) {
-      console.log("[T212 Auto-Run] Adding EWMA Trend (Max) after optimization completed...");
-      runTrading212SimForSource(
-        "biased",
-        "ewma-trend-max",
-        "EWMA Trend (Max)",
-        { autoSelect: false, applyTrendFilters: true }
       );
     }
   }, [isCfdEnabled, reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource]);

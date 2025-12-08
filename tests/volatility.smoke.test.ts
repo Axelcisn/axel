@@ -16,6 +16,12 @@ const MODELS: Array<ForecastRecord["method"]> = [
 
 type Model = (typeof MODELS)[number];
 
+interface IntervalRecord {
+  L_h: number;
+  U_h: number;
+  band_width_bp?: number;
+}
+
 beforeAll(async () => {
   // Ensure TargetSpec exists so the route does not 400; request overrides h/coverage.
   await Promise.all(
@@ -113,9 +119,22 @@ function getHorizonRecord(resp: ForecastRecord, h: number, coverage: number) {
   expect(horizon).toBe(h);
   expect(Math.abs((cov ?? 0) - coverage)).toBeLessThan(1e-9);
 
-  const intervals = (resp.intervals ?? {}) as any;
-  const L = intervals.L_h ?? (resp as any).L_h;
-  const U = intervals.U_h ?? (resp as any).U_h;
+  const rawIntervals = resp.intervals ?? {};
+  if (
+    typeof (rawIntervals as any).L_h !== "number" ||
+    typeof (rawIntervals as any).U_h !== "number"
+  ) {
+    throw new Error("Missing L_h / U_h in volatility response");
+  }
+
+  const intervals: IntervalRecord = {
+    L_h: (rawIntervals as any).L_h,
+    U_h: (rawIntervals as any).U_h,
+    band_width_bp: (rawIntervals as any).band_width_bp,
+  };
+
+  const L = intervals.L_h;
+  const U = intervals.U_h;
 
   expect(Number.isFinite(L)).toBe(true);
   expect(Number.isFinite(U)).toBe(true);
@@ -215,8 +234,21 @@ describe("Volatility API structural invariants", () => {
             expect(Math.abs((cov ?? 0) - coverage)).toBeLessThan(1e-9);
 
             const intervals = json.intervals ?? {};
-            const L = intervals.L_h ?? (json as any).L_h;
-            const U = intervals.U_h ?? (json as any).U_h;
+            if (
+              typeof (intervals as any).L_h !== "number" ||
+              typeof (intervals as any).U_h !== "number"
+            ) {
+              throw new Error("Missing L_h / U_h in volatility response");
+            }
+
+            const typedIntervals: IntervalRecord = {
+              L_h: (intervals as any).L_h,
+              U_h: (intervals as any).U_h,
+              band_width_bp: (intervals as any).band_width_bp,
+            };
+
+            const L = typedIntervals.L_h;
+            const U = typedIntervals.U_h;
             expect(Number.isFinite(L)).toBe(true);
             expect(Number.isFinite(U)).toBe(true);
             expect(L).toBeLessThanOrEqual(U);

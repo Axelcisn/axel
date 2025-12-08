@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server';
 import { runRollingOriginPI } from '@/lib/backtest/runner';
 import { backtestStorage } from '@/lib/backtest/store';

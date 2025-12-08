@@ -6,7 +6,7 @@
   "h_eff_days": 3,
   "verifyDate": "2025-12-08",
   "domain": "log",
-  "created_at": "2025-12-06T15:20:48.322Z",
+  "created_at": "2025-12-08T12:02:13.030Z",
   "locked": true,
   "y_hat": 278.7799987792969,
   "target": {
@@ -18,14 +18,14 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.01840770022694737,
+    "sigma_hat": 0.018407696731718052,
     "mu_star_used": 0,
     "window_start": "2021-12-13",
     "window_end": "2025-12-05",
     "n": 1256,
     "S_t": 278.7799987792969,
-    "sigma_forecast": 0.01840770022694737,
-    "sigma2_forecast": 0.00033884342764515824,
+    "sigma_forecast": 0.018407696731718052,
+    "sigma2_forecast": 0.0003388432989669035,
     "critical_value": 1.96,
     "window_span": {
       "start": "2021-12-13",
@@ -42,9 +42,9 @@
     }
   },
   "intervals": {
-    "L_h": 268.9011509491498,
-    "U_h": 289.0217741540334,
-    "band_width_bp": 748.2535174677807
+    "L_h": 268.9011527912974,
+    "U_h": 289.0217721740464,
+    "band_width_bp": 748.2533702027383
   },
   "provenance": {
     "rng_seed": null,
@@ -64,7 +64,7 @@
   "diagnostics": {
     "method_source": "Range-YZ",
     "m_log": 5.630422935923008,
-    "s_scale": 0.01840770022694737,
+    "s_scale": 0.018407696731718052,
     "critical_type": "normal"
   },
   "critical": {
