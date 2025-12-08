@@ -10,9 +10,11 @@ interface TickerSearchProps {
   compact?: boolean;
   autoFocus?: boolean;
   variant?: 'panel' | 'default';
+  placeholder?: string;
+  inputClassName?: string;
 }
 
-export function TickerSearch({ initialSymbol, className, isDarkMode = true, compact = false, autoFocus = false, variant = 'default' }: TickerSearchProps) {
+export function TickerSearch({ initialSymbol, className, isDarkMode = true, compact = false, autoFocus = false, variant = 'default', placeholder, inputClassName }: TickerSearchProps) {
   const router = useRouter();
   const [value, setValue] = useState(initialSymbol ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -77,14 +79,14 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           ref={inputRef}
-          placeholder={variant === 'panel' ? "Search" : (compact ? "Search ticker…" : "AAPL, MSFT, SPY…")}
+          placeholder={placeholder ?? (variant === 'panel' ? "Search" : (compact ? "Search ticker…" : "AAPL, MSFT, SPY…"))}
           className={`${variant === 'panel' ? 'w-full text-3xl md:text-4xl pl-0 pr-4 py-3 rounded-md' : (compact ? 'w-32' : 'w-28')} ${
             variant === 'panel'
               ? (isDarkMode ? 'border-transparent bg-transparent text-slate-100 placeholder:text-slate-400 focus:outline-none' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none')
               : (isDarkMode
                   ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
                   : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500")
-          }`}
+          } ${inputClassName ?? ''}`}
         />
         {/* For the panel variant we don't show the Go button; submission is done via Enter */}
         {variant !== 'panel' && (
