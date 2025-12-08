@@ -9,6 +9,12 @@ interface MomentumMiniChartProps {
 }
 
 export default function MomentumMiniChart({ data }: MomentumMiniChartProps) {
+  const slice = useMemo(() => {
+    if (!data || data.length === 0) return [];
+    const windowSize = 60;
+    return data.slice(-windowSize);
+  }, [data]);
+
   if (!data || data.length === 0) {
     return (
       <div className="mt-4 h-20 rounded-xl border border-slate-800 bg-slate-900/40 text-[11px] text-slate-500 flex items-center justify-center">
@@ -16,11 +22,6 @@ export default function MomentumMiniChart({ data }: MomentumMiniChartProps) {
       </div>
     );
   }
-
-  const slice = useMemo(() => {
-    const windowSize = 60;
-    return data.slice(-windowSize);
-  }, [data]);
 
   return (
     <div className="mt-4 h-20 rounded-xl border border-slate-800 bg-slate-900/40 px-2 py-1.5">
