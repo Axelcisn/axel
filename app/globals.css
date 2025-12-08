@@ -2,7 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Root color variables */
+/* ============================================
+   THEME COLORS - SINGLE SOURCE OF TRUTH
+   ============================================
+   To change the background color across the entire app,
+   modify the --background variable below.
+   All pages and components will automatically update.
+   ============================================ */
+
+/* Light mode color variables */
 :root {
   --background: #ffffff;
   --foreground: #111827;
@@ -10,24 +18,22 @@
   --border: #e5e7eb;
 }
 
-/* Dark mode color variables */
+/* Dark mode color variables - CHANGE HERE to update entire app */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #111827;
+    --background: #0D0D0D;  /* ← Main dark background - change this one value to update everywhere */
     --foreground: #f9fafb;
     --background-secondary: #1f2937;
     --border: #374151;
   }
 }
 
-/* Light mode color variables (explicit) */
-@media (prefers-color-scheme: light) {
-  :root {
-    --background: #ffffff;
-    --foreground: #111827;
-    --background-secondary: #f9fafb;
-    --border: #e5e7eb;
-  }
+/* Support explicit .dark class (in case dark mode is toggled manually) */
+.dark {
+  --background: #0D0D0D;  /* ← Keep this in sync with the media query above */
+  --foreground: #f9fafb;
+  --background-secondary: #1f2937;
+  --border: #374151;
 }
 
 /* Base body styles that react to color scheme */
@@ -36,6 +42,14 @@ body {
   background: var(--background);
   transition: background-color 0.3s ease, color 0.3s ease;
 }
+
+/* Helper classes that map to the CSS variables so components can
+   consistently use the project's theme colors. Changing the
+   variables above will update all components that use these. */
+.app-bg { background: var(--background) !important; }
+.app-bg-secondary { background: var(--background-secondary) !important; }
+.app-border { border-color: var(--border) !important; }
+.app-foreground { color: var(--foreground) !important; }
 
 /* Remove focus outlines from Recharts components */
 .recharts-wrapper,
@@ -71,4 +85,40 @@ body {
 
 .chart-dot-cyan {
   transition: cx 0.15s ease-out, cy 0.15s ease-out;
+}
+
+/* Smooth slide-down + fade animation used by the search panel */
+@keyframes slideDownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Slightly longer open animation for a more elegant feel */
+.animate-slideDownFade {
+  /* slightly longer for a more elegant open */
+  animation: slideDownFade 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Slide-up + fade used for closing the panel */
+@keyframes slideUpFade {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.animate-slideUpFade {
+  animation: slideUpFade 220ms cubic-bezier(0.4, 0.0, 0.2, 1) both;
+  will-change: transform, opacity;
 }

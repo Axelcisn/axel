@@ -14,7 +14,7 @@ export default async function Trading212Page() {
   ]);
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 px-6 py-8">
+    <main className="min-h-screen bg-background text-foreground px-6 py-8">
       <div className="max-w-6xl mx-auto space-y-8">
         <header className="flex items-baseline justify-between">
           <div>

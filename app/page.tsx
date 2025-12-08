@@ -7,7 +7,7 @@ export default function HomePage() {
   const isDarkMode = useDarkMode();
 
   return (
-    <main className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+    <main className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
         <div className="text-center">
           <h1 className={`text-4xl font-bold sm:text-5xl md:text-6xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>

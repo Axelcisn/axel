@@ -18,7 +18,7 @@ export default function AnalysisPage() {
   };
 
   return (
-    <main className={`min-h-screen ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+    <main className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-8">
           <h1 className={`text-3xl font-bold sm:text-4xl ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>

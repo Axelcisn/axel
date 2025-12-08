@@ -19,6 +19,32 @@ export interface MomentumResult {
   period: number;
 }
 
+// Normalization bounds for momentum% → score
+export const MOMENTUM_MIN_PCT = -0.10; // -10%
+export const MOMENTUM_MAX_PCT = 0.10;  // +10%
+
+export type MomentumZone = 'oversold' | 'neutral' | 'overbought';
+
+export type MomentumRegime =
+  | 'strong_up'
+  | 'up'
+  | 'flat'
+  | 'down'
+  | 'strong_down';
+
+export interface MomentumScorePoint {
+  date: string;
+  score: number;   // 0..100
+  zone: MomentumZone;
+}
+
+export interface MomentumZeroCross {
+  date: string;
+  direction: 'neg_to_pos' | 'pos_to_neg';
+  index: number;
+  barsAgo: number;
+}
+
 /**
  * Compute Momentum indicator
  * 
@@ -76,4 +102,75 @@ export function computeMomentum(
     latest,
     period,
   };
+}
+
+export function momentumPctToScore(momentumPct: number): number {
+  if (!Number.isFinite(momentumPct)) return 50;
+  const clamped = Math.max(MOMENTUM_MIN_PCT, Math.min(MOMENTUM_MAX_PCT, momentumPct));
+  const raw = (clamped - MOMENTUM_MIN_PCT) / (MOMENTUM_MAX_PCT - MOMENTUM_MIN_PCT); // 0..1
+  return raw * 100;
+}
+
+export function momentumZoneFromScore(score: number): MomentumZone {
+  if (!Number.isFinite(score)) return 'neutral';
+  if (score >= 70) return 'overbought';
+  if (score <= 30) return 'oversold';
+  return 'neutral';
+}
+
+export function classifyMomentumRegime(momentumPct: number): MomentumRegime {
+  if (!Number.isFinite(momentumPct)) return 'flat';
+  const pct = momentumPct * 100;
+
+  if (pct >= 2) return 'strong_up';
+  if (pct > 0) return 'up';
+  if (pct <= -2) return 'strong_down';
+  if (pct < 0) return 'down';
+  return 'flat';
+}
+
+export function buildMomentumScoreSeries(
+  points: MomentumPoint[]
+): MomentumScorePoint[] {
+  return points.map((p) => {
+    const score = momentumPctToScore(p.momentumPct);
+    return {
+      date: p.date,
+      score,
+      zone: momentumZoneFromScore(score),
+    };
+  });
+}
+
+export function findLastMomentumZeroCross(
+  points: MomentumPoint[]
+): MomentumZeroCross | null {
+  if (!points || points.length < 2) return null;
+
+  const n = points.length;
+  let last: MomentumZeroCross | null = null;
+
+  for (let i = 1; i < n; i++) {
+    const prev = points[i - 1].momentumPct;
+    const curr = points[i].momentumPct;
+    if (!Number.isFinite(prev) || !Number.isFinite(curr)) continue;
+
+    if (prev <= 0 && curr > 0) {
+      last = {
+        date: points[i].date,
+        direction: 'neg_to_pos',
+        index: i,
+        barsAgo: n - 1 - i,
+      };
+    } else if (prev >= 0 && curr < 0) {
+      last = {
+        date: points[i].date,
+        direction: 'pos_to_neg',
+        index: i,
+        barsAgo: n - 1 - i,
+      };
+    }
+  }
+
+  return last;
 }

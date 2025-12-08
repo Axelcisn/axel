@@ -22,6 +22,7 @@ import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
 import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint } from '@/components/PriceChart';
+import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
   Trading212CfdConfig,
   Trading212SimBar,
@@ -44,6 +45,7 @@ import {
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import TrendSection from '@/components/trend/TrendSection';
+import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
 
 /**
  * Data flow (Timing/Trend):
@@ -146,6 +148,8 @@ interface ValidationSummary {
   };
 }
 
+type TrendEwmaPreset = 'short' | 'medium' | 'long' | 'custom';
+
 interface TimingPageProps {
   params: {
     ticker: string;
@@ -175,6 +179,9 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isSavingTarget, setIsSavingTarget] = useState(false);
   const [targetError, setTargetError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [trendMomentumPeriod, setTrendMomentumPeriod] = useState(10);
+  const [trendShortWindow, setTrendShortWindow] = useState(14);
+  const [trendLongWindow, setTrendLongWindow] = useState(50);
 
   // GBM Forecast state
   const [currentForecast, setCurrentForecast] = useState<GbmForecast | ForecastRecord | null>(null);
@@ -226,6 +233,12 @@ export default function TimingPage({ params }: TimingPageProps) {
       stackTrace: new Error().stack?.split('\n').slice(1, 4).join('\n')
     });
   }, [activeForecast]);
+
+  const { shortEwma: trendShortEwma, longEwma: trendLongEwma } = useEwmaCrossover(
+    params.ticker,
+    trendShortWindow,
+    trendLongWindow
+  );
 
   // Stable forecast overlay state - use the best available forecast for chart display
   const stableOverlayForecast = useMemo(() => {
@@ -440,6 +453,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [realT212Summary, setRealT212Summary] = useState<PairedTradesSummary | null>(null);
   const [realTradesLoading, setRealTradesLoading] = useState(false);
   const [showRealTrades, setShowRealTrades] = useState(true); // Toggle visibility of real trades
+  const { momentum: chartMomentum } = useTrendIndicators(params.ticker, { momentumPeriod: trendMomentumPeriod });
 
   // State for Yahoo Finance sync
   const [isYahooSyncing, setIsYahooSyncing] = useState(false);
@@ -4233,9 +4247,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [params.ticker, loadBaseForecastCount]);
 
   return (
-    <div className={`w-full px-[5%] py-6 ${
-      isDarkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
-    }`}>
+    <div className="w-full px-[5%] py-6 bg-background text-foreground">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className={`text-3xl font-bold ${
@@ -4368,7 +4380,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           </div>
         </div>
       </div>
-      
       {/* Price Chart Section */}
       <div className="mb-8">
         {/* Debug: Log what we're passing to PriceChart */}
@@ -4397,6 +4408,12 @@ export default function TimingPage({ params }: TimingPageProps) {
           ewmaSummary={ewmaSummary}
           ewmaBiasedPath={ewmaBiasedPath}
           ewmaBiasedSummary={ewmaBiasedSummary}
+          ewmaShortSeries={trendShortEwma ?? undefined}
+          ewmaLongSeries={trendLongEwma ?? undefined}
+          ewmaShortWindow={trendShortWindow}
+          ewmaLongWindow={trendLongWindow}
+          momentumScoreSeries={chartMomentum?.scoreSeries ?? undefined}
+          momentumPeriod={chartMomentum?.period ?? trendMomentumPeriod}
           onLoadEwmaUnbiased={handleLoadUnbiasedClick}
           onLoadEwmaBiased={handleLoadBiasedClick}
           isLoadingEwmaBiased={isLoadingEwmaBiased}
@@ -4730,6 +4747,14 @@ export default function TimingPage({ params }: TimingPageProps) {
         ewmaSummary={ewmaSummary}
         horizon={h}
         coverage={coverage}
+        shortWindowOverride={trendShortWindow}
+        longWindowOverride={trendLongWindow}
+        onEwmaWindowChange={(short, long) => {
+          setTrendShortWindow(short);
+          setTrendLongWindow(long);
+        }}
+        momentumPeriodOverride={trendMomentumPeriod}
+        onMomentumPeriodChange={setTrendMomentumPeriod}
       />
 
       {/* Unified Forecast Bands Card - Full Width */}

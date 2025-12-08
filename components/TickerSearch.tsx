@@ -1,19 +1,28 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, KeyboardEvent, FormEvent } from "react";
+import { useState, useRef, useEffect, KeyboardEvent, FormEvent } from "react";
 
 interface TickerSearchProps {
   initialSymbol?: string;
   className?: string;
   isDarkMode?: boolean;
   compact?: boolean;
+  autoFocus?: boolean;
+  variant?: 'panel' | 'default';
 }
 
-export function TickerSearch({ initialSymbol, className, isDarkMode = true, compact = false }: TickerSearchProps) {
+export function TickerSearch({ initialSymbol, className, isDarkMode = true, compact = false, autoFocus = false, variant = 'default' }: TickerSearchProps) {
   const router = useRouter();
   const [value, setValue] = useState(initialSymbol ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (autoFocus && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [autoFocus]);
 
   function submit(symbolRaw: string) {
     const symbol = symbolRaw.trim().toUpperCase();
@@ -22,6 +31,19 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
       return;
     }
     setLocalError(null);
+    // Save to recent searches in localStorage (dedup & limit)
+    try {
+      const key = 'axel:lastSearches';
+      const raw = localStorage.getItem(key);
+      let arr: string[] = raw ? JSON.parse(raw) : [];
+      arr = arr.filter((s) => s !== symbol);
+      arr.unshift(symbol);
+      arr = arr.slice(0, 10);
+      localStorage.setItem(key, JSON.stringify(arr));
+    } catch (e) {
+      // ignore storage errors
+    }
+
     router.push(`/company/${encodeURIComponent(symbol)}/timing`);
   }
 
@@ -40,36 +62,43 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
   return (
     <form
       onSubmit={handleSubmit}
-      className={`flex items-center gap-2 text-xs ${className ?? ""}`}
+      className={`flex items-center gap-2 ${variant === 'panel' ? '' : 'text-xs'} ${className ?? ""}`}
     >
-      {!compact && (
+      {/* Panel variant: hide the small label and show a large full-width input */}
+      {variant !== 'panel' && !compact && (
         <label className={isDarkMode ? "text-slate-400" : "text-gray-500"}>
           <span className="mr-2">Search ticker:</span>
         </label>
       )}
-      <div className="flex items-center gap-1">
+      <div className={`flex items-center gap-1 w-full`}> 
         <input
           type="text"
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={compact ? "Search ticker…" : "AAPL, MSFT, SPY…"}
-          className={`${compact ? 'w-32' : 'w-28'} rounded-md border px-2 py-1 text-xs focus:outline-none ${
-            isDarkMode
-              ? "border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
-              : "border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500"
+          ref={inputRef}
+          placeholder={variant === 'panel' ? "Search" : (compact ? "Search ticker…" : "AAPL, MSFT, SPY…")}
+          className={`${variant === 'panel' ? 'w-full text-3xl md:text-4xl pl-0 pr-4 py-3 rounded-md' : (compact ? 'w-32' : 'w-28')} ${
+            variant === 'panel'
+              ? (isDarkMode ? 'border-transparent bg-transparent text-slate-100 placeholder:text-slate-400 focus:outline-none' : 'border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none')
+              : (isDarkMode
+                  ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
+                  : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500")
           }`}
         />
-        <button
-          type="submit"
-          className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-            isDarkMode
-              ? "border-sky-500 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
-              : "border-sky-500 bg-sky-100 text-sky-700 hover:bg-sky-200"
-          }`}
-        >
-          Go
-        </button>
+        {/* For the panel variant we don't show the Go button; submission is done via Enter */}
+        {variant !== 'panel' && (
+          <button
+            type="submit"
+            className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+              isDarkMode
+                ? "border-sky-500 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+                : "border-sky-500 bg-sky-100 text-sky-700 hover:bg-sky-200"
+            }`}
+          >
+            Go
+          </button>
+        )}
       </div>
       {localError && !compact && (
         <span className="ml-2 text-[11px] text-red-400">{localError}</span>

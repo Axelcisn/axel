@@ -25,6 +25,20 @@ import {
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
 import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
 import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
+import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
+import type { MomentumScorePoint } from "@/lib/indicators/momentum";
+
+// Professional cool palette for EWMA overlays
+const SHORT_EWMA_COLOR = '#F22973'; // pink (updated)
+const LONG_EWMA_COLOR  = '#6366F1'; // indigo
+
+const makeEwmaDot = (color: string) => (props: any) => {
+  const dot = AnimatedPriceDot(props);
+  if (!dot) return dot;
+  return React.cloneElement(dot as React.ReactElement, {
+    fill: color,
+  });
+};
 
 // Helper function to calculate target date (Date t+h) accounting for business days
 function calculateTargetDate(dateT: string | null, horizon: number): string | null {
@@ -135,6 +149,10 @@ interface ChartPoint {
   ewma_biased_upper?: number | null;
   ewma_biased_origin_date?: string | null;
   ewma_biased_realized?: number | null;
+
+  // === EWMA crossover overlays ===
+  ewma_short?: number | null;
+  ewma_long?: number | null;
 };
 
 /**
@@ -283,6 +301,12 @@ interface PriceChartProps {
   ewmaSummary?: EwmaSummary | null;
   ewmaBiasedPath?: EwmaWalkerPathPoint[] | null;
   ewmaBiasedSummary?: EwmaSummary | null;
+  ewmaShortSeries?: EwmaPoint[];
+  ewmaLongSeries?: EwmaPoint[];
+  ewmaShortWindow?: number;
+  ewmaLongWindow?: number;
+  momentumScoreSeries?: MomentumScorePoint[];
+  momentumPeriod?: number;
   onLoadEwmaUnbiased?: () => void;
   onLoadEwmaBiased?: () => void;
   isLoadingEwmaBiased?: boolean;
@@ -318,6 +342,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   ewmaSummary,
   ewmaBiasedPath,
   ewmaBiasedSummary,
+  ewmaShortSeries,
+  ewmaLongSeries,
+  ewmaShortWindow,
+  ewmaLongWindow,
+  momentumScoreSeries,
+  momentumPeriod,
   onLoadEwmaUnbiased,
   onLoadEwmaBiased,
   isLoadingEwmaBiased,
@@ -334,6 +364,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
+  const shortSeries = ewmaShortSeries ?? [];
+  const longSeries = ewmaLongSeries ?? [];
+  const momentumSeries = momentumScoreSeries ?? [];
+  const hasEwmaShort = shortSeries.length > 0;
+  const hasEwmaLong = longSeries.length > 0;
+  const shortWindowLabel = ewmaShortWindow;
+  const longWindowLabel = ewmaLongWindow;
+  const hasMomentumScore = momentumSeries.length > 0;
+  const hasMomentumScorePane = hasMomentumScore;
   
   // EWMA overlay toggles - sync with activeT212RunId
   const [showEwmaOverlay, setShowEwmaOverlay] = useState(false);
@@ -1126,11 +1165,39 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return generatedFuture;
   }, [lastDateStr, allDates, h]);
 
+  const ewmaShortMap = useMemo(() => {
+    const map = new Map<string, number>();
+    shortSeries.forEach((p) => {
+      if (!Number.isFinite(p.value)) return;
+      map.set(normalizeDateString(p.date), p.value);
+    });
+    return map;
+  }, [shortSeries]);
+
+  const ewmaLongMap = useMemo(() => {
+    const map = new Map<string, number>();
+    longSeries.forEach((p) => {
+      if (!Number.isFinite(p.value)) return;
+      map.set(normalizeDateString(p.date), p.value);
+    });
+    return map;
+  }, [longSeries]);
+
+  const momentumMap = useMemo(() => {
+    const map = new Map<string, number>();
+    momentumSeries.forEach((p) => {
+      if (!Number.isFinite(p.score)) return;
+      map.set(normalizeDateString(p.date), p.score);
+    });
+    return map;
+  }, [momentumSeries]);
+
   // Create extended chartData with future placeholders
   const chartData: ChartPoint[] = React.useMemo(() => {
     // Historical portion: same as rangeData, but mark as not future
     const base = rangeData.map((p) => {
       const isBullish = p.close && p.open && p.close > p.open;
+      const chartDate = normalizeDateString(p.date);
       return {
         date: p.date,
         value: p.adj_close,
@@ -1139,6 +1206,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         low: p.low,
         close: p.close,
         volume: p.volume,
+        ewma_short: ewmaShortMap.get(chartDate) ?? null,
+        ewma_long: ewmaLongMap.get(chartDate) ?? null,
+        momentumScore: momentumMap.get(chartDate),
         // Determine volume color based on price movement (modern glass palette with borders)
         volumeColor: isBullish ? "rgba(52, 211, 153, 0.35)" : "rgba(251, 113, 133, 0.35)",
         volumeStroke: isBullish ? "rgba(16, 185, 129, 0.8)" : "rgba(244, 63, 94, 0.8)",
@@ -1204,7 +1274,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }));
 
     return [...base, ...futurePoints];
-  }, [rangeData, fullData, futureDates, h, forecastOverlay?.activeForecast]);
+  }, [rangeData, fullData, futureDates, h, forecastOverlay?.activeForecast, ewmaShortMap, ewmaLongMap]);
 
   // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
   const chartDataWithEwma = useMemo(() => {
@@ -1821,6 +1891,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     
     return [min - padding, max + padding];
   }, [chartDataWithForecastBand, showEwmaOverlay]);
+
+  const priceYMinValue = useMemo(() => {
+    return Array.isArray(priceYDomain) && typeof priceYDomain[0] === "number"
+      ? priceYDomain[0]
+      : undefined;
+  }, [priceYDomain]);
+
+  const priceYMaxValue = useMemo(() => {
+    return Array.isArray(priceYDomain) && typeof priceYDomain[1] === "number"
+      ? priceYDomain[1]
+      : undefined;
+  }, [priceYDomain]);
 
   // === Unified Chart Data with Equity ===
   const chartDataWithEquity = useMemo(() => {
@@ -3007,32 +3089,34 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               applyPanOffset(barOffset);
               // Update drag start to current position for continuous dragging
               dragStartXRef.current = e.clientX;
-              dragStartWindowRef.current = {
-                start: dragStartWindowRef.current.start + barOffset,
-                end: dragStartWindowRef.current.end + barOffset,
-              };
-            }
-          }}
+            dragStartWindowRef.current = {
+              start: dragStartWindowRef.current.start + barOffset,
+              end: dragStartWindowRef.current.end + barOffset,
+            };
+          }
+        }}
         >
           <ResponsiveContainer width="100%" height={500}>
             <ComposedChart
               data={chartDataWithEquity}
               margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
               syncId="price-equity-sync"
+              barCategoryGap="0%"
+              barGap={0}
               onClick={(state: any) => {
                 chartClickHandlerRef.current?.(state);
               }}
               onMouseMove={applyHoverFromRechartsState}
               onMouseLeave={handleChartMouseLeave}
             >
-            <defs>
-              <linearGradient
-                id="priceFill"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
+                <defs>
+                  <linearGradient
+                    id="priceFill"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
                 <stop
                   offset="0%"
                   stopColor={lineColor}
@@ -3067,6 +3151,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   stopColor="#93C5FD"
                   stopOpacity={0.4}
                 />
+              </linearGradient>
+              <linearGradient id="momentumScoreFill" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#22c55e" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#22c55e" stopOpacity={0.02} />
               </linearGradient>
               {/* Subtle glow filter for forecast lines */}
               <filter id="forecastGlow" x="-20%" y="-20%" width="140%" height="140%">
@@ -3174,16 +3262,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
-            </defs>
+                </defs>
 
             <XAxis
               dataKey="date"
               type="category"
               allowDuplicatedCategory={false}
+              scale="band"
               axisLine={false}
               tickLine={false}
               tickMargin={8}
               minTickGap={24}
+              padding={{ left: 0, right: 0 }}
               tick={{
                 fontSize: 10,
                 fill: isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)",
@@ -3192,20 +3282,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             />
             
             {/* Price Y-Axis */}
-            <YAxis
-              yAxisId="price"
-              orientation="right"
-              axisLine={false}
-              tickLine={false}
-              tickMargin={8}
-              width={45}
-              tick={{
-                fontSize: 10,
-                fill: isDarkMode ? "rgba(148, 163, 184, 0.9)" : "rgba(75, 85, 99, 0.9)",
-              }}
-              domain={priceYDomain}
-              tickFormatter={(v: number) => v.toFixed(0)}
-            />
+          <YAxis
+            yAxisId="price"
+            orientation="right"
+            axisLine={false}
+            tickLine={false}
+            tickMargin={8}
+            width={45}
+            tick={{
+              fontSize: 10,
+              fill: isDarkMode ? "rgba(148, 163, 184, 0.9)" : "rgba(75, 85, 99, 0.9)",
+            }}
+            domain={priceYDomain}
+            tickFormatter={(v: number) => v.toFixed(0)}
+          />
             
             {/* Volume Y-Axis (positioned at bottom) */}
             <YAxis
@@ -3225,13 +3315,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   isDarkMode={isDarkMode}
                   horizon={h}
                   trading212EventsByDate={trading212EventsByDate}
+                  ewmaShortWindow={ewmaShortWindow}
+                  ewmaLongWindow={ewmaLongWindow}
                 />
               )}
               animationDuration={0}
-              cursor={{
-                stroke: "rgba(148, 163, 184, 0.35)",
-                strokeWidth: 1,
-              }}
+              cursor={false}
             />
             
             {/* TEMP: Test dot at last historical point */}
@@ -3269,26 +3358,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   className="forecast-ref-line"
                 />
 
-                {/* Center forecast dot - larger and more prominent */}
+                {/* Center forecast dot */}
                 <ReferenceDot
                   x={overlayDate}
                   y={overlayCenter}
                   yAxisId="price"
-                  r={6}
-                  fill={isDarkMode ? "#3B82F6" : "#2563EB"}
+                  r={5}
+                  fill={isDarkMode ? "#60A5FA" : "#3B82F6"}
                   stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
-                  strokeWidth={2.5}
+                  strokeWidth={2}
                   className="forecast-dot-animated forecast-dot-center"
                 />
 
-                {/* Lower / Upper band markers as glowing dots */}
+                {/* Lower / Upper band markers */}
                 {overlayLower != null && (
                   <ReferenceDot
                     x={overlayDate}
                     y={overlayLower}
                     yAxisId="price"
                     r={5}
-                    fill={isDarkMode ? "#22D3EE" : "#06B6D4"}
+                    fill={isDarkMode ? "#60A5FA" : "#3B82F6"}
                     stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
                     strokeWidth={2}
                     className="forecast-dot-animated forecast-dot-lower"
@@ -3300,7 +3389,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     y={overlayUpper}
                     yAxisId="price"
                     r={5}
-                    fill={isDarkMode ? "#22D3EE" : "#06B6D4"}
+                    fill={isDarkMode ? "#60A5FA" : "#3B82F6"}
                     stroke={isDarkMode ? "#1E293B" : "#FFFFFF"}
                     strokeWidth={2}
                     className="forecast-dot-animated forecast-dot-upper"
@@ -3309,39 +3398,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               </>
             )}
             
-            {/* Forecast Band - Upper boundary filled to bottom, then Lower boundary masks it */}
-            {overlayLower != null && overlayUpper != null && (
-              <>
-                {/* Upper band - fills from upper to lower using stacking */}
-                <Area
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastUpper"
-                  stroke="transparent"
-                  fill="url(#forecastBandFill)"
-                  fillOpacity={1}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                {/* Lower band - masks out the area below lower */}
-                <Area
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastLower"
-                  stroke="transparent"
-                  fill={isDarkMode ? "#0F172A" : "#FFFFFF"}
-                  fillOpacity={1}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              </>
-            )}
-            
-            {/* Forecast Lower Line - with glow effect */}
+            {/* Forecast Lines - connecting current price to forecast bounds */}
+            {/* Forecast Lower Line */}
             {overlayLower != null && (
               <Line
                 yAxisId="price"
@@ -3358,14 +3416,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               />
             )}
             
-            {/* Forecast Center Line - primary with stronger glow */}
+            {/* Forecast Center Line */}
             {overlayCenter != null && (
               <Line
                 yAxisId="price"
                 type="linear"
                 dataKey="forecastCenter"
-                stroke="#3B82F6"
-                strokeWidth={2.5}
+                stroke="#60A5FA"
+                strokeWidth={2}
+                strokeOpacity={0.85}
                 dot={false}
                 activeDot={false}
                 isAnimationActive={false}
@@ -3374,7 +3433,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               />
             )}
             
-            {/* Forecast Upper Line - with glow effect */}
+            {/* Forecast Upper Line */}
             {overlayUpper != null && (
               <Line
                 yAxisId="price"
@@ -3401,9 +3460,47 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               dot={false}
               activeDot={<AnimatedPriceDot />}
               connectNulls={true}
+              strokeLinecap="round"
+              strokeLinejoin="round"
               filter="url(#priceLineGlow)"
               isAnimationActive={false}
             />
+
+            {/* EWMA crossover overlays */}
+            {hasEwmaShort && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_short"
+                stroke={SHORT_EWMA_COLOR}
+                strokeWidth={1.8}
+                strokeOpacity={0.9}
+                dot={false}
+                activeDot={makeEwmaDot(SHORT_EWMA_COLOR)}
+                connectNulls
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                filter="url(#priceLineGlow)"
+                isAnimationActive={false}
+              />
+            )}
+            {hasEwmaLong && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="ewma_long"
+                stroke={LONG_EWMA_COLOR}
+                strokeWidth={1.8}
+                strokeOpacity={0.9}
+                dot={false}
+                activeDot={makeEwmaDot(LONG_EWMA_COLOR)}
+                connectNulls
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                filter="url(#priceLineGlow)"
+                isAnimationActive={false}
+              />
+            )}
             
             {/* Volume Bars - bottom with modern emerald/rose colors and borders */}
             <Bar
@@ -3422,6 +3519,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               ))}
             </Bar>
             
+            {/* EWMA Band - Upper boundary area */}
             {/* EWMA Band - Upper boundary area */}
             {showEwmaOverlay && (
               <Area
@@ -3447,7 +3545,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 dataKey="ewma_lower"
                 stroke="rgba(168, 85, 247, 0.3)"
                 strokeWidth={1}
-                fill={isDarkMode ? "#0f172a" : "#ffffff"}
+                fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
                 fillOpacity={1}
                 dot={false}
                 activeDot={false}
@@ -3497,7 +3595,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 dataKey="ewma_biased_lower"
                 stroke={ewmaIsMaximized ? "rgba(249, 115, 22, 0.4)" : "rgba(245, 158, 11, 0.3)"}
                 strokeWidth={1}
-                fill={isDarkMode ? "#0f172a" : "#ffffff"}
+                fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
                 fillOpacity={1}
                 dot={false}
                 activeDot={false}
@@ -3591,8 +3689,141 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 />
               );
             })}
+
+            {hoveredDate && priceYMinValue != null && priceYMaxValue != null && (
+              <ReferenceLine
+                x={hoveredDate}
+                yAxisId="price"
+                segment={[
+                  { x: hoveredDate, y: priceYMinValue },
+                  { x: hoveredDate, y: priceYMaxValue },
+                ]}
+                stroke="#ffffff"
+                strokeWidth={2.2}
+                strokeOpacity={1}
+                ifOverflow="visible"
+              />
+            )}
             </ComposedChart>
           </ResponsiveContainer>
+
+          {hasMomentumScorePane && (
+            <div className="mt-4">
+              <ResponsiveContainer width="100%" height={180}>
+                <ComposedChart
+                  data={chartDataWithEquity}
+                  margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
+                  syncId="price-equity-sync"
+                  barCategoryGap="0%"
+                  barGap={0}
+                  onMouseMove={applyHoverFromRechartsState}
+                  onMouseLeave={handleChartMouseLeave}
+                >
+                  <defs>
+                    <linearGradient id="momentumScoreFillPane" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.35} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+
+                  <XAxis
+                    dataKey="date"
+                    type="category"
+                    allowDuplicatedCategory={false}
+                    scale="band"
+                    axisLine={false}
+                    tickLine={false}
+                    tickMargin={8}
+                    minTickGap={24}
+                    padding={{ left: 0, right: 0 }}
+                    tick={{
+                      fontSize: 10,
+                      fill: isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)",
+                    }}
+                    tickFormatter={formatXAxisDate}
+                    hide
+                  />
+                  <YAxis
+                    yAxisId="momentum"
+                    domain={[0, 100]}
+                    orientation="right"
+                    axisLine={false}
+                    tickLine={false}
+                    tickMargin={8}
+                    tick={{ fontSize: 10, fill: isDarkMode ? "#9ca3af" : "#6b7280" }}
+                    width={45}
+                  />
+                  <YAxis
+                    yAxisId="momentum-volume"
+                    orientation="right"
+                    width={0}
+                    axisLine={false}
+                    tickLine={false}
+                    tick={false}
+                    domain={[0, 1]}
+                  />
+
+                  <ReferenceLine
+                    yAxisId="momentum"
+                    y={50}
+                    stroke="#4b5563"
+                    strokeDasharray="3 3"
+                    label={{
+                      value: "50 (neutral)",
+                      fill: "#9ca3af",
+                      position: "insideRight",
+                      fontSize: 10,
+                    }}
+                  />
+                  <ReferenceLine
+                    yAxisId="momentum"
+                    y={30}
+                    stroke="#4b5563"
+                    strokeDasharray="2 2"
+                  />
+                  <ReferenceLine
+                    yAxisId="momentum"
+                    y={70}
+                    stroke="#4b5563"
+                    strokeDasharray="2 2"
+                  />
+
+                  <Tooltip
+                    cursor={false}
+                    content={<MomentumTooltip momentumPeriod={momentumPeriod} />}
+                  />
+
+                  <Area
+                    type="monotone"
+                    dataKey="momentumScore"
+                    yAxisId="momentum"
+                    stroke="#22c55e"
+                    strokeWidth={1.4}
+                    fill="url(#momentumScoreFillPane)"
+                    fillOpacity={0.25}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls
+                  />
+
+                  {hoveredDate && (
+                    <ReferenceLine
+                      x={hoveredDate}
+                      yAxisId="momentum"
+                      segment={[
+                        { x: hoveredDate, y: 0 },
+                        { x: hoveredDate, y: 100 },
+                      ]}
+                      stroke="#ffffff"
+                      strokeWidth={2.2}
+                      strokeOpacity={1}
+                      ifOverflow="visible"
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
           {/* Hover Overlay Controls - Apple Liquid Glass style */}
           <div 
@@ -3735,6 +3966,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     zoomOut,
     resetViewWindow,
     hoveredDate,
+    hasEwmaShort,
+    hasEwmaLong,
+    shortWindowLabel,
+    longWindowLabel,
+    hasMomentumScore,
+    momentumPeriod,
   ]);
 
   return (
@@ -5769,6 +6006,53 @@ const RangeSelector: React.FC<RangeSelectorProps> = ({
   );
 };
 
+interface MomentumTooltipProps {
+  active?: boolean;
+  payload?: any[];
+  label?: string | number;
+  momentumPeriod?: number;
+}
+
+const MomentumTooltip: React.FC<MomentumTooltipProps> = ({
+  active,
+  payload,
+  momentumPeriod,
+}) => {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const data = payload[0]?.payload;
+  const score: number | undefined = data?.momentumScore;
+
+  if (score == null || momentumPeriod == null) return null;
+
+  let zoneLabel = "Neutral (30–70)";
+  let zoneClass = "text-slate-300";
+
+  if (score >= 70) {
+    zoneLabel = "Overbought (≥70)";
+    zoneClass = "text-amber-300";
+  } else if (score <= 30) {
+    zoneLabel = "Oversold (≤30)";
+    zoneClass = "text-sky-300";
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg">
+      <div className="mb-1 font-semibold text-slate-100">
+        Momentum ({momentumPeriod}D)
+      </div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-slate-400">Score</span>
+        <span className="font-mono text-slate-100">{score.toFixed(0)}</span>
+      </div>
+      <div className="mt-1 flex items-baseline justify-between">
+        <span className="text-slate-400">Zone</span>
+        <span className={`font-mono ${zoneClass}`}>{zoneLabel}</span>
+      </div>
+    </div>
+  );
+};
+
 interface PriceTooltipProps {
   active?: boolean;
   label?: string | number;
@@ -5789,6 +6073,8 @@ interface PriceTooltipProps {
     netPnl?: number;
     margin?: number;
   }[]>;
+  ewmaShortWindow?: number;
+  ewmaLongWindow?: number;
 }
 
 // Type for trade marker in tooltip (legacy - keeping for backwards compat)
@@ -5823,6 +6109,8 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   isDarkMode = true,
   horizon = 1,
   trading212EventsByDate,
+  ewmaShortWindow,
+  ewmaLongWindow,
 }) => {
   if (!active || !payload || !payload.length || !label) return null;
   
@@ -5835,12 +6123,28 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   const h = horizon;
   // Use close price directly from data, not from payload value (which could be EWMA)
   const price = data.close;
+  const shortValue = data.ewma_short ?? null;
+  const longValue = data.ewma_long ?? null;
   
   // Check if this is a future/forecast-only point (no historical price, only forecast data)
   const isFuturePoint = data.isFuture === true;
   const hasForecastData = isFuturePoint && (data.forecastCenter != null || data.forecastLower != null || data.forecastUpper != null);
   const hasEwmaData = data.ewma_forecast != null;
   const hasEwmaBiasedData = data.ewma_biased_forecast != null;
+  const showEwmaTrend = ewmaShortWindow != null && ewmaLongWindow != null && (shortValue != null || longValue != null);
+  const formatPrice = (v: number | null) => (v != null ? `$${v.toFixed(2)}` : '—');
+  let trendLabel = 'Neutral';
+  let trendClass = isDarkMode ? 'text-slate-300' : 'text-gray-600';
+
+  if (shortValue != null && longValue != null) {
+    if (shortValue > longValue) {
+      trendLabel = 'Bullish';
+      trendClass = 'text-emerald-400';
+    } else if (shortValue < longValue) {
+      trendLabel = 'Bearish';
+      trendClass = 'text-rose-400';
+    }
+  }
   
   // Get model name for forecast display
   const modelName = data.forecastModelName || 'Model';
@@ -6017,6 +6321,35 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>{formatVolumeAbbreviated(data.volume)}</span>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* EWMA trend block */}
+        {showEwmaTrend && (
+          <div className="px-4 py-3">
+            <div className="mb-1 font-semibold text-[11px] text-slate-300">
+              EWMA ({ewmaShortWindow} vs {ewmaLongWindow} days)
+            </div>
+            <div className="flex items-baseline justify-between text-[10px]">
+              <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
+                Short EWMA ({ewmaShortWindow})
+              </span>
+              <span className="font-mono text-slate-100">
+                {formatPrice(shortValue)}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between text-[10px] mt-1">
+              <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
+                Long EWMA ({ewmaLongWindow})
+              </span>
+              <span className="font-mono text-slate-100">
+                {formatPrice(longValue)}
+              </span>
+            </div>
+            <div className="mt-1 flex items-baseline justify-between text-[10px]">
+              <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Trend</span>
+              <span className={`font-mono ${trendClass}`}>{trendLabel}</span>
             </div>
           </div>
         )}

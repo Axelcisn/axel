@@ -6,7 +6,7 @@
   "h_eff_days": 3,
   "verifyDate": "2025-12-08",
   "domain": "log",
-  "created_at": "2025-12-07T11:43:11.314Z",
+  "created_at": "2025-12-07T14:59:30.852Z",
   "locked": true,
   "y_hat": 455,
   "target": {
@@ -74,6 +74,5 @@
     "start": "2021-12-13",
     "end": "2025-12-05",
     "n_obs": 1000
-  },
-  "is_active": false
+  }
 }
