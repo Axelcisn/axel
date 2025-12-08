@@ -15,7 +15,6 @@ export default function Navigation() {
   // Panel mount / close animation states
   const [panelMounted, setPanelMounted] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [isHoveringPanel, setIsHoveringPanel] = useState(false);
   const timeoutRef = useRef<number | null>(null);
   const hoverTimeoutRef = useRef<number | null>(null);
   const CLOSE_ANIM_MS = 360; // should match .animate-searchPanelExit duration
@@ -156,9 +155,6 @@ export default function Navigation() {
               isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'
             }`}
             onClick={() => setIsSearchOpen(false)}
-            onMouseEnter={() => {
-              if (!isHoveringPanel) setIsSearchOpen(false);
-            }}
           />
 
           <div className="fixed inset-0 z-50 flex justify-center px-[5%] pt-16 pb-12 pointer-events-none">
@@ -173,10 +169,8 @@ export default function Navigation() {
                   clearTimeout(hoverTimeoutRef.current);
                   hoverTimeoutRef.current = null;
                 }
-                setIsHoveringPanel(true);
               }}
               onMouseLeave={() => {
-                setIsHoveringPanel(false);
                 if (hoverTimeoutRef.current) {
                   clearTimeout(hoverTimeoutRef.current);
                   hoverTimeoutRef.current = null;
