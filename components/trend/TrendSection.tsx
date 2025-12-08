@@ -133,6 +133,7 @@ export default function TrendSection({
   // Tab state
   const [activeTab, setActiveTab] = useState<TrendTab>('traditional');
   const [momentumPeriod, setMomentumPeriod] = useState<number>(momentumPeriodOverride ?? 10);
+  const [adxPeriod, setAdxPeriod] = useState<number>(14);
 
   // EWMA crossover preset state
   const [ewmaPreset, setEwmaPreset] = useState<EwmaPreset>('medium');
@@ -207,7 +208,7 @@ export default function TrendSection({
     error: indicatorsError,
   } = useTrendIndicators(ticker, {
     momentumPeriod,
-    adxPeriod: 14,
+    adxPeriod,
   });
 
   const {
@@ -731,7 +732,7 @@ export default function TrendSection({
                     - momentum.period (lookback)
                     - trendClassification.recentMomentum (EWMA-based recent return)
                 ═══════════════════════════════════════════════════════════════ */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-6">
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-5 md:p-6">
                   {(() => {
                     const latestMomentum = momentum?.latest ?? null;
                     const momentumPct = latestMomentum ? latestMomentum.momentumPct * 100 : null;
@@ -770,6 +771,13 @@ export default function TrendSection({
                           ? 'text-rose-400'
                           : 'text-slate-300';
 
+                    const regimeBadge =
+                      regime === 'strong_up' || regime === 'up'
+                        ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300'
+                        : regime === 'strong_down' || regime === 'down'
+                          ? 'border-rose-500/60 bg-rose-500/10 text-rose-300'
+                          : 'border-slate-600 bg-slate-800 text-slate-300';
+
                     const zoneLabel =
                       zone === 'overbought'
                         ? 'Overbought (≥70)'
@@ -787,18 +795,11 @@ export default function TrendSection({
                     return (
                       <>
                         {/* Header */}
-                        <div className="flex items-start justify-between mb-4">
-                          <div className="flex items-center gap-2.5">
-                            <span className={`w-3 h-3 rounded-sm ${
-                              momentumPct != null && momentumPct > 0
-                                ? 'bg-emerald-500'
-                                : momentumPct != null && momentumPct < 0
-                                  ? 'bg-rose-500'
-                                  : 'bg-slate-500'
-                            }`} />
-                      <div>
-                        <div className="relative group flex items-center gap-1">
-                          <h4 className="text-sm font-semibold text-white">Price Momentum</h4>
+                        <div className="mb-5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="relative group flex items-center gap-1">
+                                <h4 className="text-sm font-semibold text-white">Price Momentum</h4>
                                 <span className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-400 cursor-help">
                                   i
                                 </span>
@@ -815,10 +816,15 @@ export default function TrendSection({
                                   </p>
                                 </div>
                               </div>
-                              <p className="text-[10px] text-slate-500">Lookback: {momentum?.period ?? momentumPeriod}d · Mode: Price change (Δ over n periods)</p>
+                              {/* Removed inline lookback descriptor to simplify header per request */}
                             </div>
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium ${regimeBadge}`}>
+                              {regimeLabel}
+                            </span>
                           </div>
-                          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+
+                          {/* Lookback buttons */}
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
                             {[5, 10, 14, 30].map((p) => (
                               <button
                                 key={p}
@@ -827,7 +833,7 @@ export default function TrendSection({
                                   setMomentumPeriod(p);
                                   onMomentumPeriodChange?.(p);
                                 }}
-                                className={`rounded-full px-2 py-1 border ${
+                                className={`rounded-full px-2.5 py-1 border text-[11px] transition-colors ${
                                   momentumPeriod === p
                                     ? 'border-emerald-500 bg-emerald-500/10 text-emerald-300'
                                     : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-500 hover:text-slate-200'
@@ -840,28 +846,20 @@ export default function TrendSection({
                         </div>
 
                         {/* Primary Regime Block */}
-                        <div className="mb-4">
-                          <p className="text-xs text-slate-400">Momentum regime</p>
-                          <p className={`mt-1 text-xl font-semibold ${regimeColor}`}>
+                        <div className="mb-5">
+                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Momentum regime</p>
+                          <p className={`mt-1 text-2xl font-semibold ${regimeColor}`}>
                             {regimeLabel}
                           </p>
-                          <p className="text-[11px] text-slate-500 mt-1">
-                            {latestMomentum
-                              ? `${momentum?.period ?? momentumPeriod}D momentum is ${formatSignedCurrency(momentumAbs)} (${formatPct(momentumPct)}) → ${
-                                  regimeLabel === 'Flat / Neutral'
-                                    ? 'momentum is near the center line.'
-                                    : regimeLabel.toLowerCase() + ' price thrust.'
-                                }`
-                              : 'Not enough data to compute momentum.'}
-                          </p>
+                          {/* Removed descriptive sentence under regime per request */}
                         </div>
 
-                        {/* Metrics + Signals */}
-                        <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,2fr)_minmax(0,1.4fr)] text-xs sm:text-sm">
-                          <dl className="space-y-2">
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Momentum ({momentum?.period ?? momentumPeriod}D)</dt>
-                              <dd className={`font-mono ${
+                        {/* Metrics */}
+                        <div className="mt-4 text-sm">
+                          <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2.5">
+                            <div className="contents">
+                              <dt className="text-slate-400">Momentum ({momentum?.period ?? momentumPeriod}D)</dt>
+                              <dd className={`font-mono text-[15px] ${
                                 momentumAbs != null
                                   ? momentumAbs > 0
                                     ? 'text-emerald-400'
@@ -873,9 +871,9 @@ export default function TrendSection({
                                 {formatSignedCurrency(momentumAbs)}
                               </dd>
                             </div>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">ROC ({momentum?.period ?? momentumPeriod}D)</dt>
-                              <dd className={`font-mono ${
+                            <div className="contents">
+                              <dt className="text-slate-400">ROC ({momentum?.period ?? momentumPeriod}D)</dt>
+                              <dd className={`font-mono text-[15px] ${
                                 momentumPct != null
                                   ? momentumPct > 0
                                     ? 'text-emerald-400'
@@ -887,27 +885,27 @@ export default function TrendSection({
                                 {formatPct(momentumPct)}
                               </dd>
                             </div>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Momentum Score</dt>
-                              <dd className="font-mono text-slate-200">
+                            <div className="contents">
+                              <dt className="text-slate-400">Momentum Score</dt>
+                              <dd className="font-mono text-[15px] text-slate-200">
                                 {formatScore(score)}
                               </dd>
                             </div>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Zone</dt>
-                              <dd className={`font-mono ${zoneColor}`}>
+                            <div className="contents">
+                              <dt className="text-slate-400">Zone</dt>
+                              <dd className={`font-mono text-[15px] ${zoneColor}`}>
                                 {zoneLabel}
                               </dd>
                             </div>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Current Close</dt>
-                              <dd className="font-mono text-slate-300">
+                            <div className="contents">
+                              <dt className="text-slate-400">Current Close</dt>
+                              <dd className="font-mono text-[15px] text-slate-300">
                                 {latestMomentum ? `$${latestMomentum.close.toFixed(2)}` : '—'}
                               </dd>
                             </div>
-                            <div className="flex justify-between">
-                              <dt className="text-slate-500">Recent EWMA Momentum</dt>
-                              <dd className={`font-mono font-medium ${
+                            <div className="contents">
+                              <dt className="text-slate-400">Recent EWMA Momentum</dt>
+                              <dd className={`font-mono text-[15px] font-medium ${
                                 trendClassification.recentMomentum > 0 
                                   ? 'text-emerald-400' 
                                   : trendClassification.recentMomentum < 0 
@@ -919,33 +917,28 @@ export default function TrendSection({
                               </dd>
                             </div>
                           </dl>
+                        </div>
 
-                          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-3 sm:p-4">
-                            <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                              Signals
-                            </h4>
-                            <div className="space-y-1.5">
-                              <div className="flex items-baseline justify-between">
-                                <span className="text-slate-400">Zero-cross</span>
-                                <span className="font-mono text-slate-100">
-                                  {zeroCross
-                                    ? `${zeroCross.direction === 'neg_to_pos' ? 'Negative → Positive' : 'Positive → Negative'} (${zeroCross.barsAgo} bars ago)`
-                                    : '—'}
-                                </span>
-                              </div>
-                              <div className="flex items-baseline justify-between">
-                                <span className="text-slate-400">Band</span>
-                                <span className="font-mono text-slate-100">
-                                  {zoneLabel}
-                                </span>
-                              </div>
-                              <div className="flex items-baseline justify-between">
-                                <span className="text-slate-400">Divergence</span>
-                                <span className="font-mono text-slate-300">
-                                  None detected (TODO)
-                                </span>
-                              </div>
-                            </div>
+                        {/* Signals (single-column, below Momentum Regime) - no border/background */}
+                        <div className="mb-4">
+                          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                            Signals
+                          </h4>
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-sm">
+                            <span className="text-slate-400">Zero-cross</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                              {zeroCross
+                                ? `${zeroCross.direction === 'neg_to_pos' ? 'Negative → Positive' : 'Positive → Negative'} (${zeroCross.barsAgo} bars ago)`
+                                : '—'}
+                            </span>
+                            <span className="text-slate-400">Band</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                              {zoneLabel}
+                            </span>
+                            <span className="text-slate-400">Divergence</span>
+                            <span className="font-mono text-[15px] text-slate-300 text-right">
+                              None detected (TODO)
+                            </span>
                           </div>
                         </div>
 
@@ -966,120 +959,202 @@ export default function TrendSection({
                     - adx.latest.plusDI, minusDI
                     - adx.period
                 ═══════════════════════════════════════════════════════════════ */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 sm:p-5">
-                  {/* Header */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-2.5">
-                      <span className={`w-3 h-3 rounded-sm ${
-                        adx?.trendStrength === 'very-strong' || adx?.trendStrength === 'strong'
-                          ? 'bg-emerald-500'
-                          : adx?.trendStrength === 'normal'
-                            ? 'bg-amber-500'
-                            : 'bg-slate-500'
-                      }`} />
-                      <div>
-                        <h4 className="text-sm font-semibold text-white">Trend Strength (ADX)</h4>
-                        <p className="text-[10px] text-slate-500">Period: {adx?.period ?? 14}</p>
+                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-5 md:p-6">
+                  {(() => {
+                    const adxValue = adx?.latest?.adx ?? null;
+                    const adxRegime = adx?.regime ?? null;
+                    const adxSlope = adx?.slope ?? null;
+                    const adxThresholdCross = adx?.lastThresholdCross ?? null;
+                    const adxExtreme = adx?.extreme ?? null;
+
+                    const regimeLabel = (() => {
+                      switch (adxRegime) {
+                        case 'range':
+                          return 'Range / No strong trend';
+                        case 'threshold_zone':
+                          return 'Threshold zone (trend forming/fading)';
+                        case 'strong':
+                          return 'Strong trend';
+                        case 'very_strong':
+                          return 'Very strong trend';
+                        case 'extreme':
+                          return 'Extreme trend';
+                        case 'climax':
+                          return 'Overextended / climax trend';
+                        default:
+                          return '—';
+                      }
+                    })();
+
+                    const regimeColor =
+                      adxRegime === 'strong' || adxRegime === 'very_strong'
+                        ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/60'
+                        : adxRegime === 'extreme' || adxRegime === 'climax'
+                          ? 'text-violet-300 bg-violet-500/10 border-violet-500/60'
+                          : adxRegime === 'threshold_zone'
+                            ? 'text-amber-300 bg-amber-500/10 border-amber-500/60'
+                            : 'text-slate-300 bg-slate-800 border-slate-600';
+
+                    const infoCopy = (
+                      <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-80 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                        <p className="mb-1">
+                          ADX measures <span className="font-semibold">trend strength, not direction</span>. It is derived from Wilder&apos;s Directional Movement (+DI and -DI) and ranges from 0 to 100.
+                        </p>
+                        <p className="mb-1">
+                          Values below ~20 indicate a flat, choppy market; above ~25 a trending environment; 40–50+ means a very strong trend.
+                        </p>
+                        <p>
+                          ADX rising = trend strength increasing; ADX falling = trend weakening (even if price still drifts up or down). We use ADX as a filter: EWMA/Momentum trend signals are more reliable when ADX is high enough.
+                        </p>
                       </div>
-                    </div>
-                    {/* Strength pill */}
-                    {adx?.trendStrength ? (
-                      <span className={`px-2 py-1 rounded-full text-[10px] font-medium uppercase ${
-                        adx.trendStrength === 'very-strong'
-                          ? 'bg-emerald-500/20 text-emerald-400'
-                          : adx.trendStrength === 'strong'
-                            ? 'bg-emerald-500/10 text-emerald-500'
-                            : adx.trendStrength === 'normal'
-                              ? 'bg-amber-500/10 text-amber-400'
-                              : 'bg-slate-700 text-slate-400'
-                      }`}>
-                        {adx.trendStrength.replace('-', ' ')}
-                      </span>
-                    ) : (
-                      <span className="px-2 py-1 rounded-full text-[10px] font-medium bg-slate-800 text-slate-500">
-                        N/A
-                      </span>
-                    )}
-                  </div>
+                    );
 
-                  {/* Primary Metric */}
-                  <div className="mb-4">
-                    {adx?.latest ? (
-                      <>
-                        <div className={`text-2xl font-bold font-mono ${
-                          adx.latest.adx >= 40 
-                            ? 'text-emerald-400' 
-                            : adx.latest.adx >= 20 
-                              ? 'text-amber-400'
-                              : 'text-slate-400'
-                        }`}>
-                          {adx.latest.adx.toFixed(1)}
-                        </div>
-                        <div className="text-xs text-slate-500 mt-0.5">
-                          {adx.latest.adx >= 60 
-                            ? 'Extremely strong trend'
-                            : adx.latest.adx >= 40 
-                              ? 'Very strong trend'
-                              : adx.latest.adx >= 20 
-                                ? 'Moderate trend strength'
-                                : 'Rangebound / low-strength trend'}
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="text-2xl font-bold text-slate-600">—</div>
-                        <div className="text-xs text-slate-600 mt-0.5">No data</div>
-                      </>
-                    )}
-                  </div>
+                    const regimeDescription =
+                      adxValue != null
+                        ? `ADX(${adx?.period ?? adxPeriod}) = ${adxValue.toFixed(1)} → ${
+                            adxRegime === 'range'
+                              ? 'flat, range-bound market. Trend-following signals are prone to false breakouts.'
+                              : 'solid trending environment. Trend-following signals (EWMA, Momentum) are more likely to work.'
+                          }`
+                        : 'Not enough data to compute ADX.';
 
-                  {/* Secondary Metrics */}
-                  <dl className="space-y-2 text-xs">
-                    <div className="flex justify-between">
-                      <dt className="text-slate-500">+DI / -DI</dt>
-                      <dd className="font-mono">
-                        {adx?.latest ? (
-                          <>
-                            <span className="text-emerald-400">{adx.latest.plusDI.toFixed(1)}</span>
-                            <span className="text-slate-600"> / </span>
-                            <span className="text-rose-400">{adx.latest.minusDI.toFixed(1)}</span>
-                          </>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-slate-500">Direction</dt>
-                      <dd className={`font-medium ${
-                        adx?.latest
-                          ? adx.latest.plusDI > adx.latest.minusDI 
-                            ? 'text-emerald-400' 
-                            : 'text-rose-400'
-                          : 'text-slate-600'
-                      }`}>
-                        {adx?.latest
-                          ? adx.latest.plusDI > adx.latest.minusDI
-                            ? '+DI > -DI (Bullish)'
-                            : '-DI > +DI (Bearish)'
-                          : '—'}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt className="text-slate-500">Strength Band</dt>
-                      <dd className="text-slate-300">
-                        {adx?.trendStrength === 'very-strong'
-                          ? 'Very Strong (≥60)'
-                          : adx?.trendStrength === 'strong'
-                            ? 'Strong (40–60)'
-                            : adx?.trendStrength === 'normal'
-                              ? 'Normal (20–40)'
-                              : adx?.trendStrength === 'weak'
-                                ? 'Weak (<20)'
+                    return (
+                      <>
+                        {/* Header */}
+                        <div className="mb-4">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="relative group flex items-center gap-1">
+                                <h4 className="text-sm font-semibold text-white">Trend Strength (ADX)</h4>
+                                <span className="flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-400 cursor-help">
+                                  i
+                                </span>
+                                {infoCopy}
+                              </div>
+                              {/* Removed inline period descriptor to simplify header per request */}
+                            </div>
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-medium ${regimeColor}`}>
+                              {regimeLabel}
+                            </span>
+                          </div>
+
+                          {/* moved the period buttons below the title */}
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+                            {[7, 14, 21, 28].map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => setAdxPeriod(p)}
+                                className={`rounded-full px-2.5 py-1 border text-[11px] transition-colors ${
+                                  adxPeriod === p
+                                    ? 'border-violet-500 bg-violet-500/10 text-violet-300'
+                                    : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                                }`}
+                              >
+                                {p}d
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Regime block */}
+                        <div className="mb-5">
+                          <p className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Trend strength regime</p>
+                          <p className="mt-1 text-2xl font-semibold text-slate-50">{regimeLabel}</p>
+                          {/* Removed descriptive sentence under regime per request */}
+                        </div>
+
+                        {/* Metrics */}
+                        <div className="mt-4">
+                          <dl className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2.5 text-sm">
+                            <div className="contents">
+                              <dt className="text-slate-400">ADX ({adx?.period ?? adxPeriod}D)</dt>
+                              <dd className="font-mono text-[15px] text-slate-100">
+                                {adxValue != null ? adxValue.toFixed(1) : '—'}
+                              </dd>
+                            </div>
+                            <div className="contents">
+                              <dt className="text-slate-400">ADX change (5 bars)</dt>
+                              <dd className="font-mono text-[15px] text-slate-100">
+                                {adxSlope
+                                  ? `${adxSlope.change >= 0 ? '+' : ''}${adxSlope.change.toFixed(1)}`
+                                  : '—'}
+                              </dd>
+                            </div>
+                            <div className="contents">
+                              <dt className="text-slate-400">+DI ({adx?.period ?? adxPeriod}D)</dt>
+                              <dd className="font-mono text-[15px] text-emerald-400">
+                                {adx?.latest ? adx.latest.plusDI.toFixed(1) : '—'}
+                              </dd>
+                            </div>
+                            <div className="contents">
+                              <dt className="text-slate-400">-DI ({adx?.period ?? adxPeriod}D)</dt>
+                              <dd className="font-mono text-[15px] text-rose-400">
+                                {adx?.latest ? adx.latest.minusDI.toFixed(1) : '—'}
+                              </dd>
+                            </div>
+                            <div className="contents">
+                              <dt className="text-slate-400">DMI Direction</dt>
+                              <dd className="font-mono text-[15px]">
+                                {adx?.latest
+                                  ? adx.latest.plusDI > adx.latest.minusDI
+                                    ? <span className="text-emerald-400">Uptrend (+DI &gt; -DI)</span>
+                                    : <span className="text-rose-400">Downtrend (-DI &gt; +DI)</span>
+                                  : '—'}
+                              </dd>
+                            </div>
+                          </dl>
+                        </div>
+
+                        {/* Signals (single-column, below regime) - no border/background */}
+                        <div className="mb-4">
+                          <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+                            Signals
+                          </h4>
+                          <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-sm">
+                            <span className="text-slate-400">Environment</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right max-w-[260px] leading-snug">
+                              {adxValue != null && adxValue >= 25
+                                ? 'Trend trading favoured (ADX > 25)'
+                                : 'Range environment – beware false breakouts (ADX < 20–25)'}
+                            </span>
+                            <span className="text-slate-400">Threshold (25)</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                              {adxValue != null && adxValue >= 25 ? 'Above threshold' : 'Below threshold'}
+                            </span>
+                            <span className="text-slate-400">ADX slope</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                              {adxSlope
+                                ? adxSlope.direction === 'rising'
+                                  ? 'Rising (strength increasing)'
+                                  : adxSlope.direction === 'falling'
+                                    ? 'Falling (weakening)'
+                                    : 'Flat'
                                 : '—'}
-                      </dd>
-                    </div>
-                  </dl>
+                            </span>
+                            <span className="text-slate-400">Last threshold cross</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right">
+                              {adxThresholdCross
+                                ? `${adxThresholdCross.direction === 'cross_above' ? 'Crossed above' : 'Crossed below'} ${adxThresholdCross.level} (${adxThresholdCross.barsAgo} bars ago)`
+                                : '—'}
+                            </span>
+                            <span className="text-slate-400">Extreme state</span>
+                            <span className="font-mono text-[15px] text-slate-100 text-right max-w-[260px] leading-snug">
+                              {adxExtreme
+                                ? adxExtreme.isExtremeNow
+                                  ? `Extreme: peaked at ${adxExtreme.peakAdx.toFixed(1)}`
+                                  : `Last peak ${adxExtreme.peakAdx.toFixed(1)} on ${adxExtreme.peakDate}`
+                                : 'None'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="mt-2 text-[10px] text-slate-500">
+                          ADX rises as trend strength builds and falls as trend momentum fades, even if price continues drifting in the same direction.
+                        </p>
+                      </>
+                    );
+                  })()}
                 </div>
 
               </div>

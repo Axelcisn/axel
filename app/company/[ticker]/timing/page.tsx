@@ -234,7 +234,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
   }, [activeForecast]);
 
-  const { shortEwma: trendShortEwma, longEwma: trendLongEwma } = useEwmaCrossover(
+  const { priceSeries: headerPriceSeries, shortEwma: trendShortEwma, longEwma: trendLongEwma } = useEwmaCrossover(
     params.ticker,
     trendShortWindow,
     trendLongWindow
@@ -453,7 +453,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [realT212Summary, setRealT212Summary] = useState<PairedTradesSummary | null>(null);
   const [realTradesLoading, setRealTradesLoading] = useState(false);
   const [showRealTrades, setShowRealTrades] = useState(true); // Toggle visibility of real trades
-  const { momentum: chartMomentum } = useTrendIndicators(params.ticker, { momentumPeriod: trendMomentumPeriod });
+  const { momentum: chartMomentum, adx: chartAdx } = useTrendIndicators(params.ticker, { momentumPeriod: trendMomentumPeriod });
 
   // State for Yahoo Finance sync
   const [isYahooSyncing, setIsYahooSyncing] = useState(false);
@@ -4246,38 +4246,175 @@ export default function TimingPage({ params }: TimingPageProps) {
     loadBaseForecastCount();
   }, [params.ticker, loadBaseForecastCount]);
 
+  const tickerDisplay = companyTicker || params.ticker.toUpperCase();
+  const logoLetter = tickerDisplay.slice(0, 1);
+  const lastClose =
+    headerPriceSeries && headerPriceSeries.length > 0
+      ? headerPriceSeries[headerPriceSeries.length - 1].close
+      : headerPrice.price;
+  const prevClose =
+    headerPriceSeries && headerPriceSeries.length > 1
+      ? headerPriceSeries[headerPriceSeries.length - 2].close
+      : null;
+  const priceDisplay =
+    lastClose != null
+      ? lastClose.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '—';
+  const priceChangeAbs =
+    lastClose != null && prevClose != null ? lastClose - prevClose : null;
+  const priceChangePct =
+    lastClose != null && prevClose != null && prevClose !== 0
+      ? ((lastClose - prevClose) / prevClose) * 100
+      : null;
+  const changeColor =
+    priceChangeAbs == null ? 'text-slate-400' : priceChangeAbs >= 0 ? 'text-emerald-400' : 'text-rose-400';
+  const changeDisplay =
+    priceChangeAbs != null ? `${priceChangeAbs >= 0 ? '+' : ''}${priceChangeAbs.toFixed(2)}` : '—';
+  const changePctDisplay =
+    priceChangePct != null ? `${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}%` : null;
+
+  const actionButtons = (
+    <>
+      {/* Upload Data Button */}
+      <button
+        onClick={() => setShowUploadModal(true)}
+        className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+          isDarkMode
+            ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500'
+            : 'text-slate-600 border border-slate-200 hover:text-slate-800'
+        }`}
+        title="Upload Data"
+      >
+        <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+      </button>
+
+      {/* Yahoo Finance Sync Button */}
+      <div className="relative">
+        <button
+          onClick={handleYahooSync}
+          disabled={isYahooSyncing}
+          className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+            isDarkMode
+              ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed'
+              : 'text-slate-600 border border-slate-200 hover:text-slate-800 disabled:opacity-40 disabled:cursor-not-allowed'
+          }`}
+          title="Sync from Yahoo Finance"
+        >
+          {isYahooSyncing ? (
+            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
+            </svg>
+          ) : (
+            <svg className="w-5 h-5 transition-transform group-hover:scale-110 group-hover:rotate-180 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+          )}
+        </button>
+        {yahooSyncError && (
+          <div className={`absolute top-full right-0 mt-2 px-2 py-1 text-[10px] rounded-md whitespace-nowrap z-10 ${
+            isDarkMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-50 text-red-600 border border-red-200'
+          }`}>
+            {yahooSyncError}
+          </div>
+        )}
+      </div>
+
+      {/* Data Quality / Help Button */}
+      <button
+        onClick={() => setShowDataQualityModal(true)}
+        className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+          isDarkMode
+            ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500'
+            : 'text-slate-600 border border-slate-200 hover:text-slate-800'
+        }`}
+        title="Data Quality Information"
+      >
+        <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+          <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+        </svg>
+      </button>
+
+      {/* Add to Watchlist Button */}
+      <button
+        onClick={addToWatchlist}
+        disabled={isAddingToWatchlist || isInWatchlist}
+        className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
+          isInWatchlist
+            ? isDarkMode
+              ? 'text-emerald-400 border border-emerald-500/40 cursor-default'
+              : 'text-emerald-600 border border-emerald-200 cursor-default'
+            : isDarkMode
+              ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed'
+              : 'text-slate-600 border border-slate-200 hover:text-slate-800 disabled:opacity-40 disabled:cursor-not-allowed'
+        }`}
+        title={isInWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
+      >
+        {isInWatchlist ? (
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        ) : (
+          <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+          </svg>
+        )}
+      </button>
+    </>
+  );
+
   return (
-    <div className="w-full px-[5%] py-6 bg-background text-foreground">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className={`text-3xl font-bold ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>{companyName || companyTicker}</h1>
-          <div className="flex items-center gap-2">
-            <span className={`text-sm ${
-              isDarkMode ? 'text-gray-400' : 'text-gray-500'
-            }`}>{companyTicker} · {companyExchange}</span>
-            <MarketSessionBadge symbol={params.ticker} />
+    <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-6 bg-background text-foreground">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between mb-8">
+        <div className="flex items-start gap-4 lg:gap-5">
+          <div className="flex flex-col justify-between min-h-[140px]">
+            <div className="h-20 w-20 rounded-full bg-gradient-to-br from-orange-500 via-rose-500 to-amber-400 shadow-xl ring-1 ring-white/10 flex items-center justify-center text-3xl font-semibold text-white">
+              {logoLetter}
             </div>
-            {/* Current price under title (Google Finance style) */}
-            {headerPrice.price != null && (
-              <div className="mt-1 flex items-baseline gap-2">
-                <span className={`text-2xl font-semibold ${
-                  isDarkMode ? 'text-white' : 'text-gray-900'
-                }`}>
-                  {headerPrice.price.toLocaleString(undefined, { style: 'currency', currency: 'USD' })}
+          </div>
+          <div className="space-y-3">
+            <h1 className="text-4xl font-semibold tracking-tight text-white">
+              {companyName || tickerDisplay}
+            </h1>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+              <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-slate-200">
+                <span className="font-medium">{tickerDisplay}</span>
+                <span className="text-slate-500">·</span>
+                <span>{companyExchange || 'NASDAQ'}</span>
+              </div>
+              <MarketSessionBadge symbol={params.ticker} />
+            </div>
+            <div className="flex flex-wrap items-baseline gap-3">
+              <div className="flex items-baseline gap-2">
+                <span className="text-5xl md:text-6xl font-semibold text-slate-100 tracking-tight">
+                  {priceDisplay}
                 </span>
-                {headerPrice.date && (
-                  <span className={`text-xs ${
-                    isDarkMode ? 'text-gray-500' : 'text-gray-400'
-                  }`}>
-                    as of {headerPrice.date}
+                <span className="text-sm uppercase text-slate-400">USD</span>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className={`text-xl font-semibold ${changeColor}`}>
+                  {changeDisplay}
+                </span>
+                {changePctDisplay && (
+                  <span className={`text-xl font-semibold ${changeColor}`}>
+                    {changePctDisplay}
                   </span>
                 )}
               </div>
+            </div>
+            {headerPrice.date && (
+              <p className="text-xs text-slate-500">
+                At close at {headerPrice.date}
+              </p>
             )}
           </div>
-        <div className="flex items-center gap-3">
+        </div>
+
+        <div className="flex flex-col items-end gap-3">
           {watchlistSuccess && (
             <span className={`text-sm font-medium ${
               isDarkMode ? 'text-green-400' : 'text-green-600'
@@ -4285,98 +4422,8 @@ export default function TimingPage({ params }: TimingPageProps) {
               ✓ Added to Watchlist
             </span>
           )}
-          
-          {/* Header Action Buttons - Icon-only, consistent styling */}
-          <div className="flex items-center gap-2">
-            {/* Upload Data Button */}
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-                isDarkMode 
-                  ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50'
-                  : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md'
-              }`}
-              title="Upload Data"
-            >
-              <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-            </button>
-
-            {/* Yahoo Finance Sync Button */}
-            <div className="relative">
-              <button
-                onClick={handleYahooSync}
-                disabled={isYahooSyncing}
-                className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-                  isDarkMode 
-                    ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-800/80 disabled:hover:text-slate-400 disabled:hover:border-slate-700/60 disabled:hover:shadow-none'
-                    : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white disabled:hover:text-slate-500 disabled:hover:border-slate-200 disabled:hover:shadow-none'
-                }`}
-                title="Sync from Yahoo Finance"
-              >
-                {isYahooSyncing ? (
-                  <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 transition-transform group-hover:scale-110 group-hover:rotate-180 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                )}
-              </button>
-              {yahooSyncError && (
-                <div className={`absolute top-full right-0 mt-2 px-2 py-1 text-[10px] rounded-md whitespace-nowrap z-10 ${
-                  isDarkMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-50 text-red-600 border border-red-200'
-                }`}>
-                  {yahooSyncError}
-                </div>
-              )}
-            </div>
-
-            {/* Data Quality / Help Button */}
-            <button
-              onClick={() => setShowDataQualityModal(true)}
-              className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-                isDarkMode 
-                  ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50'
-                  : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md'
-              }`}
-              title="Data Quality Information"
-            >
-              <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
-              </svg>
-            </button>
-
-            {/* Add to Watchlist Button */}
-            <button
-              onClick={addToWatchlist}
-              disabled={isAddingToWatchlist || isInWatchlist}
-              className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-                isInWatchlist 
-                  ? isDarkMode
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 cursor-default'
-                    : 'bg-emerald-50 text-emerald-600 border border-emerald-200 cursor-default'
-                  : isDarkMode
-                    ? 'bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white border border-slate-700/60 hover:border-slate-600 hover:shadow-lg hover:shadow-slate-900/50 disabled:opacity-40 disabled:cursor-not-allowed'
-                    : 'bg-white hover:bg-slate-50 text-slate-500 hover:text-slate-700 border border-slate-200 hover:border-slate-300 hover:shadow-md disabled:opacity-40 disabled:cursor-not-allowed'
-              }`}
-              title={isInWatchlist ? 'Already in Watchlist' : 'Add to Watchlist'}
-            >
-              {isInWatchlist ? (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                </svg>
-              )}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {actionButtons}
           </div>
         </div>
       </div>
@@ -4414,6 +4461,8 @@ export default function TimingPage({ params }: TimingPageProps) {
           ewmaLongWindow={trendLongWindow}
           momentumScoreSeries={chartMomentum?.scoreSeries ?? undefined}
           momentumPeriod={chartMomentum?.period ?? trendMomentumPeriod}
+          adxPeriod={chartAdx?.period ?? 14}
+          adxSeries={chartAdx?.series ?? undefined}
           onLoadEwmaUnbiased={handleLoadUnbiasedClick}
           onLoadEwmaBiased={handleLoadBiasedClick}
           isLoadingEwmaBiased={isLoadingEwmaBiased}
