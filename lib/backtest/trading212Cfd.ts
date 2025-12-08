@@ -87,6 +87,8 @@ export interface Trading212SimulationResult {
   stopOutEvents: number;
   swapFeesTotal: number;     // Total overnight swap fees (usually negative for longs)
   fxFeesTotal: number;       // Total FX conversion fees
+  firstDate: string | null;
+  lastDate: string | null;
 }
 
 // ============================================================================
@@ -407,6 +409,8 @@ export function simulateTrading212Cfd(
 
   const equitySeries = history.map((h) => h.equity);
   const maxDrawdown = computeMaxDrawdown(equitySeries);
+  const firstDate = history.length > 0 ? history[0].date : null;
+  const lastDate = history.length > 0 ? history[history.length - 1].date : null;
 
   return {
     initialEquity,
@@ -418,5 +422,7 @@ export function simulateTrading212Cfd(
     stopOutEvents,
     swapFeesTotal: swapFeesAccrued,
     fxFeesTotal: fxFeesAccrued,
+    firstDate,
+    lastDate,
   };
 }

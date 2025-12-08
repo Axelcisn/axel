@@ -293,6 +293,8 @@ export interface SimulationRunSummary {
   lastDate: string;
 }
 
+type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max" | "ewma-trend" | "ewma-trend-max";
+
 interface PriceChartProps {
   symbol: string;
   className?: string;
@@ -317,8 +319,8 @@ interface PriceChartProps {
   horizonCoverage?: HorizonCoverageProps;
   tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
   t212AccountHistory?: Trading212AccountSnapshot[] | null;  // Equity curve from Trading212 simulation
-  activeT212RunId?: string | null;  // Currently active T212 run (for Chart toggle)
-  onToggleT212Run?: (runId: "ewma-unbiased" | "ewma-biased" | "ewma-biased-max") => void;  // Toggle T212 run visibility
+  activeT212RunId?: T212RunId | null;  // Currently active T212 run (for Chart toggle)
+  onToggleT212Run?: (runId: T212RunId) => void;  // Toggle T212 run visibility
   isCfdEnabled?: boolean;  // Whether CFD simulation is enabled
   onToggleCfd?: () => void;  // Toggle CFD simulation on/off
   onDateRangeChange?: (startDate: string | null, endDate: string | null) => void;  // Callback when date range changes
@@ -389,7 +391,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     if (activeT212RunId === "ewma-unbiased") {
       setShowEwmaOverlay(true);
       setShowEwmaBiasedOverlay(false);
-    } else if (activeT212RunId === "ewma-biased" || activeT212RunId === "ewma-biased-max") {
+    } else if (
+      activeT212RunId === "ewma-biased" ||
+      activeT212RunId === "ewma-biased-max" ||
+      activeT212RunId === "ewma-trend" ||
+      activeT212RunId === "ewma-trend-max"
+    ) {
       setShowEwmaOverlay(false);
       setShowEwmaBiasedOverlay(true);
     } else {
@@ -4665,7 +4672,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   onClick={() => {
                     // Radio behavior: turn off all other EWMA overlays
                     setShowEwmaOverlay(false);
-                    setShowEwmaBiasedOverlay(false);
+                    setShowEwmaBiasedOverlay(true);
                     // Toggle T212 run visibility for Max
                     if (onToggleT212Run) {
                       onToggleT212Run("ewma-biased-max");
@@ -4689,7 +4696,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }
                   `}
-                >
+                  >
                   {ewmaReactionMapDropdown?.isOptimizingReaction ? '...' : 'Max'}
                 </button>
 
@@ -4852,6 +4859,74 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           >
             {isCfdEnabled ? 'CFD On' : 'CFD Off'}
           </button>
+
+          {/* Trend Button (Biased forecast + Trend filters) */}
+          {onLoadEwmaBiased && (
+            <div className="relative group">
+              <button
+                onClick={() => {
+                  if (onLoadEwmaBiased) {
+                    onLoadEwmaBiased();
+                  }
+                  setShowEwmaOverlay(false);
+                  setShowEwmaBiasedOverlay(true);
+                  if (onToggleT212Run) {
+                    onToggleT212Run("ewma-trend");
+                  }
+                }}
+                disabled={isLoadingEwmaBiased}
+                className={`
+                  px-3 py-1 text-xs rounded-full transition-colors font-medium
+                  ${activeT212RunId === "ewma-trend"
+                    ? isDarkMode
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-emerald-500 text-white'
+                    : isLoadingEwmaBiased
+                      ? 'bg-gray-300 text-gray-500 cursor-wait'
+                      : isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }
+                `}
+              >
+                {isLoadingEwmaBiased ? 'Loading...' : 'Trend'}
+              </button>
+            </div>
+          )}
+
+          {/* Trend (Max) Button */}
+          {onLoadEwmaBiased && (
+            <div className="relative group">
+              <button
+                onClick={() => {
+                  if (onLoadEwmaBiased) {
+                    onLoadEwmaBiased();
+                  }
+                  setShowEwmaOverlay(false);
+                  setShowEwmaBiasedOverlay(true);
+                  if (onToggleT212Run) {
+                    onToggleT212Run("ewma-trend-max");
+                  }
+                }}
+                disabled={isLoadingEwmaBiased}
+                className={`
+                  px-3 py-1 text-xs rounded-full transition-colors font-medium
+                  ${activeT212RunId === "ewma-trend-max"
+                    ? isDarkMode
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-violet-500 text-white'
+                    : isLoadingEwmaBiased
+                      ? 'bg-gray-300 text-gray-500 cursor-wait'
+                      : isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }
+                `}
+              >
+                {isLoadingEwmaBiased ? 'Loading...' : 'Trend (Max)'}
+              </button>
+            </div>
+          )}
 
           {/* Simulation Settings Button (⋯) with Dropdown */}
           <div className="relative" ref={simulationSettingsDropdownRef}>
