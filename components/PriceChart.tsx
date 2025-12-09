@@ -6981,37 +6981,30 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
             </div>
             
             {/* Single column layout */}
-            <div className="text-[9px]">
+            <div className="text-[9px] space-y-0.5">
               {/* E[Price] - the forecasted price for current date (from past forecast) */}
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>E[Price]</span>
                 <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
                   {data.ewma_biased_past_forecast != null ? `$${data.ewma_biased_past_forecast.toFixed(2)}` : '—'}
                 </span>
               </div>
               {/* Upper Band */}
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Upper</span>
                 <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                   {data.ewma_biased_past_upper != null ? `$${data.ewma_biased_past_upper.toFixed(2)}` : '—'}
                 </span>
               </div>
               {/* Lower Band */}
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Lower</span>
                 <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                   {data.ewma_biased_past_lower != null ? `$${data.ewma_biased_past_lower.toFixed(2)}` : '—'}
                 </span>
               </div>
-              {/* Realized - the actual price at t */}
-              <div className="flex justify-between">
-                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Realized</span>
-                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                  {!data.isFuture && data.close != null ? `$${data.close.toFixed(2)}` : '—'}
-                </span>
-              </div>
               {/* Error row */}
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Error</span>
                 <span className="font-mono tabular-nums">
                   {!data.isFuture && data.close != null && data.ewma_biased_past_forecast != null ? (
@@ -7023,10 +7016,10 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               </div>
               
               {/* Separator line */}
-              <div className={`border-t my-1 ${isDarkMode ? 'border-slate-600/50' : 'border-gray-300/50'}`} />
+              <div className={`border-t my-1.5 ${isDarkMode ? 'border-slate-600/50' : 'border-gray-300/50'}`} />
               
               {/* Forecast - the price forecasted for Horizon (future forecast) */}
-              <div className="flex justify-between">
+              <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Forecast</span>
                 <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
                   {data.ewma_biased_future_forecast != null ? `$${data.ewma_biased_future_forecast.toFixed(2)}` : '—'}
