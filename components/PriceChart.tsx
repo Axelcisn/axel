@@ -7114,7 +7114,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                       </span>
                     </div>
 
-                    {/* P&L row - combined $ and % */}
+                    {/* P&L row - dollar amount */}
                     <div className="flex justify-between ml-3">
                       <span className="text-slate-400">P&amp;L</span>
                       <span
@@ -7124,13 +7124,23 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                         }
                       >
                         {pnl >= 0 ? '+' : '-'}${Math.abs(pnl).toFixed(2)}
-                        {e.margin != null && (
-                          <span className="text-[9px] ml-1">
-                            ({pct >= 0 ? '+' : '-'}{Math.abs(pct).toFixed(1)}%)
-                          </span>
-                        )}
                       </span>
                     </div>
+
+                    {/* P&L percentage row - below the dollar amount */}
+                    {e.margin != null && (
+                      <div className="flex justify-between ml-3">
+                        <span className="text-slate-500"></span>
+                        <span
+                          className={
+                            'font-mono tabular-nums text-[9px] ' +
+                            (isGain ? 'text-emerald-400/80' : 'text-rose-400/80')
+                          }
+                        >
+                          ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
