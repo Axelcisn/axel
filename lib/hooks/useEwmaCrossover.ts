@@ -62,7 +62,7 @@ export function useEwmaCrossover(
     const event = findLastEwmaCrossover(shortSeries, longSeries);
     const latestShortValue = shortSeries[shortSeries.length - 1].value;
     const latestLongValue = longSeries[longSeries.length - 1].value;
-    const stats = computeEwmaGapStats(shortSeries, longSeries);
+    const stats = computeEwmaGapStats(shortSeries, longSeries, 60, null);
 
     return {
       shortEwma: shortSeries,

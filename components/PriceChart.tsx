@@ -14,6 +14,7 @@ import {
   ReferenceLine,
   ReferenceDot,
   Line,
+  Scatter,
 } from "recharts";
 import { useDarkMode } from "@/lib/hooks/useDarkMode";
 import {
@@ -150,6 +151,10 @@ interface ChartPoint {
   ewma_biased_upper?: number | null;
   ewma_biased_origin_date?: string | null;
   ewma_biased_realized?: number | null;
+
+  // Trend overlays (simple EWMA pair)
+  trendEwmaShort?: number | null;
+  trendEwmaLong?: number | null;
 
   // === EWMA crossover overlays ===
   ewma_short?: number | null;
@@ -294,6 +299,24 @@ export interface SimulationRunSummary {
 }
 
 type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
+export type TrendOverlayState = {
+  ewma: boolean;
+  momentum: boolean;
+  adx: boolean;
+};
+
+interface TrendEwmaPoint {
+  date: string;
+  value: number;
+}
+
+interface TrendEwmaSignal {
+  date: string;
+  type: 'bullish' | 'bearish';
+}
+
+const TREND_EWMA_SHORT_COLOR = "#f97316";
+const TREND_EWMA_LONG_COLOR = "#3b82f6";
 
 interface PriceChartProps {
   symbol: string;
@@ -312,6 +335,11 @@ interface PriceChartProps {
   momentumPeriod?: number;
   adxSeries?: AdxPoint[];
   adxPeriod?: number;
+  trendOverlays?: TrendOverlayState;
+  trendEwmaShort?: TrendEwmaPoint[];
+  trendEwmaLong?: TrendEwmaPoint[];
+  trendEwmaCrossSignals?: TrendEwmaSignal[];
+  onToggleEwmaTrend?: () => void;
   onLoadEwmaUnbiased?: () => void;
   onLoadEwmaBiased?: () => void;
   isLoadingEwmaBiased?: boolean;
@@ -355,6 +383,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   momentumPeriod,
   adxSeries,
   adxPeriod,
+  trendOverlays,
+  trendEwmaShort,
+  trendEwmaLong,
+  trendEwmaCrossSignals,
+  onToggleEwmaTrend,
   onLoadEwmaUnbiased,
   onLoadEwmaBiased,
   isLoadingEwmaBiased,
@@ -371,12 +404,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
-  const shortSeries = ewmaShortSeries ?? [];
-  const longSeries = ewmaLongSeries ?? [];
+  const showTrendEwma = trendOverlays?.ewma ?? false;
+  const shortSeries = trendEwmaShort ?? [];
+  const longSeries = trendEwmaLong ?? [];
+  const trendShortSeries = trendEwmaShort ?? [];
+  const trendLongSeries = trendEwmaLong ?? [];
   const momentumSeries = momentumScoreSeries ?? [];
   const adxSeriesSafe = adxSeries ?? [];
-  const hasEwmaShort = shortSeries.length > 0;
-  const hasEwmaLong = longSeries.length > 0;
+  const hasEwmaShort = showTrendEwma && trendShortSeries.length > 0;
+  const hasEwmaLong = showTrendEwma && trendLongSeries.length > 0;
   const shortWindowLabel = ewmaShortWindow;
   const longWindowLabel = ewmaLongWindow;
   const hasMomentumScore = momentumSeries.length > 0;
@@ -1209,6 +1245,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return map;
   }, [adxSeriesSafe]);
 
+  const trendEwmaShortMap = useMemo(() => {
+    if (!showTrendEwma) return null;
+    const map = new Map<string, number>();
+    trendShortSeries.forEach((p) => {
+      if (!Number.isFinite(p.value)) return;
+      map.set(normalizeDateString(p.date), p.value);
+    });
+    return map;
+  }, [trendShortSeries, showTrendEwma]);
+
+  const trendEwmaLongMap = useMemo(() => {
+    if (!showTrendEwma) return null;
+    const map = new Map<string, number>();
+    trendLongSeries.forEach((p) => {
+      if (!Number.isFinite(p.value)) return;
+      map.set(normalizeDateString(p.date), p.value);
+    });
+    return map;
+  }, [trendLongSeries, showTrendEwma]);
+
   // Create extended chartData with future placeholders
   const chartData: ChartPoint[] = React.useMemo(() => {
     // Historical portion: same as rangeData, but mark as not future
@@ -1225,6 +1281,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         volume: p.volume,
         ewma_short: ewmaShortMap.get(chartDate) ?? null,
         ewma_long: ewmaLongMap.get(chartDate) ?? null,
+        trendEwmaShort: showTrendEwma && trendEwmaShortMap ? trendEwmaShortMap.get(chartDate) ?? null : null,
+        trendEwmaLong: showTrendEwma && trendEwmaLongMap ? trendEwmaLongMap.get(chartDate) ?? null : null,
         momentumScore: momentumMap.get(chartDate),
         adxValue: adxMap.get(chartDate),
         // Determine volume color based on price movement (modern glass palette with borders)
@@ -1292,7 +1350,72 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }));
 
     return [...base, ...futurePoints];
-  }, [rangeData, fullData, futureDates, h, forecastOverlay?.activeForecast, ewmaShortMap, ewmaLongMap]);
+  }, [
+    rangeData,
+    fullData,
+    futureDates,
+    h,
+    forecastOverlay?.activeForecast,
+    ewmaShortMap,
+    ewmaLongMap,
+    trendEwmaShortMap,
+    trendEwmaLongMap,
+    showTrendEwma,
+    momentumMap,
+    adxMap,
+  ]);
+
+  const trendCrossPoints = useMemo(() => {
+    if (!showTrendEwma) return [];
+    if (!chartData || chartData.length === 0) return [];
+    if (!trendEwmaCrossSignals || trendEwmaCrossSignals.length === 0) return [];
+
+    return trendEwmaCrossSignals
+      .map((signal) => {
+        const dataPoint = chartData.find((d) => normalizeDateString(d.date) === normalizeDateString(signal.date));
+        if (!dataPoint || dataPoint.close == null) return null;
+        return {
+          x: dataPoint.date,
+          y: dataPoint.close,
+          type: signal.type as 'bullish' | 'bearish',
+        };
+      })
+      .filter(
+        (p): p is { x: string; y: number; type: 'bullish' | 'bearish' } =>
+          !!p
+      );
+  }, [chartData, trendEwmaCrossSignals, showTrendEwma]);
+
+  // Check if chartData actually has any trend EWMA values (not just if props have data)
+  const chartHasTrendEwmaShort = useMemo(() => {
+    if (!showTrendEwma) return false;
+    return chartData.some(p => p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort));
+  }, [chartData, showTrendEwma]);
+
+  const chartHasTrendEwmaLong = useMemo(() => {
+    if (!showTrendEwma) return false;
+    return chartData.some(p => p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong));
+  }, [chartData, showTrendEwma]);
+
+  const renderTrendArrow = useCallback((props: any): React.ReactElement => {
+    const { cx, cy, payload } = props;
+    if (cx == null || cy == null || !payload) return <g />;
+    if (payload.type === 'bullish') {
+      return (
+        <g>
+          <polygon points={`${cx},${cy - 8} ${cx - 4},${cy} ${cx + 4},${cy}`} fill="#22c55e" />
+        </g>
+      );
+    }
+    if (payload.type === 'bearish') {
+      return (
+        <g>
+          <polygon points={`${cx},${cy + 8} ${cx - 4},${cy} ${cx + 4},${cy}`} fill="#ef4444" />
+        </g>
+      );
+    }
+    return <g />;
+  }, []);
 
   // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
   const chartDataWithEwma = useMemo(() => {
@@ -1888,15 +2011,19 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const values: number[] = [];
     
     chartDataWithForecastBand.forEach(p => {
-      if (p.close != null) values.push(p.close);
-      if (p.forecastCenter != null) values.push(p.forecastCenter);
-      if (p.forecastLower != null) values.push(p.forecastLower);
-      if (p.forecastUpper != null) values.push(p.forecastUpper);
+      if (p.close != null && Number.isFinite(p.close)) values.push(p.close);
+      if (p.forecastCenter != null && Number.isFinite(p.forecastCenter)) values.push(p.forecastCenter);
+      if (p.forecastLower != null && Number.isFinite(p.forecastLower)) values.push(p.forecastLower);
+      if (p.forecastUpper != null && Number.isFinite(p.forecastUpper)) values.push(p.forecastUpper);
       // Include EWMA values in domain calculation
       if (showEwmaOverlay) {
-        if (p.ewma_forecast != null) values.push(p.ewma_forecast);
-        if (p.ewma_lower != null) values.push(p.ewma_lower);
-        if (p.ewma_upper != null) values.push(p.ewma_upper);
+        if (p.ewma_forecast != null && Number.isFinite(p.ewma_forecast)) values.push(p.ewma_forecast);
+        if (p.ewma_lower != null && Number.isFinite(p.ewma_lower)) values.push(p.ewma_lower);
+        if (p.ewma_upper != null && Number.isFinite(p.ewma_upper)) values.push(p.ewma_upper);
+      }
+      if (showTrendEwma) {
+        if (p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort)) values.push(p.trendEwmaShort);
+        if (p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong)) values.push(p.trendEwmaLong);
       }
     });
     
@@ -1904,11 +2031,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     
     const min = Math.min(...values);
     const max = Math.max(...values);
+    
+    // Guard against NaN or Infinity
+    if (!Number.isFinite(min) || !Number.isFinite(max)) {
+      return ["dataMin", "dataMax"];
+    }
+    
     // Add 2% padding
     const padding = (max - min) * 0.02;
     
     return [min - padding, max + padding];
-  }, [chartDataWithForecastBand, showEwmaOverlay]);
+  }, [chartDataWithForecastBand, showEwmaOverlay, showTrendEwma]);
 
   const priceYMinValue = useMemo(() => {
     return Array.isArray(priceYDomain) && typeof priceYDomain[0] === "number"
@@ -2980,10 +3113,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Memoized chart element to prevent re-renders when dropdown states change
   const memoizedChartElement = useMemo(() => {
-    if (loading || error || chartDataWithEwma.length === 0) return null;
-    
+    if (loading || error) return null;
+
+    const chartDataForRender =
+      chartDataWithEquity.length > 0
+        ? chartDataWithEquity
+        : chartDataWithForecastBand.length > 0
+          ? chartDataWithForecastBand
+          : chartDataWithEwma.length > 0
+            ? chartDataWithEwma
+            : chartData;
+
+    if (!chartDataForRender || chartDataForRender.length === 0) return null;
+
     return (
-      <div className="relative">
+      <div className="relative" key={`chart-wrapper-${showTrendEwma}-${chartDataForRender.length}`}>
         {/* Enhanced CSS Animations for forecast band */}
         <style>{`
           /* Smooth dot entrance with scale and glow */
@@ -3114,9 +3258,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           }
         }}
         >
-          <ResponsiveContainer width="100%" height={500}>
+          <ResponsiveContainer 
+            width="100%" 
+            height={500}
+            key={`chart-container-${showTrendEwma}-${chartDataForRender.length}`}
+          >
             <ComposedChart
-              data={chartDataWithEquity}
+              data={chartDataForRender}
               margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
               syncId="price-equity-sync"
               barCategoryGap="0%"
@@ -3286,12 +3434,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               dataKey="date"
               type="category"
               allowDuplicatedCategory={false}
-              scale="band"
               axisLine={false}
               tickLine={false}
               tickMargin={8}
-              minTickGap={24}
-              padding={{ left: 0, right: 0 }}
+              minTickGap={50}
+              padding={{ left: 10, right: 10 }}
+              interval="preserveStartEnd"
               tick={{
                 fontSize: 10,
                 fill: isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)",
@@ -3484,38 +3632,41 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               isAnimationActive={false}
             />
 
-            {/* EWMA crossover overlays */}
-            {hasEwmaShort && (
-              <Line
+            {/* Trend EWMA overlays (toggle-controlled) - always render but hide via strokeOpacity */}
+            <Line
+              yAxisId="price"
+              type="monotone"
+              dataKey="trendEwmaShort"
+              stroke={TREND_EWMA_SHORT_COLOR}
+              strokeWidth={chartHasTrendEwmaShort ? 1.6 : 0}
+              strokeOpacity={chartHasTrendEwmaShort ? 0.9 : 0}
+              dot={false}
+              connectNulls
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              isAnimationActive={false}
+            />
+            <Line
+              yAxisId="price"
+              type="monotone"
+              dataKey="trendEwmaLong"
+              stroke={TREND_EWMA_LONG_COLOR}
+              strokeWidth={chartHasTrendEwmaLong ? 1.6 : 0}
+              strokeOpacity={chartHasTrendEwmaLong ? 0.9 : 0}
+              dot={false}
+              connectNulls
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              isAnimationActive={false}
+            />
+
+            {showTrendEwma && trendCrossPoints.length > 0 && (
+              <Scatter
                 yAxisId="price"
-                type="monotone"
-                dataKey="ewma_short"
-                stroke={SHORT_EWMA_COLOR}
-                strokeWidth={1.8}
-                strokeOpacity={0.9}
-                dot={false}
-                activeDot={makeEwmaDot(SHORT_EWMA_COLOR)}
-                connectNulls
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                filter="url(#priceLineGlow)"
-                isAnimationActive={false}
-              />
-            )}
-            {hasEwmaLong && (
-              <Line
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_long"
-                stroke={LONG_EWMA_COLOR}
-                strokeWidth={1.8}
-                strokeOpacity={0.9}
-                dot={false}
-                activeDot={makeEwmaDot(LONG_EWMA_COLOR)}
-                connectNulls
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                filter="url(#priceLineGlow)"
+                data={trendCrossPoints}
+                dataKey="y"
+                name="TrendCross"
+                shape={renderTrendArrow}
                 isAnimationActive={false}
               />
             )}
@@ -3970,6 +4121,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     );
   }, [
     chartDataWithEquity,
+    chartDataWithForecastBand,
+    chartDataWithEwma,
+    chartData,
     lineColor,
     isDarkMode,
     priceYDomain,
@@ -4004,6 +4158,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     hoveredDate,
     hasEwmaShort,
     hasEwmaLong,
+    showTrendEwma,
+    chartHasTrendEwmaShort,
+    chartHasTrendEwmaLong,
+    trendCrossPoints,
+    renderTrendArrow,
     shortWindowLabel,
     longWindowLabel,
     hasMomentumScore,
@@ -4784,6 +4943,46 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 )}
               </div>
             </div>
+
+            {onToggleEwmaTrend && (
+              <>
+                <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+                <div className="flex flex-col gap-0.5">
+                  <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Trend</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className={`
+                        rounded-full px-3 py-1 text-xs transition-colors
+                        ${trendOverlays?.ewma
+                          ? 'bg-sky-500 text-white'
+                          : isDarkMode
+                            ? 'bg-slate-800 text-slate-200'
+                            : 'bg-slate-200 text-slate-700'
+                        }
+                      `}
+                      onClick={onToggleEwmaTrend}
+                    >
+                      EWMA
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full px-3 py-1 text-xs bg-slate-900 text-slate-500 cursor-default"
+                      disabled
+                    >
+                      Momentum
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-full px-3 py-1 text-xs bg-slate-900 text-slate-500 cursor-default"
+                      disabled
+                    >
+                      ADX
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         )}
         
@@ -6712,6 +6911,42 @@ function formatTooltipDate(label: string): string {
     year: "2-digit",
   };
   return d.toLocaleDateString(undefined, opts);
+}
+
+// X-axis tick that centers the label under its bar using the band size/offset provided by Recharts
+function CenteredDateTick({
+  x = 0,
+  y = 0,
+  payload,
+  isDarkMode,
+  width,
+  visibleTicksCount,
+}: {
+  x?: number;
+  y?: number;
+  payload?: any;
+  isDarkMode: boolean;
+  width?: number;
+  visibleTicksCount?: number;
+}) {
+  // Calculate the offset to center under the bar
+  // The x position from Recharts is at the tick mark (between bars)
+  // We need to shift it to the center of the bar
+  const offset = payload?.offset ?? 0;
+  
+  const label = payload?.value ? formatXAxisDate(payload.value) : "";
+
+  return (
+    <text
+      x={x + offset}
+      y={y + 4}
+      textAnchor="middle"
+      fontSize={10}
+      fill={isDarkMode ? "rgba(148, 163, 184, 0.7)" : "rgba(75, 85, 99, 0.7)"}
+    >
+      {label}
+    </text>
+  );
 }
 
 function VolumeTooltip({ active, payload, label }: any) {

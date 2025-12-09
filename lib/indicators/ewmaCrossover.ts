@@ -13,6 +13,8 @@ export interface EwmaCrossoverEvent {
 }
 
 export type EwmaGapDirection = 'bullish' | 'bearish' | 'flat';
+export type EwmaGapStrength = 'neutral' | 'mild' | 'strong' | 'extreme';
+export type EwmaGapSlope = 'strengthening' | 'fading' | 'stable';
 
 export interface EwmaGapStats {
   gap: number;
@@ -21,6 +23,8 @@ export interface EwmaGapStats {
   stdGap: number;
   zScore: number;
   direction: EwmaGapDirection;
+  strength: EwmaGapStrength;
+  slope: EwmaGapSlope;
   sampleSize: number;
 }
 
@@ -116,10 +120,11 @@ export function findLastEwmaCrossover(
 export function computeEwmaGapStats(
   shortSeries: EwmaPoint[],
   longSeries: EwmaPoint[],
-  lookback: number = 60
+  lookback: number = 60,
+  previousZ?: number | null
 ): EwmaGapStats | null {
-  const { dates, short, long } = alignByDate(shortSeries, longSeries);
-  const n = dates.length;
+  const aligned = alignByDate(shortSeries, longSeries);
+  const n = aligned.dates.length;
   if (n === 0) return null;
 
   const windowSize = Math.min(lookback, n);
@@ -127,19 +132,20 @@ export function computeEwmaGapStats(
 
   const gaps: number[] = [];
   for (let i = start; i < n; i++) {
-    const s = short[i];
-    const l = long[i];
+    const s = aligned.short[i];
+    const l = aligned.long[i];
     if (!Number.isFinite(s) || !Number.isFinite(l)) continue;
     gaps.push(s - l);
   }
 
-  if (gaps.length === 0) return null;
+  if (!gaps.length) return null;
 
-  const latestShort = short[n - 1];
-  const latestLong = long[n - 1];
+  const latestShort = aligned.short[n - 1];
+  const latestLong = aligned.long[n - 1];
 
   const gap = latestShort - latestLong;
-  const gapPct = Number.isFinite(latestLong) && latestLong !== 0 ? gap / latestLong : 0;
+  const gapPct =
+    Number.isFinite(latestLong) && latestLong !== 0 ? gap / latestLong : 0;
 
   const sampleSize = gaps.length;
   let meanGap = 0;
@@ -159,9 +165,28 @@ export function computeEwmaGapStats(
     zScore = (gap - meanGap) / stdGap;
   }
 
+  const absZ = Math.abs(zScore);
+
+  // Direction should be based on the raw gap (short - long), not on z-score
   let direction: EwmaGapDirection = 'flat';
-  if (gap > 0) direction = 'bullish';
-  else if (gap < 0) direction = 'bearish';
+  if (gap > 0) {
+    direction = 'bullish';
+  } else if (gap < 0) {
+    direction = 'bearish';
+  }
+
+  let strength: EwmaGapStrength = 'neutral';
+  if (absZ >= 2.5) strength = 'extreme';
+  else if (absZ >= 1.5) strength = 'strong';
+  else if (absZ >= 0.5) strength = 'mild';
+
+  let slope: EwmaGapSlope = 'stable';
+  if (previousZ != null && Number.isFinite(previousZ)) {
+    const deltaZ = zScore - previousZ;
+    const slopeThreshold = 0.1; // ignore tiny wiggles
+    if (deltaZ > slopeThreshold) slope = 'strengthening';
+    else if (deltaZ < -slopeThreshold) slope = 'fading';
+  }
 
   return {
     gap,
@@ -170,6 +195,8 @@ export function computeEwmaGapStats(
     stdGap,
     zScore,
     direction,
+    strength,
+    slope,
     sampleSize,
   };
 }

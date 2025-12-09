@@ -220,6 +220,7 @@ export default function TrendSection({
     lastEvent,
     latestShort,
     latestLong,
+    gapStats,
     isLoading: ewmaCrossoverLoading,
     error: ewmaCrossoverError,
   } = useEwmaCrossover(ticker, shortWindow, longWindow);
@@ -570,16 +571,14 @@ export default function TrendSection({
                         if (lastEvent) {
                           const dir = lastEvent.direction;
                           if (isGoldenDeathPair && dir === 'bullish') {
-                            crossoverLabel = 'Golden Cross (bullish)';
+                            crossoverLabel = 'Golden Cross';
                           } else if (isGoldenDeathPair && dir === 'bearish') {
-                            crossoverLabel = 'Death Cross (bearish)';
+                            crossoverLabel = 'Death Cross';
                           } else if (dir === 'bullish') {
-                            crossoverLabel = 'Bullish crossover (short above long)';
+                            crossoverLabel = 'Bullish crossover';
                           } else if (dir === 'bearish') {
-                            crossoverLabel = 'Bearish crossover (short below long)';
+                            crossoverLabel = 'Bearish crossover';
                           }
-                        } else if (isGoldenDeathPair) {
-                          crossoverLabel = '50/200 pair: Golden Cross (bullish) or Death Cross (bearish)';
                         }
 
                         return (
@@ -592,7 +591,15 @@ export default function TrendSection({
                               </span>
                             </div>
                             <div className="mt-1 flex items-baseline justify-between">
-                              <span className="text-slate-400">Type</span>
+                              <span className="flex items-center gap-1 text-slate-400">
+                                Type
+                                <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                                  i
+                                  <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-72 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                    A bullish crossover happens when the short EWMA crosses above the long EWMA (trend turning up). A bearish crossover is the opposite. A Golden Cross is the special bullish crossover of 50 vs 200 periods; a Death Cross is the bearish 50 vs 200 crossover.
+                                  </div>
+                                </span>
+                              </span>
                               <span className="text-slate-200">
                                 {crossoverLabel}
                               </span>
@@ -631,6 +638,51 @@ export default function TrendSection({
                           }`}>
                             {priceBiasPct >= 0 ? '+' : ''}
                             {(priceBiasPct * 100).toFixed(2)}%
+                          </dd>
+                        </div>
+                        <div className="flex items-baseline justify-between">
+                          <dt className="flex items-center gap-1 text-slate-400">
+                            Level
+                            <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-300">
+                              i
+                              <div className="pointer-events-none absolute left-0 top-full z-10 mt-1 hidden w-64 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg group-hover:block">
+                                Level measures how far the short and long EWMA are from each other compared to their recent history. Direction (bullish/bearish) comes from short minus long. The value in σ shows how unusual the current gap is: positive = larger than normal, negative = smaller than normal.
+                              </div>
+                            </span>
+                          </dt>
+                          <dd className="font-mono text-right text-slate-100">
+                            {gapStats ? (
+                              <>
+                                <span
+                                  className={
+                                    gapStats.direction === 'bullish'
+                                      ? 'text-emerald-400'
+                                      : gapStats.direction === 'bearish'
+                                        ? 'text-rose-400'
+                                        : 'text-slate-300'
+                                  }
+                                >
+                                  {gapStats.direction === 'bullish'
+                                    ? 'Bullish'
+                                    : gapStats.direction === 'bearish'
+                                      ? 'Bearish'
+                                      : 'Flat'}
+                                </span>
+                                <span className="ml-1 text-slate-400">
+                                  (
+                                  {gapStats.zScore >= 0 ? '+' : ''}
+                                  {gapStats.zScore.toFixed(2)}σ
+                                  {gapStats.slope === 'strengthening'
+                                    ? ', strengthening'
+                                    : gapStats.slope === 'fading'
+                                      ? ', fading'
+                                      : ''}
+                                  )
+                                </span>
+                              </>
+                            ) : (
+                              '—'
+                            )}
                           </dd>
                         </div>
                       </dl>

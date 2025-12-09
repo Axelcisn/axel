@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint } from '@/components/PriceChart';
+import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint, TrendOverlayState } from '@/components/PriceChart';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
   Trading212CfdConfig,
@@ -46,6 +46,7 @@ import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import TrendSection from '@/components/trend/TrendSection';
 import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
+import { computeEwmaSeries } from '@/lib/indicators/ewmaCrossover';
 
 /**
  * Data flow (Timing/Trend):
@@ -149,6 +150,7 @@ interface ValidationSummary {
 }
 
 type TrendEwmaPreset = 'short' | 'medium' | 'long' | 'custom';
+// Use TrendOverlayState from PriceChart for type compatibility
 
 interface TimingPageProps {
   params: {
@@ -182,6 +184,18 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [trendMomentumPeriod, setTrendMomentumPeriod] = useState(10);
   const [trendShortWindow, setTrendShortWindow] = useState(14);
   const [trendLongWindow, setTrendLongWindow] = useState(50);
+  const [trendOverlays, setTrendOverlays] = useState<TrendOverlayState>({
+    ewma: false,
+    momentum: false,
+    adx: false,
+  });
+
+  function toggleEwmaTrendOverlay() {
+    setTrendOverlays((prev) => ({
+      ...prev,
+      ewma: !prev.ewma,
+    }));
+  }
 
   // GBM Forecast state
   const [currentForecast, setCurrentForecast] = useState<GbmForecast | ForecastRecord | null>(null);
@@ -239,6 +253,40 @@ export default function TimingPage({ params }: TimingPageProps) {
     trendShortWindow,
     trendLongWindow
   );
+
+  const trendFastWindow = 14;
+  const trendSlowWindow = 50;
+
+  const trendEwmaSeries = useMemo(() => {
+    if (!headerPriceSeries || headerPriceSeries.length < trendSlowWindow + 5) {
+      return {
+        short: [] as { date: string; value: number }[],
+        long: [] as { date: string; value: number }[],
+        crossSignals: [] as { date: string; type: 'bullish' | 'bearish' }[],
+      };
+    }
+
+    const priceRows = headerPriceSeries.map((b) => ({ date: b.date, close: b.close }));
+    const shortSeries = computeEwmaSeries(priceRows, trendFastWindow);
+    const longSeries = computeEwmaSeries(priceRows, trendSlowWindow);
+
+    const crossSignals: { date: string; type: 'bullish' | 'bearish' }[] = [];
+    for (let i = 1; i < shortSeries.length && i < longSeries.length; i++) {
+      const prevGap = shortSeries[i - 1].value - longSeries[i - 1].value;
+      const currGap = shortSeries[i].value - longSeries[i].value;
+      if (prevGap <= 0 && currGap > 0) {
+        crossSignals.push({ date: shortSeries[i].date, type: 'bullish' });
+      } else if (prevGap >= 0 && currGap < 0) {
+        crossSignals.push({ date: shortSeries[i].date, type: 'bearish' });
+      }
+    }
+
+    return {
+      short: shortSeries,
+      long: longSeries,
+      crossSignals,
+    };
+  }, [headerPriceSeries, trendFastWindow, trendSlowWindow]);
 
   // Stable forecast overlay state - use the best available forecast for chart display
   const stableOverlayForecast = useMemo(() => {
@@ -688,8 +736,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     return t212RunsFiltered.map((run) => {
       const r = run.result;
       const stats = run.filteredStats;
-      const baseFirstDate = r.firstDate ?? (r.accountHistory.length > 0 ? r.accountHistory[0].date : "—");
-      const baseLastDate = r.lastDate ?? (r.accountHistory.length > 0 ? r.accountHistory[r.accountHistory.length - 1].date : "—");
+      const baseFirstDate = (r as any).firstDate ?? (r.accountHistory.length > 0 ? r.accountHistory[0].date : "—");
+      const baseLastDate = (r as any).lastDate ?? (r.accountHistory.length > 0 ? r.accountHistory[r.accountHistory.length - 1].date : "—");
       return {
         id: run.id,
         label: run.label,
@@ -4514,6 +4562,11 @@ export default function TimingPage({ params }: TimingPageProps) {
           ewmaLongSeries={trendLongEwma ?? undefined}
           ewmaShortWindow={trendShortWindow}
           ewmaLongWindow={trendLongWindow}
+          trendOverlays={trendOverlays}
+          trendEwmaShort={trendEwmaSeries.short}
+          trendEwmaLong={trendEwmaSeries.long}
+          trendEwmaCrossSignals={trendEwmaSeries.crossSignals}
+          onToggleEwmaTrend={toggleEwmaTrendOverlay}
           momentumScoreSeries={chartMomentum?.scoreSeries ?? undefined}
           momentumPeriod={chartMomentum?.period ?? trendMomentumPeriod}
           adxPeriod={chartAdx?.period ?? 14}
