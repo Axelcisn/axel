@@ -248,14 +248,17 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
   }, [activeForecast]);
 
-  const { priceSeries: headerPriceSeries, shortEwma: trendShortEwma, longEwma: trendLongEwma } = useEwmaCrossover(
+  const trendEwmaCrossover = useEwmaCrossover(
     params.ticker,
     trendShortWindow,
     trendLongWindow
   );
+  const headerPriceSeries = trendEwmaCrossover.priceSeries;
+  const trendShortEwma = trendEwmaCrossover.shortEwma;
+  const trendLongEwma = trendEwmaCrossover.longEwma;
 
-  const trendFastWindow = 14;
-  const trendSlowWindow = 50;
+  const trendFastWindow = trendShortWindow;
+  const trendSlowWindow = trendLongWindow;
 
   const trendEwmaSeries = useMemo(() => {
     if (!headerPriceSeries || headerPriceSeries.length < trendSlowWindow + 5) {
@@ -4912,6 +4915,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         }}
         momentumPeriodOverride={trendMomentumPeriod}
         onMomentumPeriodChange={setTrendMomentumPeriod}
+        ewmaCrossoverOverride={trendEwmaCrossover}
       />
 
       {/* Unified Forecast Bands Card - Full Width */}

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
-import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
+import useEwmaCrossover, { type UseEwmaCrossoverResult } from '@/lib/hooks/useEwmaCrossover';
 
 // Tab type for trend analysis
 type TrendTab = 'traditional' | 'ml' | 'ai';
@@ -60,6 +60,8 @@ interface TrendSectionProps {
   /** Optional controlled momentum period */
   momentumPeriodOverride?: number;
   onMomentumPeriodChange?: (period: number) => void;
+  /** Optional EWMA crossover data to avoid duplicate fetches */
+  ewmaCrossoverOverride?: Partial<UseEwmaCrossoverResult>;
 }
 
 /**
@@ -127,6 +129,7 @@ export default function TrendSection({
   onEwmaWindowChange,
   momentumPeriodOverride,
   onMomentumPeriodChange,
+  ewmaCrossoverOverride,
 }: TrendSectionProps) {
   const isDarkMode = useDarkMode();
 
@@ -213,17 +216,23 @@ export default function TrendSection({
     macdLongWindow: 26,
   });
 
-  const {
-    priceSeries,
-    shortEwma,
-    longEwma,
-    lastEvent,
-    latestShort,
-    latestLong,
-    gapStats,
-    isLoading: ewmaCrossoverLoading,
-    error: ewmaCrossoverError,
-  } = useEwmaCrossover(ticker, shortWindow, longWindow);
+  const shouldFetchEwmaCrossover = !ewmaCrossoverOverride;
+  const ewmaCrossover = useEwmaCrossover(
+    shouldFetchEwmaCrossover ? ticker : undefined,
+    shortWindow,
+    longWindow
+  );
+
+  const priceSeries = ewmaCrossoverOverride?.priceSeries ?? ewmaCrossover.priceSeries;
+  const shortEwma = ewmaCrossoverOverride?.shortEwma ?? ewmaCrossover.shortEwma;
+  const longEwma = ewmaCrossoverOverride?.longEwma ?? ewmaCrossover.longEwma;
+  const lastEvent = ewmaCrossoverOverride?.lastEvent ?? ewmaCrossover.lastEvent;
+  const latestShort = ewmaCrossoverOverride?.latestShort ?? ewmaCrossover.latestShort;
+  const latestLong = ewmaCrossoverOverride?.latestLong ?? ewmaCrossover.latestLong;
+  const gapStats = ewmaCrossoverOverride?.gapStats ?? ewmaCrossover.gapStats;
+  const ewmaCrossoverLoading =
+    ewmaCrossoverOverride?.isLoading ?? ewmaCrossover.isLoading;
+  const ewmaCrossoverError = ewmaCrossoverOverride?.error ?? ewmaCrossover.error;
 
   // Combined loading/error states
   const isLoadingAny = isLoading || indicatorsLoading || ewmaCrossoverLoading;

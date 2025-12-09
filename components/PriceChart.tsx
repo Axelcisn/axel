@@ -405,8 +405,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
   const showTrendEwma = trendOverlays?.ewma ?? false;
-  const shortSeries = trendEwmaShort ?? [];
-  const longSeries = trendEwmaLong ?? [];
+  const shortSeries = ewmaShortSeries ?? [];
+  const longSeries = ewmaLongSeries ?? [];
   const trendShortSeries = trendEwmaShort ?? [];
   const trendLongSeries = trendEwmaLong ?? [];
   const momentumSeries = momentumScoreSeries ?? [];
@@ -1279,8 +1279,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         low: p.low,
         close: p.close,
         volume: p.volume,
-        ewma_short: ewmaShortMap.get(chartDate) ?? null,
-        ewma_long: ewmaLongMap.get(chartDate) ?? null,
+        ewma_short: showTrendEwma ? ewmaShortMap.get(chartDate) ?? null : null,
+        ewma_long: showTrendEwma ? ewmaLongMap.get(chartDate) ?? null : null,
         trendEwmaShort: showTrendEwma && trendEwmaShortMap ? trendEwmaShortMap.get(chartDate) ?? null : null,
         trendEwmaLong: showTrendEwma && trendEwmaLongMap ? trendEwmaLongMap.get(chartDate) ?? null : null,
         momentumScore: momentumMap.get(chartDate),
@@ -3632,33 +3632,37 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               isAnimationActive={false}
             />
 
-            {/* Trend EWMA overlays (toggle-controlled) - always render but hide via strokeOpacity */}
-            <Line
-              yAxisId="price"
-              type="monotone"
-              dataKey="trendEwmaShort"
-              stroke={TREND_EWMA_SHORT_COLOR}
-              strokeWidth={chartHasTrendEwmaShort ? 1.6 : 0}
-              strokeOpacity={chartHasTrendEwmaShort ? 0.9 : 0}
-              dot={false}
-              connectNulls
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              isAnimationActive={false}
-            />
-            <Line
-              yAxisId="price"
-              type="monotone"
-              dataKey="trendEwmaLong"
-              stroke={TREND_EWMA_LONG_COLOR}
-              strokeWidth={chartHasTrendEwmaLong ? 1.6 : 0}
-              strokeOpacity={chartHasTrendEwmaLong ? 0.9 : 0}
-              dot={false}
-              connectNulls
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              isAnimationActive={false}
-            />
+            {/* Trend EWMA overlays (toggle-controlled) */}
+            {showTrendEwma && chartHasTrendEwmaShort && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="trendEwmaShort"
+                stroke={TREND_EWMA_SHORT_COLOR}
+                strokeWidth={1.6}
+                strokeOpacity={0.9}
+                dot={false}
+                connectNulls
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                isAnimationActive={false}
+              />
+            )}
+            {showTrendEwma && chartHasTrendEwmaLong && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="trendEwmaLong"
+                stroke={TREND_EWMA_LONG_COLOR}
+                strokeWidth={1.6}
+                strokeOpacity={0.9}
+                dot={false}
+                connectNulls
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                isAnimationActive={false}
+              />
+            )}
 
             {showTrendEwma && trendCrossPoints.length > 0 && (
               <Scatter
