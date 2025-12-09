@@ -120,7 +120,7 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
   if (variant === 'panel') {
     return (
       <div className="w-full">
-        <div className="px-6 md:px-16 pt-20 pb-16">
+        <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 pt-20 pb-16">
           <div className="max-w-5xl">
             <form onSubmit={handleSubmit} className="w-full">
               <div className="flex items-center gap-3">
@@ -167,12 +167,10 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
                         <span className="text-slate-400 truncate">
                           {item.name}
                         </span>
-                        {item.exchange ? (
+                        {item.exchange && (
                           <span className="ml-auto text-xs font-medium text-slate-500">
                             {item.exchange}
                           </span>
-                        ) : (
-                          <span className="ml-auto text-xs font-medium text-slate-600">—</span>
                         )}
                       </button>
                     ))
@@ -187,9 +185,6 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
                         </svg>
                         <span className="font-semibold">{symbol}</span>
-                        <span className="ml-auto text-xs font-medium text-slate-600">
-                          —
-                        </span>
                       </button>
                     ))}
               </div>

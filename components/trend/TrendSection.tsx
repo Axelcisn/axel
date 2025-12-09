@@ -362,7 +362,7 @@ export default function TrendSection({
   };
 
   return (
-    <div className="mb-8">
+    <div className="mb-4">
       {/* Header with Tabs */}
       <div className="mb-4">
         <div className="flex items-center justify-between">

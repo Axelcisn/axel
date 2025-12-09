@@ -190,7 +190,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [trendShortWindow, setTrendShortWindow] = useState(14);
   const [trendLongWindow, setTrendLongWindow] = useState(50);
   const [trendOverlays, setTrendOverlays] = useState<TrendOverlayState>({
-    ewma: false,
+    ewma: true,  // Always show Trend-EWMA
     momentum: false,
     adx: false,
   });
@@ -5019,7 +5019,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         </div>
       </div>
       {/* Price Chart Section */}
-      <div className="mb-8">
+      <div className="mb-4">
         {/* Debug: Log what we're passing to PriceChart */}
         {(() => {
           console.log("[Timing] PriceChart props", {
