@@ -100,17 +100,14 @@ export function StickyTickerBar({
         }`}
         style={{ pointerEvents: isVisible ? 'auto' : 'none' }}
       >
-        {/* Floating rounded bar */}
+        {/* Floating rounded bar - transparent with blur */}
         <div
-          className="h-[48px] rounded-full max-w-[720px] w-full px-6 flex items-center justify-between shadow-lg"
+          className="h-[48px] rounded-full max-w-[720px] w-full px-6 flex items-center justify-between"
           style={{
-            backgroundColor: isDarkMode ? 'rgba(29, 29, 31, 0.92)' : 'rgba(255, 255, 255, 0.92)',
+            backgroundColor: 'transparent',
             backdropFilter: 'saturate(180%) blur(20px)',
             WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.08)',
-            boxShadow: isDarkMode 
-              ? '0 4px 30px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05) inset' 
-              : '0 4px 30px rgba(0, 0, 0, 0.1)',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(0, 0, 0, 0.1)',
           }}
         >
           {/* Left: Ticker name - Apple typography */}
@@ -123,40 +120,42 @@ export function StickyTickerBar({
             </span>
           </div>
 
-          {/* Right: Price + Buttons */}
-          <div className="flex items-center gap-3">
-            {/* Price display */}
+          {/* Right: Price + Search icon */}
+          <div className="flex items-center gap-4">
+            {/* Price display - larger */}
             {currentPrice != null && (
-              <div className="flex items-center gap-2 mr-2">
+              <div className="flex items-center gap-3">
                 <span
-                  className="text-[12px] font-normal"
-                  style={{ color: isDarkMode ? '#86868b' : '#6e6e73' }}
+                  className="text-[15px] font-medium"
+                  style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
                 >
                   ${currentPrice.toFixed(2)}
                 </span>
                 {priceChange != null && priceChangePercent != null && (
-                  <span className={`text-[12px] font-normal ${changeColor}`}>
+                  <span className={`text-[14px] font-medium ${changeColor}`}>
                     {isPositive ? '+' : ''}{priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePercent.toFixed(2)}%)
                   </span>
                 )}
               </div>
             )}
 
-            {/* Search button - Apple style pill */}
+            {/* Search button - icon only with border */}
             <button
               type="button"
               onClick={() => setIsSearchOpen(true)}
-              className="flex items-center justify-center h-[30px] px-4 rounded-full text-[13px] font-medium transition-all duration-200"
+              className="flex items-center justify-center h-[32px] w-[32px] rounded-full transition-all duration-200"
               style={{
-                backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.06)',
+                backgroundColor: 'transparent',
                 color: isDarkMode ? '#f5f5f7' : '#1d1d1f',
-                border: 'none',
+                border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgba(0, 0, 0, 0.15)',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+                e.currentTarget.style.borderColor = isDarkMode ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.25)';
+                e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.03)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.06)';
+                e.currentTarget.style.borderColor = isDarkMode ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.15)';
+                e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
               <svg
@@ -165,12 +164,11 @@ export function StickyTickerBar({
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="2"
-                className="h-[14px] w-[14px] mr-1.5"
+                className="h-[16px] w-[16px]"
               >
                 <circle cx="11" cy="11" r="6" />
                 <path strokeLinecap="round" d="M21 21l-4.35-4.35" />
               </svg>
-              Search
             </button>
           </div>
         </div>
