@@ -7041,7 +7041,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               </span>
             </div>
             
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 text-[9px]">
               {t212Events.map((e, idx) => {
                 const isShort = e.side === 'short';
                 const openLabel = e.side === 'long' ? 'Open Long' : 'Open Short';
@@ -7050,7 +7050,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 if (e.type === 'open') {
                   // Open event - just show the open line
                   return (
-                    <div key={idx} className="flex justify-between text-[10px]">
+                    <div key={idx} className="flex justify-between gap-4">
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -7081,9 +7081,9 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 };
 
                 return (
-                  <div key={idx} className="flex flex-col text-[10px]">
+                  <div key={idx} className="flex flex-col space-y-0.5">
                     {/* Open row for this CLOSED position */}
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-4">
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -7099,7 +7099,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                     </div>
 
                     {/* Exit row */}
-                    <div className="flex justify-between">
+                    <div className="flex justify-between gap-4">
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -7115,8 +7115,8 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                     </div>
 
                     {/* P&L row - dollar amount */}
-                    <div className="flex justify-between ml-3">
-                      <span className="text-slate-400">P&amp;L</span>
+                    <div className="flex justify-between gap-4 ml-3">
+                      <span className={isDarkMode ? 'text-slate-400' : 'text-gray-400'}>P&amp;L</span>
                       <span
                         className={
                           'font-mono tabular-nums font-medium ' +
@@ -7129,11 +7129,10 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
 
                     {/* P&L percentage row - below the dollar amount */}
                     {e.margin != null && (
-                      <div className="flex justify-between ml-3">
-                        <span className="text-slate-500"></span>
+                      <div className="flex justify-end ml-3">
                         <span
                           className={
-                            'font-mono tabular-nums text-[9px] ' +
+                            'font-mono tabular-nums text-[8px] ' +
                             (isGain ? 'text-emerald-400/80' : 'text-rose-400/80')
                           }
                         >
