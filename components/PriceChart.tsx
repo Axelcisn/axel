@@ -318,8 +318,8 @@ interface TrendEwmaSignal {
   type: 'bullish' | 'bearish';
 }
 
-const TREND_EWMA_SHORT_COLOR = "#f97316";
-const TREND_EWMA_LONG_COLOR = "#3b82f6";
+const TREND_EWMA_SHORT_COLOR = "#fbbf24"; // Yellow (amber-400)
+const TREND_EWMA_LONG_COLOR = "#3b82f6";  // Blue
 
 interface PriceChartProps {
   symbol: string;
@@ -3576,6 +3576,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
+              {/* Trend EWMA short (yellow) glow filter */}
+              <filter id="trendEwmaShortGlow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feFlood floodColor="#fbbf24" floodOpacity="0.6" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* Trend EWMA long (blue) glow filter */}
+              <filter id="trendEwmaLongGlow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feFlood floodColor="#3b82f6" floodOpacity="0.6" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
               {/* EWMA band gradient fill - soft purple */}
               <linearGradient
                 id="ewmaBandFill"
@@ -3871,6 +3891,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 isAnimationActive={false}
+                filter="url(#trendEwmaShortGlow)"
               />
             )}
             {showTrendEwma && chartHasTrendEwmaLong && (
@@ -3887,6 +3908,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 isAnimationActive={false}
+                filter="url(#trendEwmaLongGlow)"
               />
             )}
 
