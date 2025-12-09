@@ -5177,46 +5177,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 )}
               </div>
             </div>
-
-            {onToggleEwmaTrend && (
-              <>
-                <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-                <div className="flex flex-col gap-0.5">
-                  <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Trend</span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className={`
-                        rounded-full px-3 py-1 text-xs transition-colors
-                        ${trendOverlays?.ewma
-                          ? 'bg-sky-500 text-white'
-                          : isDarkMode
-                            ? 'bg-slate-800 text-slate-200'
-                            : 'bg-slate-200 text-slate-700'
-                        }
-                      `}
-                      onClick={onToggleEwmaTrend}
-                    >
-                      EWMA
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full px-3 py-1 text-xs bg-slate-900 text-slate-500 cursor-default"
-                      disabled
-                    >
-                      Momentum
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-full px-3 py-1 text-xs bg-slate-900 text-slate-500 cursor-default"
-                      disabled
-                    >
-                      ADX
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
           </div>
         )}
         
