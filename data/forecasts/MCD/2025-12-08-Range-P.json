@@ -1,14 +1,14 @@
 {
-  "symbol": "NFLX",
+  "symbol": "MCD",
   "method": "Range-P",
   "date_t": "2025-12-08",
   "horizonTrading": 1,
   "h_eff_days": 1,
   "verifyDate": "2025-12-09",
   "domain": "log",
-  "created_at": "2025-12-09T14:43:21.601Z",
+  "created_at": "2025-12-09T15:54:58.737Z",
   "locked": true,
-  "y_hat": 96.79000091552734,
+  "y_hat": 309.7900085449219,
   "target": {
     "h": 1,
     "coverage": 0.95,
@@ -18,14 +18,14 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.020716674057093917,
+    "sigma_hat": 0.009719991888933242,
     "mu_star_used": 0,
     "window_start": "2023-12-05",
     "window_end": "2025-12-08",
     "n": 1255,
-    "S_t": 96.79000091552734,
-    "sigma_forecast": 0.020716674057093917,
-    "sigma2_forecast": 0.0004291805839878682,
+    "S_t": 309.7900085449219,
+    "sigma_forecast": 0.009719991888933242,
+    "sigma2_forecast": 0.00009447824232092801,
     "critical_value": 1.96,
     "window_span": {
       "start": "2023-12-05",
@@ -36,14 +36,14 @@
       "window": 504,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 11 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 8.39, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 10 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 7.21, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 92.9385954837824,
-    "U_h": 100.80100983301965,
-    "band_width_bp": 845.9794672289012
+    "L_h": 303.94400551408035,
+    "U_h": 315.7484525215185,
+    "band_width_bp": 388.3757137263677
   },
   "provenance": {
     "rng_seed": null,
@@ -62,8 +62,8 @@
   },
   "diagnostics": {
     "method_source": "Range-P",
-    "m_log": 4.5725436926199015,
-    "s_scale": 0.020716674057093917,
+    "m_log": 5.735894676155136,
+    "s_scale": 0.009719991888933242,
     "critical_type": "normal"
   },
   "critical": {

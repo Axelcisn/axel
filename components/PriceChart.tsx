@@ -301,7 +301,12 @@ export interface SimulationRunSummary {
 }
 
 type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
-type SimBase = "biased" | "max";
+type BaseMode = "biased" | "max";
+
+interface SimulationMode {
+  baseMode: BaseMode;
+  withTrend: boolean;
+}
 export type TrendOverlayState = {
   ewma: boolean;
   momentum: boolean;
@@ -352,14 +357,10 @@ interface PriceChartProps {
   t212AccountHistory?: Trading212AccountSnapshot[] | null;  // Equity curve from Trading212 simulation
   activeT212RunId?: T212RunId | null;  // Currently active T212 run (for Chart toggle)
   onToggleT212Run?: (runId: T212RunId) => void;  // Toggle T212 run visibility
-  isCfdEnabled?: boolean;  // Whether CFD simulation is enabled
-  onToggleCfd?: () => void;  // Toggle CFD simulation on/off
-  simBase?: SimBase;
-  onSelectSimBase?: (base: SimBase) => void;
+  simulationMode: SimulationMode;
+  onChangeSimulationMode?: (mode: SimulationMode) => void;
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
-  isTrendTiltEnabled?: boolean;
-  onToggleTrendTilt?: () => void;
   onDateRangeChange?: (startDate: string | null, endDate: string | null) => void;  // Callback when date range changes
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
 }
@@ -406,14 +407,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   t212AccountHistory,
   activeT212RunId,
   onToggleT212Run,
-  isCfdEnabled,
-  onToggleCfd,
-  simBase = "biased",
-  onSelectSimBase,
+  simulationMode,
+  onChangeSimulationMode,
   trendWeight = null,
   trendWeightUpdatedAt = null,
-  isTrendTiltEnabled = false,
-  onToggleTrendTilt,
   onDateRangeChange,
   simulationRuns,
 }) => {
@@ -3319,7 +3316,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Determine line color from current range performance
   const latestRangePerf = perfByRange[selectedRange];
   const isPositive = latestRangePerf != null ? latestRangePerf >= 0 : undefined;
-  const lineColor = isPositive === false ? "#F97373" : "#22D3EE"; // Glowing cyan-blue
+  const lineColor = isPositive === false ? "#ef4444" : "#22c55e"; // Vibrant red or green with glow
 
   const chartBg = "w-full";
   const containerClasses = (className ?? "") + " w-full";
@@ -3654,10 +3651,30 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
-              {/* Glowing blue filter for price line */}
+              {/* Glowing red filter for price line (negative performance) */}
+              <filter id="priceLineGlowRed" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feFlood floodColor="#ef4444" floodOpacity="0.7" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* Glowing green filter for price line (positive performance) */}
+              <filter id="priceLineGlowGreen" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feFlood floodColor="#22c55e" floodOpacity="0.7" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* Legacy glow filter - kept for backward compatibility */}
               <filter id="priceLineGlow" x="-20%" y="-20%" width="140%" height="140%">
                 <feGaussianBlur stdDeviation="2.5" result="blur"/>
-                <feFlood floodColor="#22D3EE" floodOpacity="0.5" result="color"/>
+                <feFlood floodColor="#22c55e" floodOpacity="0.5" result="color"/>
                 <feComposite in="color" in2="blur" operator="in" result="shadow"/>
                 <feMerge>
                   <feMergeNode in="shadow"/>
@@ -3872,7 +3889,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               connectNulls={true}
               strokeLinecap="round"
               strokeLinejoin="round"
-              filter="url(#priceLineGlow)"
+              filter={isPositive === false ? "url(#priceLineGlowRed)" : "url(#priceLineGlowGreen)"}
               isAnimationActive={false}
             />
 
@@ -5254,36 +5271,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       <div className="mt-4 mb-2 flex flex-col gap-1">
         <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Simulation</span>
         <div className="flex items-center gap-2">
-          {/* CFD Toggle Button */}
-          <button
-            onClick={onToggleCfd}
-            className={`
-              px-3 py-1 text-xs rounded-full transition-colors font-medium
-              ${isCfdEnabled
-                ? 'bg-blue-500 text-white'
-                : isDarkMode 
-                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }
-            `}
-          >
-            {isCfdEnabled ? 'CFD On' : 'CFD Off'}
-          </button>
-
-          {/* Sim base buttons */}
+          {/* Base mode pills */}
           <div className="flex items-center gap-2">
             <button
               type="button"
               className={`
                 px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${simBase === 'biased'
+                ${simulationMode.baseMode === 'biased'
                   ? 'bg-sky-500 text-white'
                   : isDarkMode 
                     ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }
               `}
-              onClick={() => onSelectSimBase && onSelectSimBase('biased')}
+              onClick={() => onChangeSimulationMode?.({ baseMode: 'biased', withTrend: simulationMode.withTrend })}
             >
               Biased
             </button>
@@ -5291,39 +5292,44 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               type="button"
               className={`
                 px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${simBase === 'max'
+                ${simulationMode.baseMode === 'max'
                   ? 'bg-sky-500 text-white'
                   : isDarkMode 
                     ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }
               `}
-              onClick={() => onSelectSimBase && onSelectSimBase('max')}
-          >
-            Biased (Max)
-          </button>
-        </div>
+              onClick={() => onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
+            >
+              Biased (Max)
+            </button>
+          </div>
 
-          {/* Trend tilt toggle */}
+          {/* Trend toggle */}
           <button
             type="button"
-            onClick={() => onToggleTrendTilt && onToggleTrendTilt()}
+            onClick={() =>
+              onChangeSimulationMode?.({
+                baseMode: simulationMode.baseMode,
+                withTrend: !simulationMode.withTrend,
+              })
+            }
             className={`
               px-3 py-1 text-xs rounded-full transition-colors font-medium
-              ${isTrendTiltEnabled
+              ${simulationMode.withTrend
                 ? 'bg-sky-500 text-white'
                 : isDarkMode
                   ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                   : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
               }
             `}
-            title="Toggle Trend-tilted EWMA simulation on/off. (UI hook only for now.)"
+            title="Toggle Trend-tilted EWMA simulation on/off."
           >
-            Trend tilt
+            Trend
           </button>
 
           {/* Trend Weight chip */}
-          {trendWeight != null && (
+          {typeof trendWeight === 'number' && Number.isFinite(trendWeight) && (
             <span
               className={`
                 ml-1 rounded-full px-3 py-1 text-[10px] font-medium
@@ -7286,7 +7292,7 @@ function VolumeTooltip({ active, payload, label }: any) {
   return null;
 }
 
-// Custom animated dot for price line (cyan glow)
+// Custom animated dot for price line (green for positive, red for negative)
 const AnimatedPriceDot = (props: any) => {
   const { cx, cy, payload } = props;
   
@@ -7294,16 +7300,21 @@ const AnimatedPriceDot = (props: any) => {
   if (!payload || payload.isFuture || payload.value == null) return null;
   if (cx === undefined || cy === undefined) return null;
   
+  // Determine color based on performance - if stroke is passed, use it, otherwise default to green
+  const dotColor = props.stroke || "#22c55e";
+  const isRed = dotColor.toLowerCase().includes("ef4444") || dotColor.toLowerCase().includes("f44");
+  const glowColor = isRed ? "239, 68, 68" : "34, 197, 94"; // RGB values for glow
+  
   return (
     <circle
       cx={cx}
       cy={cy}
       r={4}
-      fill="#22D3EE"
+      fill={dotColor}
       stroke="#ffffff"
       strokeWidth={1.5}
       style={{
-        filter: 'drop-shadow(0 0 3px rgba(34, 211, 238, 0.5))',
+        filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6))`,
         transition: 'all 0.12s ease-out',
       }}
     />

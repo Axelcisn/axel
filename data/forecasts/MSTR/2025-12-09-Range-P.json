@@ -1,14 +1,14 @@
 {
-  "symbol": "NFLX",
+  "symbol": "MSTR",
   "method": "Range-P",
-  "date_t": "2025-12-08",
+  "date_t": "2025-12-09",
   "horizonTrading": 1,
   "h_eff_days": 1,
-  "verifyDate": "2025-12-09",
+  "verifyDate": "2025-12-10",
   "domain": "log",
-  "created_at": "2025-12-09T14:43:21.601Z",
+  "created_at": "2025-12-09T16:36:53.316Z",
   "locked": true,
-  "y_hat": 96.79000091552734,
+  "y_hat": 197.1096954345703,
   "target": {
     "h": 1,
     "coverage": 0.95,
@@ -18,32 +18,32 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.020716674057093917,
+    "sigma_hat": 0.041927264192495095,
     "mu_star_used": 0,
-    "window_start": "2023-12-05",
-    "window_end": "2025-12-08",
-    "n": 1255,
-    "S_t": 96.79000091552734,
-    "sigma_forecast": 0.020716674057093917,
-    "sigma2_forecast": 0.0004291805839878682,
+    "window_start": "2023-12-06",
+    "window_end": "2025-12-09",
+    "n": 1256,
+    "S_t": 197.1096954345703,
+    "sigma_forecast": 0.041927264192495095,
+    "sigma2_forecast": 0.0017578954826672811,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2023-12-05",
-      "end": "2025-12-08"
+      "start": "2023-12-06",
+      "end": "2025-12-09"
     },
     "volatility_diagnostics": {
       "estimator": "P",
       "window": 504,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 11 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 8.39, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 8 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 6.17, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 92.9385954837824,
-    "U_h": 100.80100983301965,
-    "band_width_bp": 845.9794672289012
+    "L_h": 181.55941682612348,
+    "U_h": 213.9918309581112,
+    "band_width_bp": 1786.3250884446113
   },
   "provenance": {
     "rng_seed": null,
@@ -62,8 +62,8 @@
   },
   "diagnostics": {
     "method_source": "Range-P",
-    "m_log": 4.5725436926199015,
-    "s_scale": 0.020716674057093917,
+    "m_log": 5.2837604033830115,
+    "s_scale": 0.041927264192495095,
     "critical_type": "normal"
   },
   "critical": {
@@ -71,8 +71,8 @@
     "value": 1.96
   },
   "window_period": {
-    "start": "2023-12-05",
-    "end": "2025-12-08",
+    "start": "2023-12-06",
+    "end": "2025-12-09",
     "n_obs": 504
   },
   "is_active": false
