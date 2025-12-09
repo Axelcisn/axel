@@ -88,6 +88,7 @@ type GateStatus = {
 interface VolForecastResult {
   ok: boolean;
   forecast: any | null;   // ForecastRecord-like object
+  reason?: string;
 }
 
 interface BaseForecastsResult {
@@ -345,6 +346,9 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [lambdaDrift, setLambdaDrift] = useState(0.25);
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
   const [forecastError, setForecastError] = useState<string | null>(null);
+  const windowReductionLogRef = useRef<{ required: number; effective: number; canonical: number } | null>(null);
+  const lastAutoForecastKeyRef = useRef<string | null>(null);
+  const [autoForecastError, setAutoForecastError] = useState<string | null>(null);
 
   // Volatility Model state
   const [volModel, setVolModel] = useState<'GBM' | 'GARCH' | 'HAR-RV' | 'Range'>('GBM');
@@ -976,8 +980,14 @@ export default function TimingPage({ params }: TimingPageProps) {
     return isInitialized && hasCoverage && hasHorizon && hasTZ && canonicalCount > 0;
   }, [canonicalCount, isInitialized, resolvedTargetSpec]);
 
-  console.log("SERVER_SPEC", serverTargetSpec);
-  console.log("[RENDER] Component rendering, serverTargetSpec:", serverTargetSpec);
+  const prevServerTargetSpecRef = useRef<any | null>(null);
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (prevServerTargetSpecRef.current !== serverTargetSpec) {
+      console.log("SERVER_SPEC changed:", serverTargetSpec);
+      prevServerTargetSpecRef.current = serverTargetSpec;
+    }
+  }, [serverTargetSpec]);
 
   // Memoize forecast overlay props to prevent unnecessary re-renders
   const forecastOverlayProps = useMemo(() => ({
@@ -1158,10 +1168,17 @@ export default function TimingPage({ params }: TimingPageProps) {
   const loadCompanyInfo = async () => {
     try {
       const response = await fetch(`/api/companies?ticker=${params.ticker}`);
+      if (response.status === 404) {
+        setCompanyTicker(params.ticker);
+        return;
+      }
       if (response.ok) {
         const company = await response.json();
         setCompanyName(company.name || '');
         // Keep ticker in sync with URL param
+        setCompanyTicker(params.ticker);
+      } else {
+        console.error('Failed to load company info:', response.status, response.statusText);
         setCompanyTicker(params.ticker);
       }
     } catch (error) {
@@ -1205,6 +1222,10 @@ export default function TimingPage({ params }: TimingPageProps) {
   const loadLatestForecast = useCallback(async () => {
     try {
       const response = await fetch(`/api/forecast/gbm/${params.ticker}`);
+      if (response.status === 404) {
+        setCurrentForecast(null);
+        return;
+      }
       if (response.ok) {
         const forecasts = await response.json();
         // Get the most recent forecast (array is sorted by date_t descending)
@@ -1212,9 +1233,11 @@ export default function TimingPage({ params }: TimingPageProps) {
           setCurrentForecast(forecasts[0]);
           // Also set as active forecast if no active forecast is currently set
           setActiveForecast((prevActive: any) => prevActive || forecasts[0]);
+        } else {
+          setCurrentForecast(null);
         }
-      } else if (response.status !== 404) {
-        console.error('Failed to load forecasts:', response.statusText);
+      } else {
+        console.error('Failed to load forecasts:', response.status, response.statusText);
       }
     } catch (error) {
       console.error('Failed to load forecasts:', error);
@@ -1226,6 +1249,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     try {
       // Try to load the latest forecast from all methods
       const response = await fetch(`/api/forecast/gbm/${params.ticker}`);
+      if (response.status === 404) {
+        return null;
+      }
       if (response.ok) {
         const forecasts = await response.json();
         
@@ -1243,6 +1269,8 @@ export default function TimingPage({ params }: TimingPageProps) {
           setActiveForecast(forecasts[0]);
           return forecasts[0];
         }
+      } else {
+        console.error('Failed to load active forecast:', response.status, response.statusText);
       }
       
       // If no API forecasts found, check if we have a GBM forecast in state
@@ -2423,8 +2451,73 @@ export default function TimingPage({ params }: TimingPageProps) {
       ? 'HAR-RV' 
       : `Range-${rangeEstimator}`;
     const windowN = volModel === 'GBM' ? gbmWindow : volWindow;
+    const requiredWindowN = windowN;
+    const maxFeasibleWindowN = currentCanonicalCount > 0 ? currentCanonicalCount - 1 : 0;
+    if (maxFeasibleWindowN <= 0) {
+      const message = 'Insufficient history: no observations available.';
+      setVolatilityError(message);
+      return { ok: false, forecast: null, reason: 'NO_HISTORY' };
+    }
+    const effectiveWindowN = Math.min(requiredWindowN, maxFeasibleWindowN);
+    if (
+      process.env.NODE_ENV === 'development' &&
+      effectiveWindowN < requiredWindowN
+    ) {
+      const prev = windowReductionLogRef.current;
+      if (
+        !prev ||
+        prev.required !== requiredWindowN ||
+        prev.effective !== effectiveWindowN ||
+        prev.canonical !== currentCanonicalCount
+      ) {
+        console.info(
+          '[VOL] Reducing windowN from',
+          requiredWindowN,
+          'to',
+          effectiveWindowN,
+          'due to limited history (canonicalCount =',
+          currentCanonicalCount,
+          ')'
+        );
+        windowReductionLogRef.current = {
+          required: requiredWindowN,
+          effective: effectiveWindowN,
+          canonical: currentCanonicalCount,
+        };
+      }
+    }
 
-    const hasData = currentCanonicalCount >= windowN;
+    if (process.env.NODE_ENV === "development") {
+      console.info("[VOL][client] window-check", {
+        ticker: params.ticker,
+        volModel,
+        gbmWindow,
+        volWindow,
+        canonicalCount: currentCanonicalCount,
+        requiredWindowN,
+        effectiveWindowN,
+        model,
+      });
+    }
+
+    if (volModel === 'GARCH') {
+      const minRequiredGarchReturns = Math.max(effectiveWindowN - 1, 599); // window >= 600 ⇒ at least 599 returns
+      const availableReturnsUpperBound = Math.max(currentCanonicalCount - 1, 0);
+      if (availableReturnsUpperBound < minRequiredGarchReturns || effectiveWindowN < 600) {
+        if (process.env.NODE_ENV === 'development') {
+          console.info("[VOL][client] garch-precheck insufficient", {
+            ticker: params.ticker,
+            canonicalCount: currentCanonicalCount,
+            canonicalReturns: availableReturnsUpperBound,
+            minRequiredGarchReturns,
+          });
+        }
+        setVolatilityError(`Insufficient history for GARCH: need at least ${minRequiredGarchReturns + 1} observations, have ${currentCanonicalCount}.`);
+        return { ok: false, forecast: null, reason: "INSUFFICIENT_GARCH_DATA" };
+      }
+    }
+
+    const hasData = currentCanonicalCount >= effectiveWindowN + 1;
     const hasTZ   = !!persistedTZ;
     const wantsHar = volModel === "HAR-RV";
     const harAvailable = !wantsHar || currentRvAvailable;  // only true if RV exists
@@ -2441,8 +2534,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
     if (!hasData) { 
       console.log("[VOL][handler] early-return", { reason: "insufficient-data" });
-      setVolatilityError(`Insufficient history: need ${windowN} days, have ${currentCanonicalCount}.`);
-      return { ok: false, forecast: null };
+      const neededObs = requiredWindowN + 1;
+      setVolatilityError(`Insufficient history: need ${neededObs} observations, have ${currentCanonicalCount}.`);
+      return { ok: false, forecast: null, reason: 'INSUFFICIENT_DATA' };
     }
     if (!covOK) { 
       console.log("[VOL][handler] early-return", { reason: "coverage-invalid" });
@@ -2460,10 +2554,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       return { ok: false, forecast: null };
     }
 
-    if (!canonicalCount || canonicalCount <= 0) {
+    if (!currentCanonicalCount || currentCanonicalCount <= 0) {
       console.log("[VOL][handler] early-return", { reason: "no-canonical-data" });
       setVolatilityError('No canonical data available. Please upload price history before generating forecasts.');
-      return { ok: false, forecast: null };
+      return { ok: false, forecast: null, reason: 'NO_HISTORY' };
     }
 
     setIsGeneratingVolatility(true);
@@ -2504,25 +2598,25 @@ export default function TimingPage({ params }: TimingPageProps) {
       
       if (volModel === 'GBM') {
         modelParams.gbm = {
-          windowN: gbmWindow,
+          windowN: effectiveWindowN,
           lambdaDrift: gbmLambda,
         };
       } else if (volModel === 'GARCH') {
         modelParams.garch = {
-          window: volWindow,
+          window: effectiveWindowN,
           variance_targeting: garchVarianceTargeting,
           dist: resolvedDist,
           ...(resolvedDist === 'student-t' ? { df: garchDf } : {})
         };
       } else if (volModel === 'HAR-RV') {
         modelParams.har = {
-          window: volWindow,
+          window: effectiveWindowN,
           use_intraday_rv: harUseIntradayRv
         };
       } else { // Range
         modelParams.range = {
           estimator: resolvedEstimator,
-          window: volWindow,
+          window: effectiveWindowN,
           ewma_lambda: rangeEwmaLambda
         };
       }
@@ -2542,7 +2636,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log("[VOL][handler] POST -> /api/volatility", {
         url: `/api/volatility/${encodeURIComponent(tickerParam)}`,
         model: selectedModel,
-        windowN: selectedModel === 'GBM-CC' ? gbmWindow : volWindow,
+        windowN: effectiveWindowN,
         dist: resolvedDist,
         requestBody: {
           model: selectedModel,
@@ -2557,7 +2651,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         model: selectedModel,
         horizon: h,
         coverage: persistedCoverage,
-        windowForModel: selectedModel === 'GBM-CC' ? gbmWindow : volWindow,
+        windowForModel: effectiveWindowN,
         gbmWindow,
         volWindow
       });
@@ -2582,6 +2676,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       if (!resp.ok) {
         // Handle error response with content-type detection
         const contentType = resp.headers.get('content-type') || '';
+        let reason: string | undefined;
         
         if (contentType.includes('application/json')) {
           const errorData = await resp.json();
@@ -2590,13 +2685,23 @@ export default function TimingPage({ params }: TimingPageProps) {
           console.error('[VOL] Full error details:', errorData);
           const detailedError = errorData.details ? `${errorMessage} - ${errorData.details}` : errorMessage;
           setVolatilityError(detailedError);
+          const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
+          if (
+            resp.status === 422 &&
+            (errorData.code === 'INSUFFICIENT_GARCH_DATA' || normalizedMessage.includes('insufficient returns for garch estimation'))
+          ) {
+            reason = 'INSUFFICIENT_GARCH_DATA';
+          } else if (typeof errorMessage === 'string' && normalizedMessage.includes('insufficient data')) {
+            reason = 'INSUFFICIENT_DATA';
+          }
         } else {
           // Likely HTML error page from server crash
           const htmlText = await resp.text();
           console.error('[VOL] Server error body:', htmlText);
           setVolatilityError(`Server error ${resp.status}. Check console for details.`);
+          reason = 'SERVER_ERROR';
         }
-        return { ok: false, forecast: null };
+        return { ok: false, forecast: null, reason };
       }
 
       const bodyText = await resp.text();
@@ -2632,7 +2737,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       return { ok: true, forecast: data };
     } catch (err) {
       setVolatilityError(err instanceof Error ? err.message : 'Unknown error');
-      return { ok: false, forecast: null };
+      return { ok: false, forecast: null, reason: 'ERROR' };
     } finally {
       setIsGeneratingVolatility(false);
     }
@@ -3336,6 +3441,32 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log('[AutoForecast] Skipping - pipeline not ready');
       return;
     }
+
+    const availableObs = canonicalCount;
+    const requiredWindowForAuto = volModel === 'GBM' ? gbmWindow : volWindow;
+    const effectiveAutoWindowN = availableObs > 0 ? Math.min(requiredWindowForAuto, availableObs - 1) : 0;
+    const autoKey = JSON.stringify({
+      ticker: params.ticker,
+      volModel,
+      garchEstimator,
+      rangeEstimator,
+      h,
+      coverage,
+      windowN: effectiveAutoWindowN,
+    });
+
+    if (effectiveAutoWindowN <= 0) {
+      lastAutoForecastKeyRef.current = autoKey;
+      setAutoForecastError('INSUFFICIENT_DATA');
+      return;
+    }
+
+    const shouldSkipForKnownInsufficient =
+      autoForecastError === 'INSUFFICIENT_DATA' || autoForecastError === 'INSUFFICIENT_GARCH_DATA';
+
+    if (lastAutoForecastKeyRef.current === autoKey && shouldSkipForKnownInsufficient) {
+      return;
+    }
     
     // Debounce to avoid rapid-fire API calls during parameter changes
     const timeoutId = setTimeout(async () => {
@@ -3351,12 +3482,15 @@ export default function TimingPage({ params }: TimingPageProps) {
       });
       
       try {
+        lastAutoForecastKeyRef.current = autoKey;
         // Only generate the volatility forecast (step 1 of pipeline)
         // This updates the Inspector WITHOUT running conformal calibration
         const result = await generateVolatilityForecast();
         
         if (result.ok && result.forecast) {
           console.log('[AutoForecast] Volatility forecast generated successfully');
+          setAutoForecastError(null);
+          lastAutoForecastKeyRef.current = autoKey;
           // Set as active forecast for chart overlay and Inspector display
           setActiveForecast(result.forecast);
           setBaseForecast(result.forecast);
@@ -3364,9 +3498,17 @@ export default function TimingPage({ params }: TimingPageProps) {
           setConformalStale(true);
         } else {
           console.log('[AutoForecast] Volatility forecast failed:', result);
+          if (result.reason === 'INSUFFICIENT_DATA' || result.reason === 'NO_HISTORY') {
+            setAutoForecastError('INSUFFICIENT_DATA');
+          } else if (result.reason === 'INSUFFICIENT_GARCH_DATA') {
+            setAutoForecastError('INSUFFICIENT_GARCH_DATA');
+          } else {
+            setAutoForecastError(result.reason ?? null);
+          }
         }
       } catch (error) {
         console.error('[AutoForecast] Error generating volatility forecast:', error);
+        setAutoForecastError('ERROR');
       }
     }, 300); // 300ms debounce
 
@@ -3381,10 +3523,14 @@ export default function TimingPage({ params }: TimingPageProps) {
     volWindow,
     garchDf,
     rangeEwmaLambda,
+    gbmWindow,
+    canonicalCount,
+    params.ticker,
     // Guard dependencies
     pipelineReady,
     isInitialized,
-    generateVolatilityForecast
+    generateVolatilityForecast,
+    autoForecastError
   ]);
 
   // Auto-generation effect removed - pipeline now runs only on explicit user actions
@@ -4337,10 +4483,15 @@ export default function TimingPage({ params }: TimingPageProps) {
     const loadCompanyInfo = async () => {
       try {
         const response = await fetch(`/api/companies?ticker=${params.ticker}`);
+        if (response.status === 404) {
+          return;
+        }
         if (response.ok) {
           const company: CompanyInfo = await response.json();
           setCompanyName(company.name);
           setCompanyExchange(company.exchange || 'NASDAQ');
+        } else {
+          console.error('Failed to load company info:', response.status, response.statusText);
         }
       } catch (error) {
         console.error('Failed to load company info:', error);

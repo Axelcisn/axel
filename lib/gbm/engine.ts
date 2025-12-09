@@ -46,6 +46,12 @@ export function computeGbmEstimates(input: GbmInputs): GbmEstimates {
   if (dates.length !== adjClose.length) {
     throw new Error("Dates and prices must have same length");
   }
+  if (process.env.NODE_ENV === "development") {
+    console.info("[GBM][engine] input", {
+      windowN,
+      adjCloseLen: adjClose.length,
+    });
+  }
   if (adjClose.length < windowN + 1) {
     throw new Error(`Insufficient data: need ${windowN + 1} observations for ${windowN} returns`);
   }

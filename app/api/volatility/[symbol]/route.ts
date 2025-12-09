@@ -34,12 +34,22 @@ async function computeGbmForecastPure(params: {
   h: number;
   coverage: number;
 }): Promise<ForecastRecord> {
-  const { symbol, date_t, window, lambda_drift, canonicalData, h, coverage } = params;
+  const { symbol, date_t, window: windowN, lambda_drift, canonicalData, h, coverage } = params;
 
   // Filter valid rows and sort by date
   const validRows = canonicalData
     .filter(row => row.adj_close !== null && row.adj_close > 0)
     .sort((a, b) => a.date.localeCompare(b.date));
+
+  const requiredPrices = windowN + 1;
+
+  if (process.env.NODE_ENV === "development") {
+    console.info("[VOL][GBM] prep", {
+      symbol,
+      windowN,
+      validRows: validRows.length,
+    });
+  }
 
   if (validRows.length === 0) {
     throw new Error('No valid price data found');
@@ -59,13 +69,25 @@ async function computeGbmForecastPure(params: {
 
   // Get window slice
   const endIndex = dateIndex;
-  const startIndex = Math.max(0, endIndex - window + 1);
+  const startIndex = Math.max(0, endIndex - requiredPrices + 1);
   
-  if (endIndex - startIndex + 1 < window) {
-    throw new Error(`Insufficient history (N<window): have ${endIndex - startIndex + 1}, need ${window}`);
+  if (endIndex - startIndex + 1 < requiredPrices) {
+    throw new Error(`Insufficient history (N<window): have ${endIndex - startIndex + 1}, need ${requiredPrices}`);
   }
 
   const windowRows = validRows.slice(startIndex, endIndex + 1);
+
+  if (process.env.NODE_ENV === "development") {
+    console.info("[VOL][GBM] slice", {
+      symbol,
+      windowN,
+      requiredPrices,
+      startIndex,
+      endIndex,
+      windowRows: windowRows.length,
+    });
+  }
+
   const dates = windowRows.map(r => r.date);
   const adjClose = windowRows.map(r => r.adj_close!);
 
@@ -73,7 +95,7 @@ async function computeGbmForecastPure(params: {
   const gbmInput: GbmInputs = {
     dates,
     adjClose,
-    windowN: window as 252 | 504 | 756,
+    windowN: windowN as 252 | 504 | 756,
     lambdaDrift: lambda_drift,
     coverage
   };
@@ -112,7 +134,7 @@ async function computeGbmForecastPure(params: {
     method: "GBM-CC",
     y_hat,
     params: {
-      window,
+      window: windowN,
       lambda_drift,
       coverage,
       h
@@ -135,7 +157,7 @@ async function computeGbmForecastPure(params: {
     provenance: {
       rng_seed: null,
       params_snapshot: {
-        window,
+        window: windowN,
         lambda_drift,
         coverage,
         h,
@@ -323,15 +345,53 @@ export async function POST(
               { status: 400 }
             );
           }
-          
-          sigmaForecast = await fitAndForecastGarch({
-            symbol,
-            date_t,
-            window: volParams.garch.window,
-            dist: volParams.garch.dist,
-            variance_targeting: volParams.garch.variance_targeting,
-            df: volParams.garch.df
-          });
+          try {
+            sigmaForecast = await fitAndForecastGarch({
+              symbol,
+              date_t,
+              window: volParams.garch.window,
+              dist: volParams.garch.dist,
+              variance_targeting: volParams.garch.variance_targeting,
+              df: volParams.garch.df
+            });
+
+            if (process.env.NODE_ENV === 'development') {
+              const filtered = date_t ? canonicalData.filter(row => row.date <= date_t) : canonicalData;
+              const windowData = filtered.slice(-volParams.garch.window);
+              const returnsLen = windowData
+                .map((row: any) => row.r)
+                .filter((r: number | null | undefined): r is number => r !== null && r !== undefined)
+                .length;
+              const minRequired = volParams.garch.window - 1;
+              console.info('[VOL][GARCH] forecast ok', { symbol, returnsLen, minRequired });
+            }
+          } catch (error: any) {
+            const message = error?.message || '';
+            if (message.includes('Insufficient returns for GARCH estimation')) {
+              const filtered = date_t ? canonicalData.filter(row => row.date <= date_t) : canonicalData;
+              const windowData = filtered.slice(-volParams.garch.window);
+              const returnsLen = windowData
+                .map((row: any) => row.r)
+                .filter((r: number | null | undefined): r is number => r !== null && r !== undefined)
+                .length;
+              const minRequired = volParams.garch.window - 1;
+
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][GARCH] insufficient data', { symbol, returnsLen, minRequired });
+              }
+
+              return NextResponse.json(
+                {
+                  error: 'Insufficient returns for GARCH estimation',
+                  code: 'INSUFFICIENT_GARCH_DATA'
+                },
+                { status: 422 }
+              );
+            }
+
+            // Unexpected, let outer handler treat as internal error
+            throw error;
+          }
           break;
 
         case 'HAR-RV':

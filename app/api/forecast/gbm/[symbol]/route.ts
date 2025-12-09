@@ -119,6 +119,7 @@ export async function POST(
       lambdaDrift,
       coverage
     };
+    // NOTE: windowN represents number of returns; guard above ensures we have windowN + 1 prices.
     
     // Compute GBM estimates and prediction intervals using TRADING DAYS ONLY
     const estimates = computeGbmEstimates(gbmInputs);

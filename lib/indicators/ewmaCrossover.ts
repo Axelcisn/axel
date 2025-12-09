@@ -38,14 +38,20 @@ export function computeEwmaSeries(
 ): EwmaPoint[] {
   if (!rows.length || window <= 0) return [];
 
-  const values = rows.map((r) => r.close);
+  // Defensive: ensure chronological order and drop duplicate dates so EWMA is stable
+  const sorted = rows
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter((row, idx, arr) => idx === 0 || row.date !== arr[idx - 1].date);
+
+  const values = sorted.map((r) => r.close);
   const ema = exponentialMovingAverage(values, window);
 
   const points: EwmaPoint[] = [];
-  for (let i = 0; i < rows.length; i++) {
+  for (let i = 0; i < sorted.length; i++) {
     const v = ema[i];
     if (!Number.isFinite(v)) continue;
-    points.push({ date: rows[i].date, value: v });
+    points.push({ date: sorted[i].date, value: v });
   }
   return points;
 }

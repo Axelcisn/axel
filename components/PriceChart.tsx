@@ -618,7 +618,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Helper to parse rows into PricePoint[]
   const parseRowsToPoints = (rows: any[]): PricePoint[] => {
-    return rows
+    const sorted = rows
       .filter((row: any) => row.valid !== false)
       .map((row: any) => ({
         date: row.date,
@@ -636,6 +636,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       }))
       .filter((p: PricePoint) => !isNaN(p.adj_close))
       .sort((a: PricePoint, b: PricePoint) => a.date.localeCompare(b.date));
+
+    // Drop duplicate dates to avoid Recharts/category glitches and EWMA instability
+    return sorted.filter(
+      (p, idx, arr) => idx === 0 || p.date !== arr[idx - 1].date
+    );
   };
 
   // Fetch full history with auto-sync for missing symbols
@@ -1252,6 +1257,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       if (!Number.isFinite(p.value)) return;
       map.set(normalizeDateString(p.date), p.value);
     });
+    const keys = Array.from(map.keys());
+    const values = Array.from(map.values());
+    console.log("[PriceChart] trendEwmaShortMap:", {
+      size: map.size,
+      firstDates: keys.slice(0, 3),
+      lastDates: keys.slice(-3),
+      firstValues: values.slice(0, 3),
+      lastValues: values.slice(-3),
+    });
     return map;
   }, [trendShortSeries, showTrendEwma]);
 
@@ -1267,12 +1281,42 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Create extended chartData with future placeholders
   const chartData: ChartPoint[] = React.useMemo(() => {
+    // Log rangeData dates and compare with EWMA map
+    if (showTrendEwma && rangeData.length > 0 && trendEwmaShortMap) {
+      const rangeDates = rangeData.map(p => normalizeDateString(p.date));
+      const ewmaDates = Array.from(trendEwmaShortMap.keys());
+      
+      // Check overlap
+      const rangeSet = new Set(rangeDates);
+      const ewmaSet = new Set(ewmaDates);
+      const overlap = ewmaDates.filter(d => rangeSet.has(d));
+      
+      console.log("[PriceChart] DATE COMPARISON:", {
+        rangeDatesCount: rangeDates.length,
+        ewmaDatesCount: ewmaDates.length,
+        overlapCount: overlap.length,
+        rangeFirst3: rangeDates.slice(0, 3),
+        rangeLast3: rangeDates.slice(-3),
+        ewmaFirst3: ewmaDates.slice(0, 3),
+        ewmaLast3: ewmaDates.slice(-3),
+        rangeDataPrices: rangeData.slice(-3).map(p => ({ date: p.date, close: p.adj_close })),
+        ewmaValues: ewmaDates.slice(-3).map(d => ({ date: d, value: trendEwmaShortMap.get(d) })),
+      });
+    }
+
     // Historical portion: same as rangeData, but mark as not future
-    const base = rangeData.map((p) => {
+    const base: ChartPoint[] = rangeData.map((p) => {
       const isBullish = p.close && p.open && p.close > p.open;
       const chartDate = normalizeDateString(p.date);
+      
+      // Debug: log first match attempt
+      if (showTrendEwma && trendEwmaShortMap && p === rangeData[0]) {
+        const shortVal = trendEwmaShortMap.get(chartDate);
+        console.log("[PriceChart] First point lookup - chartDate:", chartDate, "shortMap has key:", trendEwmaShortMap.has(chartDate), "value:", shortVal);
+      }
+
       return {
-        date: p.date,
+        date: chartDate,
         value: p.adj_close,
         open: p.open,
         high: p.high,
@@ -1307,6 +1351,29 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     // includes the latest bar. If you pan/zoom away from the right edge, we
     // don't show the forecast cone or extra future placeholders.
     if (!atLatestBar) {
+      console.log(
+        "[PriceChart] trend fields sample (no future extension)",
+        {
+          range: selectedRange,
+          showTrendEwma,
+          sample: base.slice(0, 5).map((d) => ({
+            date: d.date,
+            trendEwmaShort: d.trendEwmaShort,
+            trendEwmaLong: d.trendEwmaLong,
+          })),
+        }
+      );
+
+      const nanTrendPoints = base.filter(
+        (p) => Number.isNaN(p.trendEwmaShort) || Number.isNaN(p.trendEwmaLong)
+      );
+      if (nanTrendPoints.length > 0) {
+      console.log("[PriceChart] trend NaN points (base)", {
+        range: selectedRange,
+        points: nanTrendPoints.slice(0, 5),
+      });
+      }
+
       return base;
     }
 
@@ -1339,17 +1406,55 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       allFutureDates.sort(); // Keep dates sorted
     }
 
-    if (!allFutureDates.length) return base;
+    let result: ChartPoint[] = base;
 
-    // Future placeholders: extend X-axis; line stops because value=null
-    const futurePoints = allFutureDates.map((d) => ({
-      date: d,
-      value: null,
-      volume: undefined,
-      isFuture: true as const,
-    }));
+    if (allFutureDates.length) {
+      // Future placeholders: extend X-axis; line stops because value=null
+      const futurePoints: ChartPoint[] = allFutureDates.map((d) => ({
+        date: normalizeDateString(d),
+        value: null,
+        volume: undefined,
+        isFuture: true,
+      }));
 
-    return [...base, ...futurePoints];
+      result = [...base, ...futurePoints];
+    }
+
+    // Count how many points have trend EWMA values
+    const shortWithValue = result.filter((p) => p.trendEwmaShort != null).length;
+    const longWithValue = result.filter((p) => p.trendEwmaLong != null).length;
+    console.log(
+      "[PriceChart] trend fields sample",
+      {
+        range: selectedRange,
+        showTrendEwma,
+        totalPoints: result.length,
+        shortWithValue,
+        longWithValue,
+        sampleFirst5: result.slice(0, 5).map((d) => ({
+          date: d.date,
+          trendEwmaShort: d.trendEwmaShort,
+          trendEwmaLong: d.trendEwmaLong,
+        })),
+        sampleLast5: result.slice(-5).map((d) => ({
+          date: d.date,
+          trendEwmaShort: d.trendEwmaShort,
+          trendEwmaLong: d.trendEwmaLong,
+        })),
+      }
+    );
+
+    const nanTrendPoints = result.filter(
+      (p) => Number.isNaN(p.trendEwmaShort) || Number.isNaN(p.trendEwmaLong)
+    );
+    if (nanTrendPoints.length > 0) {
+      console.log("[PriceChart] trend NaN points", {
+        range: selectedRange,
+        points: nanTrendPoints.slice(0, 5),
+      });
+    }
+
+    return result;
   }, [
     rangeData,
     fullData,
@@ -1372,30 +1477,61 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     return trendEwmaCrossSignals
       .map((signal) => {
-        const dataPoint = chartData.find((d) => normalizeDateString(d.date) === normalizeDateString(signal.date));
+        const dataPoint = chartData.find(
+          (d) => normalizeDateString(d.date) === normalizeDateString(signal.date)
+        );
         if (!dataPoint || dataPoint.close == null) return null;
+        const date = dataPoint.date;
+
+        // Scatter uses the chart's X-axis dataKey ("date"), so include it explicitly
         return {
-          x: dataPoint.date,
+          date,
+          x: date,
           y: dataPoint.close,
-          type: signal.type as 'bullish' | 'bearish',
+          type: signal.type as "bullish" | "bearish",
         };
       })
       .filter(
-        (p): p is { x: string; y: number; type: 'bullish' | 'bearish' } =>
-          !!p
+        (
+          p
+        ): p is {
+          date: string;
+          x: string;
+          y: number;
+          type: "bullish" | "bearish";
+        } => !!p
       );
   }, [chartData, trendEwmaCrossSignals, showTrendEwma]);
 
+  useEffect(() => {
+    if (!showTrendEwma) return;
+    if (trendCrossPoints.length > 0) {
+      console.log("[PriceChart] trendCrossPoints sample", {
+        range: selectedRange,
+        sample: trendCrossPoints.slice(0, 5),
+      });
+    }
+    const invalidCross = trendCrossPoints.filter(
+      (p) => p.y == null || Number.isNaN(p.y) || p.x == null
+    );
+    if (invalidCross.length > 0) {
+      console.log("[PriceChart] invalid trendCrossPoints", {
+        range: selectedRange,
+        sample: invalidCross.slice(0, 5),
+      });
+    }
+  }, [trendCrossPoints, showTrendEwma, selectedRange]);
+
   // Check if chartData actually has any trend EWMA values (not just if props have data)
   const chartHasTrendEwmaShort = useMemo(() => {
-    if (!showTrendEwma) return false;
     return chartData.some(p => p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort));
-  }, [chartData, showTrendEwma]);
+  }, [chartData]);
 
   const chartHasTrendEwmaLong = useMemo(() => {
-    if (!showTrendEwma) return false;
     return chartData.some(p => p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong));
-  }, [chartData, showTrendEwma]);
+  }, [chartData]);
+
+  const hasTrendEwmaData = chartHasTrendEwmaShort || chartHasTrendEwmaLong;
 
   const renderTrendArrow = useCallback((props: any): React.ReactElement => {
     const { cx, cy, payload } = props;
@@ -2087,6 +2223,66 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       };
     });
   }, [chartDataWithForecastBand, t212AccountHistory]);
+
+  useEffect(() => {
+    const invalidCloseCount = chartData.filter(
+      (p) => p.close == null || !Number.isFinite(p.close as number)
+    ).length;
+    const invalidTrendShort = chartData.filter(
+      (p) => p.trendEwmaShort != null && !Number.isFinite(p.trendEwmaShort)
+    ).length;
+    const invalidTrendLong = chartData.filter(
+      (p) => p.trendEwmaLong != null && !Number.isFinite(p.trendEwmaLong)
+    ).length;
+
+    console.log("[PriceChart] chart data lengths", {
+      range: selectedRange,
+      showTrendEwma,
+      chartData: chartData.length,
+      chartDataWithEwma: chartDataWithEwma.length,
+      chartDataWithForecastBand: chartDataWithForecastBand.length,
+      chartDataWithEquity: chartDataWithEquity.length,
+      hasTrendEwmaData,
+      chartHasTrendEwmaShort,
+      chartHasTrendEwmaLong,
+      priceYDomain,
+      priceYMinValue,
+      priceYMaxValue,
+      invalidCloseCount,
+      invalidTrendShort,
+      invalidTrendLong,
+    });
+
+    if (typeof window !== "undefined") {
+      (window as any).__priceChartDebug = {
+        selectedRange,
+        showTrendEwma,
+        chartData,
+        chartDataWithEwma,
+        chartDataWithForecastBand,
+        chartDataWithEquity,
+        priceYDomain,
+        priceYMinValue,
+        priceYMaxValue,
+        hasTrendEwmaData,
+        chartHasTrendEwmaShort,
+        chartHasTrendEwmaLong,
+      };
+    }
+  }, [
+    chartData,
+    chartDataWithEwma,
+    chartDataWithForecastBand,
+    chartDataWithEquity,
+    chartHasTrendEwmaLong,
+    chartHasTrendEwmaShort,
+    hasTrendEwmaData,
+    priceYDomain,
+    priceYMaxValue,
+    priceYMinValue,
+    selectedRange,
+    showTrendEwma,
+  ]);
 
   // Filter equity data by selected date range - nullify equity outside the range
   // This keeps charts synced but only shows equity within the selected period
@@ -2971,7 +3167,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const map = new Map<string, number>();
     fullData.forEach((pt, idx) => {
       if (pt.date) {
-        map.set(pt.date, idx);
+        map.set(normalizeDateString(pt.date), idx);
       }
     });
     return map;
@@ -3125,6 +3321,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             : chartData;
 
     if (!chartDataForRender || chartDataForRender.length === 0) return null;
+
+    console.log(
+      "[PriceChart] data length:",
+      chartDataForRender?.length,
+      "sample:",
+      chartDataForRender?.slice(0, 3),
+      "range:",
+      selectedRange,
+      "showTrendEwma:",
+      showTrendEwma
+    );
 
     return (
       <div className="relative" key={`chart-wrapper-${showTrendEwma}-${chartDataForRender.length}`}>
@@ -3635,6 +3842,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             {/* Trend EWMA overlays (toggle-controlled) */}
             {showTrendEwma && chartHasTrendEwmaShort && (
               <Line
+                key={`trend-ewma-short-${chartDataForRender.length}`}
                 yAxisId="price"
                 type="monotone"
                 dataKey="trendEwmaShort"
@@ -3650,6 +3858,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             {showTrendEwma && chartHasTrendEwmaLong && (
               <Line
+                key={`trend-ewma-long-${chartDataForRender.length}`}
                 yAxisId="price"
                 type="monotone"
                 dataKey="trendEwmaLong"
@@ -3664,6 +3873,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               />
             )}
 
+            {/* Trend cross triangles - DISABLED for debugging
             {showTrendEwma && trendCrossPoints.length > 0 && (
               <Scatter
                 yAxisId="price"
@@ -3674,6 +3884,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 isAnimationActive={false}
               />
             )}
+            */}
             
             {/* Volume Bars - bottom with modern emerald/rose colors and borders */}
             <Bar
@@ -4163,6 +4374,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     hasEwmaShort,
     hasEwmaLong,
     showTrendEwma,
+    hasTrendEwmaData,
     chartHasTrendEwmaShort,
     chartHasTrendEwmaLong,
     trendCrossPoints,
@@ -4171,6 +4383,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     longWindowLabel,
     hasMomentumScore,
     momentumPeriod,
+    selectedRange,
   ]);
 
   return (

@@ -79,6 +79,7 @@ export async function fitAndForecastGarch(params: GarchParams): Promise<SigmaFor
   const returns = windowData
     .map((row: CanonicalRow) => row.r)
     .filter((r: number | null | undefined): r is number => r !== null && r !== undefined);
+  // Need one fewer returns than prices: require >= window - 1 non-null r values (window validated >= 600)
   if (returns.length < window - 1) {
     throw new Error('Insufficient returns for GARCH estimation');
   }

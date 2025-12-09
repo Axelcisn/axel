@@ -52,7 +52,14 @@ export function usePriceHistory(symbol: string | undefined): UsePriceHistoryResu
           }))
           .filter((p) => Number.isFinite(p.close));
 
-        setData(mapped);
+        // Ensure ascending chronological order and drop duplicate dates so
+        // downstream indicators (EWMA, crossovers) receive a clean series.
+        const sorted = mapped
+          .slice()
+          .sort((a, b) => a.date.localeCompare(b.date))
+          .filter((p, idx, arr) => idx === 0 || p.date !== arr[idx - 1].date);
+
+        setData(sorted);
       } catch (err: any) {
         if (err?.name === 'AbortError') return;
         setError(err?.message || 'Failed to load price history');
