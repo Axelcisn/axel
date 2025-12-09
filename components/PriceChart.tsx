@@ -6950,6 +6950,51 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
           </div>
         )}
         
+        {/* EWMA Trend Section */}
+        {(data.trendEwmaShort != null || data.trendEwmaLong != null) && (
+          <div className="px-3 py-2">
+            {/* Section Header */}
+            <div className="mb-1">
+              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
+                isDarkMode ? 'text-yellow-400' : 'text-yellow-600'
+              }`}>
+                EWMA Trend
+              </span>
+            </div>
+            
+            {/* Single column layout */}
+            <div className="text-[9px] space-y-0.5">
+              {/* Short EWMA (yellow) */}
+              <div className="flex justify-between gap-4">
+                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Short EWMA</span>
+                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-yellow-300' : 'text-yellow-700'}`}>
+                  {data.trendEwmaShort != null ? `$${data.trendEwmaShort.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              {/* Long EWMA (blue) */}
+              <div className="flex justify-between gap-4">
+                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Long EWMA</span>
+                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>
+                  {data.trendEwmaLong != null ? `$${data.trendEwmaLong.toFixed(2)}` : '—'}
+                </span>
+              </div>
+              {/* Signal - Bullish when short > long, Bearish when short < long */}
+              {data.trendEwmaShort != null && data.trendEwmaLong != null && (
+                <div className="flex justify-between gap-4">
+                  <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Signal</span>
+                  <span className={`font-mono tabular-nums font-semibold ${
+                    data.trendEwmaShort > data.trendEwmaLong 
+                      ? 'text-emerald-400' 
+                      : 'text-rose-400'
+                  }`}>
+                    {data.trendEwmaShort > data.trendEwmaLong ? 'Bullish' : 'Bearish'}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        
         {/* EWMA Biased Section */}
         {(data.ewma_biased_past_forecast != null || data.ewma_biased_future_forecast != null) && (
           <div className="px-3 py-2">
