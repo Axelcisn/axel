@@ -93,86 +93,85 @@ export function StickyTickerBar({
 
   return (
     <>
-      {/* Apple-style sticky bar - slides in from top */}
+      {/* Apple-style floating bar - centered with rounded corners */}
       <div
-        className={`fixed top-0 left-0 right-0 z-[100] transform transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
-          isVisible ? 'translate-y-0' : '-translate-y-full'
+        className={`fixed top-0 left-0 right-0 z-[100] flex justify-center pt-3 px-4 transform transition-all duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+          isVisible ? 'translate-y-0 opacity-100' : '-translate-y-[calc(100%+12px)] opacity-0'
         }`}
         style={{ pointerEvents: isVisible ? 'auto' : 'none' }}
       >
-        {/* Apple-style bar with exact styling */}
+        {/* Floating rounded bar */}
         <div
-          className="h-[44px]"
+          className="h-[48px] rounded-full max-w-[720px] w-full px-6 flex items-center justify-between shadow-lg"
           style={{
-            backgroundColor: isDarkMode ? 'rgba(29, 29, 31, 0.94)' : 'rgba(255, 255, 255, 0.94)',
+            backgroundColor: isDarkMode ? 'rgba(29, 29, 31, 0.92)' : 'rgba(255, 255, 255, 0.92)',
             backdropFilter: 'saturate(180%) blur(20px)',
             WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-            borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.1)',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.08)',
+            boxShadow: isDarkMode 
+              ? '0 4px 30px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05) inset' 
+              : '0 4px 30px rgba(0, 0, 0, 0.1)',
           }}
         >
-          <div className="mx-auto max-w-[980px] h-full px-[22px]">
-            <div className="flex items-center justify-between h-full">
-              {/* Left: Ticker name - Apple typography */}
-              <div className="flex items-center">
+          {/* Left: Ticker name - Apple typography */}
+          <div className="flex items-center">
+            <span
+              className="text-[17px] font-semibold tracking-[-0.022em]"
+              style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
+            >
+              {ticker}
+            </span>
+          </div>
+
+          {/* Right: Price + Buttons */}
+          <div className="flex items-center gap-3">
+            {/* Price display */}
+            {currentPrice != null && (
+              <div className="flex items-center gap-2 mr-2">
                 <span
-                  className="text-[17px] font-semibold tracking-[-0.022em]"
-                  style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
+                  className="text-[12px] font-normal"
+                  style={{ color: isDarkMode ? '#86868b' : '#6e6e73' }}
                 >
-                  {ticker}
+                  ${currentPrice.toFixed(2)}
                 </span>
-              </div>
-
-              {/* Right: Price + Buttons */}
-              <div className="flex items-center gap-3">
-                {/* Price display */}
-                {currentPrice != null && (
-                  <div className="flex items-center gap-2 mr-2">
-                    <span
-                      className="text-[12px] font-normal"
-                      style={{ color: isDarkMode ? '#86868b' : '#6e6e73' }}
-                    >
-                      ${currentPrice.toFixed(2)}
-                    </span>
-                    {priceChange != null && priceChangePercent != null && (
-                      <span className={`text-[12px] font-normal ${changeColor}`}>
-                        {isPositive ? '+' : ''}{priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePercent.toFixed(2)}%)
-                      </span>
-                    )}
-                  </div>
+                {priceChange != null && priceChangePercent != null && (
+                  <span className={`text-[12px] font-normal ${changeColor}`}>
+                    {isPositive ? '+' : ''}{priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePercent.toFixed(2)}%)
+                  </span>
                 )}
-
-                {/* Search button - Apple "Explore" style */}
-                <button
-                  type="button"
-                  onClick={() => setIsSearchOpen(true)}
-                  className="flex items-center justify-center h-[28px] px-[14px] rounded-full text-[12px] font-normal transition-all duration-200"
-                  style={{
-                    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
-                    color: isDarkMode ? '#f5f5f7' : '#1d1d1f',
-                    border: 'none',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
-                  }}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className="h-[14px] w-[14px] mr-1.5"
-                  >
-                    <circle cx="11" cy="11" r="6" />
-                    <path strokeLinecap="round" d="M21 21l-4.35-4.35" />
-                  </svg>
-                  Search
-                </button>
               </div>
-            </div>
+            )}
+
+            {/* Search button - Apple style pill */}
+            <button
+              type="button"
+              onClick={() => setIsSearchOpen(true)}
+              className="flex items-center justify-center h-[30px] px-4 rounded-full text-[13px] font-medium transition-all duration-200"
+              style={{
+                backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.06)',
+                color: isDarkMode ? '#f5f5f7' : '#1d1d1f',
+                border: 'none',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.06)';
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-[14px] w-[14px] mr-1.5"
+              >
+                <circle cx="11" cy="11" r="6" />
+                <path strokeLinecap="round" d="M21 21l-4.35-4.35" />
+              </svg>
+              Search
+            </button>
           </div>
         </div>
       </div>
