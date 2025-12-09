@@ -7041,7 +7041,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               </span>
             </div>
             
-            <div className="space-y-1.5 text-[9px]">
+            <div className="space-y-1.5 text-[10px]">
               {t212Events.map((e, idx) => {
                 const isShort = e.side === 'short';
                 const openLabel = e.side === 'long' ? 'Open Long' : 'Open Short';

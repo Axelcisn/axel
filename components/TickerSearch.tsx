@@ -120,79 +120,81 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
   if (variant === 'panel') {
     return (
       <div className="w-full">
-        <div className="w-full max-w-4xl mx-auto px-6 md:px-8 pt-20 pb-16">
-          <form onSubmit={handleSubmit} className="w-full">
-            <div className="flex items-center gap-3">
-              <button
-                type="submit"
-                className="flex h-6 w-6 items-center justify-center text-slate-500 hover:text-slate-300"
-              >
-                <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m21 21-4.35-4.35m0 0A7.5 7.5 0 1 0 5 5a7.5 7.5 0 0 0 11.65 11.65Z" />
-                </svg>
-              </button>
-              <input
-                ref={inputRef}
-                value={value}
-                onChange={handleChange}
-                onKeyDown={handleKeyDown}
-                placeholder="Search"
-                className="flex-1 bg-transparent text-4xl md:text-5xl font-semibold tracking-tight text-slate-100 outline-none placeholder:text-slate-600"
-              />
-            </div>
-            {localError && (
-              <p className="mt-2 text-sm text-red-400">{localError}</p>
-            )}
-          </form>
+        <div className="px-6 md:px-16 pt-20 pb-16">
+          <div className="max-w-5xl">
+            <form onSubmit={handleSubmit} className="w-full">
+              <div className="flex items-center gap-3">
+                <button
+                  type="submit"
+                  className="flex h-6 w-6 items-center justify-center text-slate-500 hover:text-slate-300"
+                >
+                  <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m21 21-4.35-4.35m0 0A7.5 7.5 0 1 0 5 5a7.5 7.5 0 0 0 11.65 11.65Z" />
+                  </svg>
+                </button>
+                <input
+                  ref={inputRef}
+                  value={value}
+                  onChange={handleChange}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Search"
+                  className="flex-1 bg-transparent text-4xl md:text-5xl font-semibold tracking-tight text-slate-100 outline-none placeholder:text-slate-600"
+                />
+              </div>
+              {localError && (
+                <p className="mt-2 text-sm text-red-400">{localError}</p>
+              )}
+            </form>
 
-          <section className="mt-10">
-            <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">
-              {label}
-            </p>
+            <section className="mt-10">
+              <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">
+                {label}
+              </p>
 
-            <div className="mt-3 space-y-1.5">
-              {showSuggestions
-                ? listItems.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={item.onClick}
-                      className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
-                    >
-                      <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-                      </svg>
-                      <span className="font-semibold">{item.symbol}</span>
-                      <span className="text-slate-400 truncate">
-                        {item.name}
-                      </span>
-                      {item.exchange ? (
-                        <span className="ml-auto text-xs font-medium text-slate-500">
-                          {item.exchange}
+              <div className="mt-3 space-y-1.5">
+                {showSuggestions
+                  ? listItems.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={item.onClick}
+                        className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
+                      >
+                        <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span className="font-semibold">{item.symbol}</span>
+                        <span className="text-slate-400 truncate">
+                          {item.name}
                         </span>
-                      ) : (
-                        <span className="ml-auto text-xs font-medium text-slate-600">—</span>
-                      )}
-                    </button>
-                  ))
-                : visibleRecent.map((symbol) => (
-                    <button
-                      key={symbol}
-                      type="button"
-                      onClick={() => submit(symbol)}
-                      className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
-                    >
-                      <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-                      </svg>
-                      <span className="font-semibold">{symbol}</span>
-                      <span className="ml-auto text-xs font-medium text-slate-600">
-                        —
-                      </span>
-                    </button>
-                  ))}
-            </div>
-          </section>
+                        {item.exchange ? (
+                          <span className="ml-auto text-xs font-medium text-slate-500">
+                            {item.exchange}
+                          </span>
+                        ) : (
+                          <span className="ml-auto text-xs font-medium text-slate-600">—</span>
+                        )}
+                      </button>
+                    ))
+                  : visibleRecent.map((symbol) => (
+                      <button
+                        key={symbol}
+                        type="button"
+                        onClick={() => submit(symbol)}
+                        className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
+                      >
+                        <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+                        </svg>
+                        <span className="font-semibold">{symbol}</span>
+                        <span className="ml-auto text-xs font-medium text-slate-600">
+                          —
+                        </span>
+                      </button>
+                    ))}
+              </div>
+            </section>
+          </div>
         </div>
       </div>
     );
