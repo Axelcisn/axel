@@ -240,6 +240,8 @@ async function checkTrendTiltBranchOnSymbol(symbol: string, trendWeight: number)
 interface SimVariantSummary {
   symbol: string;
   variant: 'biased' | 'biased-trend' | 'max' | 'max-trend';
+  lambda?: number;
+  trainFraction?: number;
   totalReturnPct: number;
   maxDrawdownPct: number;
   trades: number;
@@ -306,16 +308,24 @@ async function runSimVariant(
 
   const sim: Trading212SimulationResult = simulateTrading212Cfd(bars, INITIAL_EQUITY, T212_CONFIG);
 
-  const totalReturnPct =
-    ((sim.finalEquity - sim.initialEquity) / sim.initialEquity) * 100;
-  const maxDrawdownPct = sim.maxDrawdown * 100;
-
+  // Consistency checks on simulation result
+  const pnl = sim.finalEquity - sim.initialEquity;
+  const totalReturnPct = (pnl / sim.initialEquity) * 100;
   expectFinite(`${symbol}/${baseMode}/ret`, totalReturnPct);
-  expectFinite(`${symbol}/${baseMode}/dd`, maxDrawdownPct);
+
+  const maxDrawdownPct = sim.maxDrawdown * 100;
+  expectInRange(`${symbol}/${baseMode}/dd`, maxDrawdownPct, 0, 100);
+  assert.strictEqual(
+    sim.trades.length,
+    sim.trades.length,
+    `${symbol}/${baseMode}: trades length inconsistent`
+  );
 
   return {
     symbol,
     variant: withTrend ? (`${baseMode}-trend` as const) : baseMode,
+    lambda: ewmaResult.params.lambda,
+    trainFraction: undefined,
     totalReturnPct,
     maxDrawdownPct,
     trades: sim.trades.length,
@@ -332,24 +342,60 @@ async function checkSimVariantsForSymbol(symbol: string, trendWeight: number) {
   variants.push(await runSimVariant(symbol, 'max', false, trendWeight));
   variants.push(await runSimVariant(symbol, 'max', true, trendWeight));
 
+  const biased = variants.find((v) => v.variant === 'biased')!;
+  const biasedTrend = variants.find((v) => v.variant === 'biased-trend')!;
+  const max = variants.find((v) => v.variant === 'max')!;
+  const maxTrend = variants.find((v) => v.variant === 'max-trend')!;
+
+  // Warn if Biased vs Max share config or are identical
+  if (
+    biased.lambda !== undefined &&
+    max.lambda !== undefined &&
+    (biased.lambda !== max.lambda || biased.trainFraction !== max.trainFraction)
+  ) {
+    if (
+      biased.totalReturnPct === max.totalReturnPct &&
+      biased.maxDrawdownPct === max.maxDrawdownPct &&
+      biased.trades === max.trades
+    ) {
+      console.warn(
+        `  ⚠ ${symbol}: Biased and Max use different λ/train, but metrics are identical. Check Max config.`
+      );
+    }
+  } else {
+    console.warn(
+      `  ⚠ ${symbol}: Biased and Max share λ/train or config missing; Max may just be a fallback to Biased.`
+    );
+  }
+
+  const metricsIdentical = (a: SimVariantSummary, b: SimVariantSummary) =>
+    a.totalReturnPct === b.totalReturnPct &&
+    a.maxDrawdownPct === b.maxDrawdownPct &&
+    a.trades === b.trades &&
+    a.stopOuts === b.stopOuts;
+
+  if (metricsIdentical(biased, biasedTrend)) {
+    console.warn(
+      `  ⚠ ${symbol}: Biased vs Biased+Trend metrics identical – check effectiveTrendWeight or tilt wiring.`
+    );
+  }
+
+  if (metricsIdentical(max, maxTrend)) {
+    console.warn(
+      `  ⚠ ${symbol}: Max vs Max+Trend metrics identical – check effectiveTrendWeight or tilt wiring.`
+    );
+  }
+
+  if (metricsIdentical(biased, biasedTrend) && metricsIdentical(max, maxTrend)) {
+    throw new Error(
+      `${symbol}: Trend ON/OFF has no effect on any variant – smoke fail for Trend tilt.`
+    );
+  }
+
   for (const v of variants) {
     expectFinite(`${symbol}/${v.variant}/ret`, v.totalReturnPct);
     expectFinite(`${symbol}/${v.variant}/dd`, v.maxDrawdownPct);
     assert.ok(v.trades >= 0, `${symbol}/${v.variant}/trades negative`);
-  }
-
-  const biased = variants.find((v) => v.variant === 'biased');
-  const biasedTrend = variants.find((v) => v.variant === 'biased-trend');
-  if (
-    biased &&
-    biasedTrend &&
-    biased.totalReturnPct === biasedTrend.totalReturnPct &&
-    biased.maxDrawdownPct === biasedTrend.maxDrawdownPct &&
-    biased.trades === biasedTrend.trades
-  ) {
-    console.warn(
-      `  ⚠ ${symbol}: Biased vs Biased+Trend metrics identical – tilt might be ineffective for this symbol`
-    );
   }
 
   console.log(

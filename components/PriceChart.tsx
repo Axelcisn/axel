@@ -359,6 +359,7 @@ interface PriceChartProps {
   onToggleT212Run?: (runId: T212RunId) => void;  // Toggle T212 run visibility
   simulationMode: SimulationMode;
   onChangeSimulationMode?: (mode: SimulationMode) => void;
+  hasMaxRun?: boolean;
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
   onDateRangeChange?: (startDate: string | null, endDate: string | null) => void;  // Callback when date range changes
@@ -409,6 +410,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onToggleT212Run,
   simulationMode,
   onChangeSimulationMode,
+  hasMaxRun = true,
   trendWeight = null,
   trendWeightUpdatedAt = null,
   onDateRangeChange,
@@ -3006,6 +3008,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   interface Trading212TooltipEvent {
     type: Trading212TooltipEventType;
+    runId: string;
     runLabel: string;
     side: 'long' | 'short';
     entryDate: string;
@@ -3132,6 +3135,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         const exitDate = normalizeDateString(trade.exitDate);
 
         const base = {
+          runId: overlay.runId,
           runLabel: overlay.label,
           side: trade.side,
         };
@@ -3295,6 +3299,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       const exitPrice = primaryClose.exitPrice ?? primaryClose.entryPrice;
 
       const detail: TradeDetailData = {
+        runId: primaryClose.runId,
+        runLabel: primaryClose.runLabel,
         side: primaryClose.side,
         entryDate: primaryClose.entryDate,
         entryPrice: primaryClose.entryPrice,
@@ -3302,8 +3308,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         exitPrice,
         netPnl: primaryClose.netPnl ?? 0,
         margin: primaryClose.margin ?? 0,
-        runId: "",
-        runLabel: primaryClose.runLabel,
         ticker: symbol,
         date,
         events,
@@ -4898,10 +4902,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         setShowEwmaOverlay(true);
                         setShowEwmaBiasedOverlay(false);
                       }
-                      // Toggle T212 run visibility
-                      if (onToggleT212Run) {
-                        onToggleT212Run("ewma-unbiased");
-                      }
                       // Always reset the maximized state when clicking Unbiased (to restore default λ and train%)
                       if (ewmaReactionMapDropdown) {
                         ewmaReactionMapDropdown.onReset();
@@ -4991,28 +4991,24 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 {onLoadEwmaBiased && (
                   <div className="relative group">
                     <button
-                      onClick={() => {
-                        // Ensure biased EWMA path is loaded if needed
-                        if (onLoadEwmaBiased) {
-                          onLoadEwmaBiased();
-                        }
+                    onClick={() => {
+                      // Ensure biased EWMA path is loaded if needed
+                      if (onLoadEwmaBiased) {
+                        onLoadEwmaBiased();
+                      }
 
-                        // Radio behavior: if already on, turn off; otherwise turn on and turn off others
-                        if (showEwmaBiasedOverlay) {
-                          setShowEwmaBiasedOverlay(false);
-                        } else {
-                          setShowEwmaBiasedOverlay(true);
-                          setShowEwmaOverlay(false);
-                        }
-                        // Toggle T212 run visibility
-                        if (onToggleT212Run) {
-                          onToggleT212Run("ewma-biased");
-                        }
-                        // Reset the maximized state when clicking Biased (to restore default λ and train%)
-                        if (ewmaReactionMapDropdown) {
-                          ewmaReactionMapDropdown.onReset();
-                        }
-                      }}
+                      // Radio behavior: if already on, turn off; otherwise turn on and turn off others
+                      if (showEwmaBiasedOverlay) {
+                        setShowEwmaBiasedOverlay(false);
+                      } else {
+                        setShowEwmaBiasedOverlay(true);
+                        setShowEwmaOverlay(false);
+                      }
+                      // Reset the maximized state when clicking Biased (to restore default λ and train%)
+                      if (ewmaReactionMapDropdown) {
+                        ewmaReactionMapDropdown.onReset();
+                      }
+                    }}
                       disabled={isLoadingEwmaBiased}
                       className={`
                         px-2 py-0.5 text-xs rounded-full transition-colors
@@ -5100,10 +5096,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     // Radio behavior: turn off all other EWMA overlays
                     setShowEwmaOverlay(false);
                     setShowEwmaBiasedOverlay(true);
-                    // Toggle T212 run visibility for Max
-                    if (onToggleT212Run) {
-                      onToggleT212Run("ewma-biased-max");
-                    }
                     // Trigger maximize when clicking Max button
                     if (ewmaReactionMapDropdown && ewmaReactionMapDropdown.hasOptimizationResults && !ewmaReactionMapDropdown.isMaximized) {
                       ewmaReactionMapDropdown.onMaximize();
@@ -5292,18 +5284,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               type="button"
               className={`
                 px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${simulationMode.baseMode === 'max'
-                  ? 'bg-sky-500 text-white'
-                  : isDarkMode 
-                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ${!hasMaxRun
+                  ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
+                  : simulationMode.baseMode === 'max'
+                    ? 'bg-sky-500 text-white'
+                    : isDarkMode 
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }
               `}
-              onClick={() => onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
-            >
-              Biased (Max)
-            </button>
-          </div>
+              disabled={!hasMaxRun}
+              onClick={() => hasMaxRun && onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
+          >
+            Biased (Max)
+          </button>
+        </div>
 
           {/* Trend toggle */}
           <button

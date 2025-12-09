@@ -44,6 +44,7 @@ import {
 } from '@/lib/trading212/tradesClient';
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
+import { StickyTickerBar } from '@/components/StickyTickerBar';
 import TrendSection from '@/components/trend/TrendSection';
 import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
 import { computeEwmaSeries, computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
@@ -461,8 +462,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     neutralIntervalScore: number;
   };
 
-  const [reactionOptimizationBest, setReactionOptimizationBest] = useState<EwmaOptimizationCandidate | null>(null);
-  const [reactionOptimizationCandidates, setReactionOptimizationCandidates] = useState<EwmaOptimizationCandidate[]>([]);
+const [reactionOptimizationBest, setReactionOptimizationBest] = useState<EwmaOptimizationCandidate | null>(null);
+const [reactionOptimizationCandidates, setReactionOptimizationCandidates] = useState<EwmaOptimizationCandidate[]>([]);
 
   // Neutral baseline for "Rank 0" row in optimization table
   type EwmaOptimizationNeutralSummary = {
@@ -472,8 +473,20 @@ export default function TimingPage({ params }: TimingPageProps) {
     coverage: number;
     avgWidth: number;
   };
-  const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
-    useState<EwmaOptimizationNeutralSummary | null>(null);
+const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
+  useState<EwmaOptimizationNeutralSummary | null>(null);
+  const getMaxEwmaConfig = useCallback(() => {
+    if (reactionOptimizationBest) {
+      return {
+        lambda: reactionOptimizationBest.lambda,
+        trainFraction: reactionOptimizationBest.trainFraction,
+      };
+    }
+    return {
+      lambda: reactionLambda,
+      trainFraction: reactionTrainFraction,
+    };
+  }, [reactionOptimizationBest, reactionLambda, reactionTrainFraction]);
 
   const [isOptimizingReaction, setIsOptimizingReaction] = useState(false);
   const [isReactionMaximized, setIsReactionMaximized] = useState(false);  // Track if Biased has been optimized
@@ -485,15 +498,21 @@ export default function TimingPage({ params }: TimingPageProps) {
     withTrend: boolean;
   }
 
-  const [trendWeight, setTrendWeight] = useState<number | null>(null);
-  const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
-  const [simulationMode, setSimulationMode] = useState<SimulationMode>({
-    baseMode: 'biased',
-    withTrend: false,
-  });
+const [trendWeight, setTrendWeight] = useState<number | null>(null);
+const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
+const [simulationMode, setSimulationMode] = useState<SimulationMode>({
+  baseMode: 'biased',
+  withTrend: false,
+});
+const effectiveTrendWeight = useMemo(() => {
+  if (trendWeight != null && Math.abs(trendWeight) >= 0.005) {
+    return trendWeight;
+  }
+  return 0.05;
+}, [trendWeight]);
 
   // Trading212 CFD Simulation state
-  const [isCfdEnabled, setIsCfdEnabled] = useState(false);  // CFD simulation toggle
+  const [isCfdEnabled, setIsCfdEnabled] = useState(true);  // CFD simulation toggle
   const [t212DateRange, setT212DateRange] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });  // Date range filter for simulation
   
   // Memoized callback for date range changes to avoid infinite loops
@@ -538,6 +557,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [t212Runs, setT212Runs] = useState<Trading212SimRun[]>([]);
   const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
   const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
+  const hasMaxRun = useMemo(() => t212Runs.some((r) => r.id === "ewma-biased-max"), [t212Runs]);
 
   // State for real Trading212 trades (from actual account history)
   const [realT212Trades, setRealT212Trades] = useState<T212SimpleTrade[]>([]);
@@ -609,20 +629,29 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Keep visible run in sync with SimulationMode and available runs
   useEffect(() => {
+    if (t212Runs.length === 0) return;
+
     const desiredBaseRunId: T212RunId =
       simulationMode.baseMode === "max" ? "ewma-biased-max" : "ewma-biased";
 
-    const hasDesired = t212Runs.some((r) => r.id === desiredBaseRunId);
-    if (hasDesired) {
-      setT212VisibleRunIds(new Set<T212RunId>([desiredBaseRunId]));
-      return;
+    const runIds = new Set(t212Runs.map((r) => r.id));
+
+    let chosen: T212RunId | null = null;
+
+    if (runIds.has(desiredBaseRunId)) {
+      chosen = desiredBaseRunId;
+    } else if (runIds.has("ewma-biased")) {
+      chosen = "ewma-biased";
+    } else if (runIds.has("ewma-unbiased")) {
+      chosen = "ewma-unbiased";
+    } else {
+      chosen = t212Runs[0].id;
     }
 
-    if (t212Runs.length > 0 && t212VisibleRunIds.size === 0) {
-      const fallbackId = t212Runs.find((r) => r.id === "ewma-biased")?.id ?? t212Runs[0].id;
-      setT212VisibleRunIds(new Set<T212RunId>([fallbackId]));
+    if (chosen != null) {
+      setT212VisibleRunIds(new Set<T212RunId>([chosen]));
     }
-  }, [simulationMode, t212Runs, t212VisibleRunIds.size]);
+  }, [t212Runs, simulationMode.baseMode]);
 
   // Prepare table rows for real T212 paired trades (with holding period)
   const realT212TradeRows = useMemo(() => {
@@ -2000,6 +2029,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     autoSelect?: boolean;
     useTrendTilt?: boolean;
     trendWeight?: number | null;
+    lambdaOverride?: number | null;
+    trainFractionOverride?: number | null;
   }
 
   const runTrading212SimForSource = useCallback(
@@ -2157,12 +2188,16 @@ export default function TimingPage({ params }: TimingPageProps) {
         // Store the run in our collection
         // For max runs, use optimizer best values when available; otherwise use current state
         const isMaxRun = runId === "ewma-biased-max";
-        const storedLambda = isMaxRun && reactionOptimizationBest
-          ? reactionOptimizationBest.lambda
-          : reactionLambda;
-        const storedTrainFraction = isMaxRun && reactionOptimizationBest
-          ? reactionOptimizationBest.trainFraction
-          : reactionTrainFraction;
+        const storedLambda = opts?.lambdaOverride != null
+          ? opts.lambdaOverride
+          : isMaxRun && reactionOptimizationBest
+            ? reactionOptimizationBest.lambda
+            : reactionLambda;
+        const storedTrainFraction = opts?.trainFractionOverride != null
+          ? opts.trainFractionOverride
+          : isMaxRun && reactionOptimizationBest
+            ? reactionOptimizationBest.trainFraction
+            : reactionTrainFraction;
         const signalSource: Trading212SimRun['signalSource'] = source;
 
         setT212Runs((prev) => {
@@ -2292,7 +2327,6 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Auto-run T212 sims when CFD is enabled and data is ready
   useEffect(() => {
     console.log("[T212 Auto-Run] Checking conditions:", {
-      isCfdEnabled,
       t212RunsLength: t212Runs.length,
       hasEwmaPath: !!ewmaPath && ewmaPath.length > 0,
       hasEwmaBiasedPath: !!ewmaBiasedPath && ewmaBiasedPath.length > 0,
@@ -2300,9 +2334,6 @@ export default function TimingPage({ params }: TimingPageProps) {
       hasOptimizationBest: !!reactionOptimizationBest,
     });
 
-    // Only run when CFD is enabled
-    if (!isCfdEnabled) return;
-    
     // Only auto-run when we have no runs and the core model data is ready
     if (t212Runs.length > 0) return;
 
@@ -2323,20 +2354,24 @@ export default function TimingPage({ params }: TimingPageProps) {
     runTrading212SimForSource("biased", "ewma-biased", "EWMA Biased", {
       autoSelect: false,
       useTrendTilt: simulationMode.withTrend,
-      trendWeight,
+      trendWeight: effectiveTrendWeight,
     });
 
-    // Biased (Max): only if we have an optimisation best config
-    if (reactionOptimizationBest) {
-      runTrading212SimForSource(
-        "biased",
-        "ewma-biased-max",
-        "EWMA Biased (Max)",
-        { autoSelect: false, useTrendTilt: simulationMode.withTrend, trendWeight }
-      );
-    }
+    // Biased (Max): always seed with best available config
+    const maxConfig = getMaxEwmaConfig();
+    runTrading212SimForSource(
+      "biased",
+      "ewma-biased-max",
+      "EWMA Biased (Max)",
+      {
+        autoSelect: false,
+        useTrendTilt: simulationMode.withTrend,
+        trendWeight: effectiveTrendWeight,
+        lambdaOverride: maxConfig.lambda,
+        trainFractionOverride: maxConfig.trainFraction,
+      }
+    );
   }, [
-    isCfdEnabled,
     t212Runs.length,
     ewmaPath,
     ewmaBiasedPath,
@@ -2344,31 +2379,40 @@ export default function TimingPage({ params }: TimingPageProps) {
     reactionOptimizationBest,
     runTrading212SimForSource,
     simulationMode,
-    trendWeight,
+    effectiveTrendWeight,
+    getMaxEwmaConfig,
   ]);
 
-  // Add "EWMA Biased (Max)" and "EWMA Trend (Max)" runs when optimization completes (if not already present)
+  // Add/refresh "EWMA Biased (Max)" run when optimization completes
   useEffect(() => {
-    // Only add if CFD is enabled
-    if (!isCfdEnabled) return;
-    
-    // Only add if we have optimization results and the run doesn't exist yet
     if (!reactionOptimizationBest) return;
     if (!ewmaBiasedPath || ewmaBiasedPath.length === 0) return;
     if (!reactionMapSummary) return;
-    
-    // Check if we already have a Biased (Max) run
-    const hasMaxRun = t212Runs.some(r => r.id === "ewma-biased-max");
-    if (!hasMaxRun) {
-      console.log("[T212 Auto-Run] Adding EWMA Biased (Max) after optimization completed...");
+
+    const desiredMaxConfig = getMaxEwmaConfig();
+    const existingMax = t212Runs.find((r) => r.id === "ewma-biased-max");
+    const needsRefresh =
+      !existingMax ||
+      existingMax.lambda !== desiredMaxConfig.lambda ||
+      existingMax.trainFraction !== desiredMaxConfig.trainFraction ||
+      existingMax.trendTiltEnabled !== simulationMode.withTrend;
+
+    if (needsRefresh) {
+      console.log("[T212 Auto-Run] Refreshing EWMA Biased (Max) after optimization completed...");
       runTrading212SimForSource(
         "biased",
         "ewma-biased-max",
         "EWMA Biased (Max)",
-        { autoSelect: false, useTrendTilt: simulationMode.withTrend, trendWeight }
+        {
+          autoSelect: false,
+          useTrendTilt: simulationMode.withTrend,
+          trendWeight: effectiveTrendWeight,
+          lambdaOverride: desiredMaxConfig.lambda,
+          trainFractionOverride: desiredMaxConfig.trainFraction,
+        }
       );
     }
-  }, [isCfdEnabled, reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource, simulationMode, trendWeight]);
+  }, [reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource, simulationMode, effectiveTrendWeight, getMaxEwmaConfig]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -4930,20 +4974,30 @@ export default function TimingPage({ params }: TimingPageProps) {
   );
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-6 bg-background text-foreground">
-      <div className="grid grid-cols-[auto_1fr_auto] gap-5 items-center mb-8">
-        <div className="flex items-center">
-          <div className="w-32 h-32 rounded-full bg-gradient-to-br from-orange-500 via-rose-500 to-amber-400 shadow-xl ring-1 ring-white/10 flex items-center justify-center text-3xl font-semibold text-white">
-            {logoLetter}
+    <>
+      {/* Apple-style sticky bar that appears after scrolling */}
+      <StickyTickerBar
+        ticker={tickerDisplay}
+        companyName={companyName || undefined}
+        currentPrice={priceValue ?? undefined}
+        priceChange={changeValue ?? undefined}
+        priceChangePercent={changePctValue ?? undefined}
+      />
+      
+      <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-6 bg-background text-foreground">
+        <div className="grid grid-cols-[auto_1fr_auto] gap-5 items-center mb-8">
+          <div className="flex items-center">
+            <div className="w-32 h-32 rounded-full bg-gradient-to-br from-orange-500 via-rose-500 to-amber-400 shadow-xl ring-1 ring-white/10 flex items-center justify-center text-3xl font-semibold text-white">
+              {logoLetter}
+            </div>
           </div>
-        </div>
-        <div className="space-y-3">
-            <h1 className="text-4xl font-semibold tracking-tight text-white">
-              {companyName || tickerDisplay}
-            </h1>
-            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-              <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-slate-200">
-                <span className="font-medium">{tickerDisplay}</span>
+          <div className="space-y-3">
+              <h1 className="text-4xl font-semibold tracking-tight text-white">
+                {companyName || tickerDisplay}
+              </h1>
+              <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
+                <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-slate-200">
+                  <span className="font-medium">{tickerDisplay}</span>
                 <span className="text-slate-500">·</span>
                 <span>{exchangeDisplay}</span>
               </div>
@@ -5078,6 +5132,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           onToggleT212Run={toggleT212RunVisibility}
           simulationMode={simulationMode}
           onChangeSimulationMode={setSimulationMode}
+          hasMaxRun={hasMaxRun}
           trendWeight={trendWeight}
           trendWeightUpdatedAt={trendWeightUpdatedAt}
           onDateRangeChange={handleDateRangeChange}
@@ -7375,5 +7430,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         </div>
       )}
     </div>
+    </>
   );
 }
