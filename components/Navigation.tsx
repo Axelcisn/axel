@@ -263,7 +263,7 @@ export default function Navigation() {
                     {lastSearches.length === 0 ? 'Suggested' : 'Last searched'}
                   </h3>
                   <ul className="space-y-3">
-                    {(lastSearches.length === 0 ? ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'TSLA'] : lastSearches).map((s) => (
+                    {(lastSearches.length === 0 ? ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'TSLA'] : lastSearches.slice(0, 5)).map((s) => (
                       <li key={s}>
                         <Link
                           href={`/company/${encodeURIComponent(s)}/timing`}

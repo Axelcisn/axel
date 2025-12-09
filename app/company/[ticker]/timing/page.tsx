@@ -2516,6 +2516,35 @@ export default function TimingPage({ params }: TimingPageProps) {
         return { ok: false, forecast: null, reason: "INSUFFICIENT_GARCH_DATA" };
       }
     }
+    if (volModel === 'Range') {
+      const minRequiredRangeObs = effectiveWindowN + 1; // window + 1 for overnight gaps
+      if (currentCanonicalCount < minRequiredRangeObs) {
+        if (process.env.NODE_ENV === 'development') {
+          console.info("[VOL][client] range-precheck insufficient", {
+            ticker: params.ticker,
+            canonicalCount: currentCanonicalCount,
+            window: effectiveWindowN,
+          });
+        }
+        setVolatilityError(`Insufficient history for Range estimator: need ${minRequiredRangeObs} observations, have ${currentCanonicalCount}.`);
+        return { ok: false, forecast: null, reason: "INSUFFICIENT_RANGE_DATA" };
+      }
+    }
+    if (volModel === 'HAR-RV') {
+      const minRequiredHarObs = Math.max(effectiveWindowN + 1, 50); // need window plus one, and a modest floor for RV proxies
+      if (currentCanonicalCount < minRequiredHarObs) {
+        if (process.env.NODE_ENV === 'development') {
+          console.info("[VOL][client] har-precheck insufficient", {
+            ticker: params.ticker,
+            canonicalCount: currentCanonicalCount,
+            window: effectiveWindowN,
+            minRequiredHarObs,
+          });
+        }
+        setVolatilityError(`Insufficient history for HAR-RV: need ${minRequiredHarObs} observations, have ${currentCanonicalCount}.`);
+        return { ok: false, forecast: null, reason: "INSUFFICIENT_HAR_DATA" };
+      }
+    }
 
     const hasData = currentCanonicalCount >= effectiveWindowN + 1;
     const hasTZ   = !!persistedTZ;
@@ -2686,11 +2715,18 @@ export default function TimingPage({ params }: TimingPageProps) {
           const detailedError = errorData.details ? `${errorMessage} - ${errorData.details}` : errorMessage;
           setVolatilityError(detailedError);
           const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
-          if (
-            resp.status === 422 &&
-            (errorData.code === 'INSUFFICIENT_GARCH_DATA' || normalizedMessage.includes('insufficient returns for garch estimation'))
-          ) {
-            reason = 'INSUFFICIENT_GARCH_DATA';
+          if (resp.status === 422) {
+            if (errorData.code === 'INSUFFICIENT_GBM_DATA') {
+              reason = 'INSUFFICIENT_GBM_DATA';
+            } else if (errorData.code === 'INSUFFICIENT_GARCH_DATA' || normalizedMessage.includes('insufficient returns for garch estimation')) {
+              reason = 'INSUFFICIENT_GARCH_DATA';
+            } else if (errorData.code === 'INSUFFICIENT_RANGE_DATA') {
+              reason = 'INSUFFICIENT_RANGE_DATA';
+            } else if (errorData.code === 'INSUFFICIENT_HAR_DATA') {
+              reason = 'INSUFFICIENT_HAR_DATA';
+            } else if (normalizedMessage.includes('insufficient data')) {
+              reason = 'INSUFFICIENT_DATA';
+            }
           } else if (typeof errorMessage === 'string' && normalizedMessage.includes('insufficient data')) {
             reason = 'INSUFFICIENT_DATA';
           }
@@ -3461,8 +3497,16 @@ export default function TimingPage({ params }: TimingPageProps) {
       return;
     }
 
+    const skipReasons = new Set([
+      'INSUFFICIENT_DATA',
+      'INSUFFICIENT_GBM_DATA',
+      'INSUFFICIENT_GARCH_DATA',
+      'INSUFFICIENT_RANGE_DATA',
+      'INSUFFICIENT_HAR_DATA',
+    ]);
+
     const shouldSkipForKnownInsufficient =
-      autoForecastError === 'INSUFFICIENT_DATA' || autoForecastError === 'INSUFFICIENT_GARCH_DATA';
+      autoForecastError ? skipReasons.has(autoForecastError) : false;
 
     if (lastAutoForecastKeyRef.current === autoKey && shouldSkipForKnownInsufficient) {
       return;
@@ -3500,8 +3544,14 @@ export default function TimingPage({ params }: TimingPageProps) {
           console.log('[AutoForecast] Volatility forecast failed:', result);
           if (result.reason === 'INSUFFICIENT_DATA' || result.reason === 'NO_HISTORY') {
             setAutoForecastError('INSUFFICIENT_DATA');
+          } else if (result.reason === 'INSUFFICIENT_GBM_DATA') {
+            setAutoForecastError('INSUFFICIENT_GBM_DATA');
           } else if (result.reason === 'INSUFFICIENT_GARCH_DATA') {
             setAutoForecastError('INSUFFICIENT_GARCH_DATA');
+          } else if (result.reason === 'INSUFFICIENT_RANGE_DATA') {
+            setAutoForecastError('INSUFFICIENT_RANGE_DATA');
+          } else if (result.reason === 'INSUFFICIENT_HAR_DATA') {
+            setAutoForecastError('INSUFFICIENT_HAR_DATA');
           } else {
             setAutoForecastError(result.reason ?? null);
           }

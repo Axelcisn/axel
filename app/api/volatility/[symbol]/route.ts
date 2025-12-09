@@ -315,27 +315,46 @@ export async function POST(
               { status: 400 }
             );
           }
-          
-          // Use pure GBM computation with canonical data already loaded
-          const gbmForecast = await computeGbmForecastPure({
-            symbol,
-            date_t,
-            window: volParams.gbm.windowN,
-            lambda_drift: volParams.gbm.lambdaDrift,
-            canonicalData,
-            h: effectiveH,
-            coverage: effectiveCoverage
-          });
-          
-          // Activate the forecast
-          await setActiveForecast(symbol, date_t, 'GBM-CC');
-          
-          return NextResponse.json({
-            ...gbmForecast,
-            is_active: true,
-            saved_at: new Date().toISOString(),
-            success: true
-          });
+          try {
+            // Use pure GBM computation with canonical data already loaded
+            const gbmForecast = await computeGbmForecastPure({
+              symbol,
+              date_t,
+              window: volParams.gbm.windowN,
+              lambda_drift: volParams.gbm.lambdaDrift,
+              canonicalData,
+              h: effectiveH,
+              coverage: effectiveCoverage
+            });
+            
+            // Activate the forecast
+            await setActiveForecast(symbol, date_t, 'GBM-CC');
+            
+            return NextResponse.json({
+              ...gbmForecast,
+              is_active: true,
+              saved_at: new Date().toISOString(),
+              success: true
+            });
+          } catch (err: any) {
+            const message = err?.message || '';
+            if (
+              message.includes('Insufficient history') ||
+              message.includes('Insufficient data') ||
+              message.includes('sigma') ||
+              message.includes('σ²') ||
+              message.includes('σ≈0')
+            ) {
+              if (process.env.NODE_ENV === "development") {
+                console.info("[VOL][GBM] insufficient data", { symbol, windowN: volParams.gbm.windowN, reason: message });
+              }
+              return NextResponse.json(
+                { error: message, code: 'INSUFFICIENT_GBM_DATA' },
+                { status: 422 }
+              );
+            }
+            throw err;
+          }
         
         case 'GARCH11-N':
         case 'GARCH11-t':
@@ -388,6 +407,28 @@ export async function POST(
                 { status: 422 }
               );
             }
+            if (
+              message.includes('Insufficient data') ||
+              message.includes('window') && message.includes('600') ||
+              message.includes('Invalid variance forecast') ||
+              message.includes('σ²') ||
+              message.includes('σ≈0')
+            ) {
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][GARCH] insufficient data', {
+                  symbol,
+                  windowN: volParams.garch.window,
+                  msg: message
+                });
+              }
+              return NextResponse.json(
+                {
+                  error: message,
+                  code: 'INSUFFICIENT_GARCH_DATA'
+                },
+                { status: 422 }
+              );
+            }
 
             // Unexpected, let outer handler treat as internal error
             throw error;
@@ -402,12 +443,31 @@ export async function POST(
             );
           }
           
-          sigmaForecast = await fitAndForecastHar({
-            symbol,
-            date_t,
-            window: volParams.har.window,
-            use_intraday_rv: volParams.har.use_intraday_rv
-          });
+          try {
+            sigmaForecast = await fitAndForecastHar({
+              symbol,
+              date_t,
+              window: volParams.har.window,
+              use_intraday_rv: volParams.har.use_intraday_rv
+            });
+          } catch (error: any) {
+            const message = error?.message || '';
+            if (
+              message.includes('Insufficient RV data') ||
+              message.includes('HAR-RV disabled') ||
+              message.includes('no realized volatility') ||
+              message.includes('Insufficient data')
+            ) {
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][HAR] insufficient data', { symbol, window: volParams.har.window, msg: message });
+              }
+              return NextResponse.json(
+                { error: message, code: 'INSUFFICIENT_HAR_DATA' },
+                { status: 422 }
+              );
+            }
+            throw error;
+          }
           break;
 
         case 'Range-P':
@@ -422,13 +482,37 @@ export async function POST(
           }
           
           const estimator = model.split('-')[1] as "P" | "GK" | "RS" | "YZ";
-          sigmaForecast = await computeRangeSigma({
-            symbol,
-            date_t,
-            estimator,
-            window: volParams.range.window,
-            ewma_lambda: volParams.range.ewma_lambda
-          });
+          try {
+            sigmaForecast = await computeRangeSigma({
+              symbol,
+              date_t,
+              estimator,
+              window: volParams.range.window,
+              ewma_lambda: volParams.range.ewma_lambda
+            });
+          } catch (error: any) {
+            const message = error?.message || '';
+            if (
+              message.includes('Insufficient variance estimates') ||
+              message.includes('Insufficient data') ||
+              message.includes('σ²') ||
+              message.includes('σ≈0')
+            ) {
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][Range] insufficient data', {
+                  symbol,
+                  estimator,
+                  window: volParams.range.window,
+                  msg: message
+                });
+              }
+              return NextResponse.json(
+                { error: message, code: 'INSUFFICIENT_RANGE_DATA' },
+                { status: 422 }
+              );
+            }
+            throw error;
+          }
           break;
 
         default:
