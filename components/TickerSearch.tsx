@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useRef, useEffect, KeyboardEvent, FormEvent } from "react";
+import { useSymbolSearch } from "@/lib/hooks/useSymbolSearch";
 
 interface TickerSearchProps {
   initialSymbol?: string;
@@ -17,12 +18,29 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
   const [value, setValue] = useState(initialSymbol ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const { results } = useSymbolSearch(value);
+  const [recentTickers, setRecentTickers] = useState<string[]>([]);
 
   useEffect(() => {
     if (autoFocus && inputRef.current) {
       inputRef.current.focus();
     }
   }, [autoFocus]);
+
+  // Load recent searches from localStorage on mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('axel:lastSearches');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          setRecentTickers(arr as string[]);
+        }
+      }
+    } catch (e) {
+      // ignore parsing/storage errors
+    }
+  }, []);
 
   function submit(symbolRaw: string) {
     const symbol = symbolRaw.trim().toUpperCase();
@@ -40,6 +58,7 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
       arr.unshift(symbol);
       arr = arr.slice(0, 10);
       localStorage.setItem(key, JSON.stringify(arr));
+      setRecentTickers(arr);
     } catch (e) {
       // ignore storage errors
     }
@@ -54,18 +73,137 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
     }
   }
 
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+    setValue(e.target.value);
+  }
+
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
     submit(value);
   }
 
+  const trimmed = value.trim();
+  const hasQuery = trimmed.length >= 2;
+  const hasResults = results.length > 0;
+  const showSuggestions = hasQuery && hasResults;
+  const label = showSuggestions ? "Suggested" : "Last searched";
+  const visibleRecent = recentTickers.slice(0, 5);
+  const listItems = showSuggestions
+    ? results.map((r) => ({
+        key: r.symbol,
+        symbol: r.symbol,
+        name: r.name,
+        exchange: r.exchange,
+        onClick: async () => {
+          try {
+            await fetch('/api/companies', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ticker: r.symbol, name: r.name, exchange: r.exchange })
+            });
+          } catch (err) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn('[TickerSearch] failed to upsert company', err);
+            }
+          }
+          router.push(`/company/${r.symbol}/timing`);
+        }
+      }))
+    : recentTickers.map((symbol) => ({
+        key: symbol,
+        symbol,
+        name: '',
+        exchange: undefined,
+        onClick: () => submit(symbol)
+      }));
+
+  if (variant === 'panel') {
+    return (
+      <div className="w-full">
+        <div className="w-full max-w-4xl mx-auto px-6 md:px-8 pt-20 pb-16">
+          <form onSubmit={handleSubmit} className="w-full">
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                className="flex h-6 w-6 items-center justify-center text-slate-500 hover:text-slate-300"
+              >
+                <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m21 21-4.35-4.35m0 0A7.5 7.5 0 1 0 5 5a7.5 7.5 0 0 0 11.65 11.65Z" />
+                </svg>
+              </button>
+              <input
+                ref={inputRef}
+                value={value}
+                onChange={handleChange}
+                onKeyDown={handleKeyDown}
+                placeholder="Search"
+                className="flex-1 bg-transparent text-4xl md:text-5xl font-semibold tracking-tight text-slate-100 outline-none placeholder:text-slate-600"
+              />
+            </div>
+            {localError && (
+              <p className="mt-2 text-sm text-red-400">{localError}</p>
+            )}
+          </form>
+
+          <section className="mt-10">
+            <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">
+              {label}
+            </p>
+
+            <div className="mt-3 space-y-1.5">
+              {showSuggestions
+                ? listItems.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={item.onClick}
+                      className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
+                    >
+                      <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span className="font-semibold">{item.symbol}</span>
+                      <span className="text-slate-400 truncate">
+                        {item.name}
+                      </span>
+                      {item.exchange ? (
+                        <span className="ml-auto text-xs font-medium text-slate-500">
+                          {item.exchange}
+                        </span>
+                      ) : (
+                        <span className="ml-auto text-xs font-medium text-slate-600">—</span>
+                      )}
+                    </button>
+                  ))
+                : visibleRecent.map((symbol) => (
+                    <button
+                      key={symbol}
+                      type="button"
+                      onClick={() => submit(symbol)}
+                      className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
+                    >
+                      <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span className="font-semibold">{symbol}</span>
+                      <span className="ml-auto text-xs font-medium text-slate-600">
+                        —
+                      </span>
+                    </button>
+                  ))}
+            </div>
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <form
       onSubmit={handleSubmit}
-      className={`${variant === 'panel' ? 'flex w-full items-center gap-3' : 'flex items-center gap-2 text-xs'} ${className ?? ""}`}
+      className={`flex items-center gap-2 text-xs ${className ?? ""}`}
     >
-      {/* Panel variant: hide the small label and show a large full-width input */}
-      {variant !== 'panel' && !compact && (
+      {!compact && (
         <label className={isDarkMode ? "text-slate-400" : "text-gray-500"}>
           <span className="mr-2">Search ticker:</span>
         </label>
@@ -77,29 +215,43 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
           ref={inputRef}
-          placeholder={variant === 'panel' ? "Search" : (compact ? "Search ticker…" : "AAPL, MSFT, SPY…")}
-          className={`${variant === 'panel' ? 'w-full rounded-none border-0 bg-transparent pl-0 pr-3 text-4xl md:text-[42px] font-semibold tracking-tight leading-tight' : (compact ? 'w-32' : 'w-28')} ${
-            variant === 'panel'
-              ? (isDarkMode
-                ? 'text-slate-100 placeholder:text-slate-500 focus:outline-none'
-                : 'text-gray-900 placeholder:text-gray-500 focus:outline-none')
-              : (isDarkMode
-                  ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
-                  : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500")
+          placeholder={compact ? "Search ticker…" : "AAPL, MSFT, SPY…"}
+          className={`${compact ? 'w-32' : 'w-28'} ${
+            isDarkMode
+              ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
+              : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500"
           }`}
         />
-        {/* For the panel variant we don't show the Go button; submission is done via Enter */}
-        {variant !== 'panel' && (
-          <button
-            type="submit"
-            className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-              isDarkMode
-                ? "border-sky-500 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
-                : "border-sky-500 bg-sky-100 text-sky-700 hover:bg-sky-200"
-            }`}
-          >
-            Go
-          </button>
+        <button
+          type="submit"
+          className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+            isDarkMode
+              ? "border-sky-500 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
+              : "border-sky-500 bg-sky-100 text-sky-700 hover:bg-sky-200"
+          }`}
+        >
+          Go
+        </button>
+      </div>
+      <div className="mt-2 w-full">
+        <div className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
+          {label}
+        </div>
+        {listItems.length > 0 && (
+          <div className="w-full rounded-md border border-slate-700 bg-black/60 shadow-lg">
+            {listItems.map((r) => (
+              <button
+                type="button"
+                key={r.key}
+                onClick={r.onClick}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-800"
+              >
+                <span className="font-semibold text-slate-100">{r.symbol}</span>
+                <span className="flex-1 truncate px-2 text-slate-300">{r.name || '—'}</span>
+                <span className="text-slate-500">{r.exchange ?? "—"}</span>
+              </button>
+            ))}
+          </div>
         )}
       </div>
       {localError && !compact && (

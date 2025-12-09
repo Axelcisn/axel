@@ -1,0 +1,48 @@
+{
+  "symbol": "NFLX",
+  "date_t": "2025-12-05",
+  "method": "GBM-CC",
+  "y_hat": 100.23999786376953,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.0015208825706148695,
+    "sigma_hat": 0.020035840257016102,
+    "mu_star_used": 0,
+    "window_start": "2023-12-01",
+    "window_end": "2025-12-05",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 100.23999786376953,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 4.607567289276655,
+  "s_scale": 0.020035840257016102,
+  "L_h": 96.37990870206994,
+  "U_h": 104.25468655286987,
+  "band_width_bp": 817,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-09T07:56:03.959Z"
+}

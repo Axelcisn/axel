@@ -1,0 +1,48 @@
+{
+  "symbol": "HOOD",
+  "date_t": "2025-12-09",
+  "method": "GBM-CC",
+  "y_hat": 136.42999267578125,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.005082506563696331,
+    "sigma_hat": 0.0428512746807117,
+    "mu_star_used": 0,
+    "window_start": "2023-12-05",
+    "window_end": "2025-12-09",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 136.42999267578125,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 4.91581160888997,
+  "s_scale": 0.0428512746807117,
+  "L_h": 125.43963586756811,
+  "U_h": 148.38326636378625,
+  "band_width_bp": 1829,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-09T12:13:44.488Z"
+}

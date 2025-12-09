@@ -1,0 +1,48 @@
+{
+  "symbol": "PSKY",
+  "date_t": "2025-12-09",
+  "method": "GBM-CC",
+  "y_hat": 14.569999694824219,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": -0.000059018505557862185,
+    "sigma_hat": 0.03408280062108686,
+    "mu_star_used": 0,
+    "window_start": "2023-12-05",
+    "window_end": "2025-12-09",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 14.569999694824219,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 2.678964599261624,
+  "s_scale": 0.03408280062108686,
+  "L_h": 13.628504759115721,
+  "U_h": 15.576535713882079,
+  "band_width_bp": 1429,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-09T11:46:18.476Z"
+}

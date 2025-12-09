@@ -66,6 +66,25 @@ export async function GET(
       );
     }
 
+    // Ensure rows are sorted ascending
+    rows.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Compute log returns r using adj_close when available
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1];
+      const curr = rows[i];
+      const prevPrice = prev.adj_close ?? prev.close;
+      const currPrice = curr.adj_close ?? curr.close;
+      if (typeof prevPrice === 'number' && typeof currPrice === 'number' && prevPrice > 0 && currPrice > 0) {
+        rows[i].r = Math.log(currPrice / prevPrice);
+      } else {
+        rows[i].r = null;
+      }
+    }
+    if (rows.length > 0) {
+      rows[0].r = null; // first row has no prior
+    }
+
     // Build meta compatible with the existing canonical pipeline
     const meta = buildMeta(symbol, rows, {
       vendor: "yahoo",

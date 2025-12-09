@@ -365,24 +365,99 @@ export async function POST(
             );
           }
           try {
+            // Build adaptive window based on usable returns
+            const filtered = date_t ? canonicalData.filter(row => row.date <= date_t) : canonicalData;
+            const returnsAll = filtered
+              .map((row: any) => row.r)
+              .filter((r: number | null | undefined): r is number => r !== null && r !== undefined);
+
+            let returns = returnsAll;
+            let returnsLen = returnsAll.length;
+
+            if (returnsLen === 0) {
+              // Fallback: recompute returns from prices when r is missing
+              const prices: number[] = [];
+              for (const row of filtered) {
+                const p = row.adj_close ?? row.close;
+                if (typeof p === 'number' && p > 0) {
+                  prices.push(p);
+                }
+              }
+              const recomputed: number[] = [];
+              for (let i = 1; i < prices.length; i++) {
+                const prev = prices[i - 1];
+                const curr = prices[i];
+                if (prev > 0 && curr > 0) {
+                  recomputed.push(Math.log(curr / prev));
+                }
+              }
+              returns = recomputed;
+              returnsLen = recomputed.length;
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][GARCH] recomputed returns from price', {
+                  symbol,
+                  canonicalRows: filtered.length,
+                  recomputedReturnsLen: returnsLen,
+                });
+              }
+            }
+            const configWindow = volParams.garch.window;
+            const garchMinWindow = 500;
+            const garchMaxWindowCap = configWindow;
+            const maxFeasibleWindow = Math.min(garchMaxWindowCap, returnsLen + 1);
+
+            if (process.env.NODE_ENV === 'development') {
+              console.info('[VOL][GARCH] window-precheck', {
+                symbol,
+                returnsLen,
+                configWindow,
+                maxFeasibleWindow,
+                garchMinWindow,
+              });
+            }
+
+            if (maxFeasibleWindow < garchMinWindow) {
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][GARCH] pre-window insufficient', {
+                  symbol,
+                  returnsLen,
+                  garchMinWindow,
+                  configWindow
+                });
+              }
+              return NextResponse.json(
+                {
+                  error: `Insufficient returns for GARCH estimation: have ${returnsLen}, need at least ${garchMinWindow - 1}`,
+                  code: 'INSUFFICIENT_GARCH_DATA'
+                },
+                { status: 422 }
+              );
+            }
+
+            const effectiveGarchWindow = maxFeasibleWindow;
+            if (process.env.NODE_ENV === 'development') {
+              console.info('[VOL][GARCH] window-effective', {
+                symbol,
+                window: effectiveGarchWindow,
+                returnsLen,
+              });
+            }
+
+            const returnsForFit = returns.slice(-(effectiveGarchWindow - 1));
+
             sigmaForecast = await fitAndForecastGarch({
               symbol,
               date_t,
-              window: volParams.garch.window,
+              window: effectiveGarchWindow,
               dist: volParams.garch.dist,
               variance_targeting: volParams.garch.variance_targeting,
-              df: volParams.garch.df
+              df: volParams.garch.df,
+              returns: returnsForFit
             });
 
             if (process.env.NODE_ENV === 'development') {
-              const filtered = date_t ? canonicalData.filter(row => row.date <= date_t) : canonicalData;
-              const windowData = filtered.slice(-volParams.garch.window);
-              const returnsLen = windowData
-                .map((row: any) => row.r)
-                .filter((r: number | null | undefined): r is number => r !== null && r !== undefined)
-                .length;
-              const minRequired = volParams.garch.window - 1;
-              console.info('[VOL][GARCH] forecast ok', { symbol, returnsLen, minRequired });
+              const minRequired = effectiveGarchWindow - 1;
+              console.info('[VOL][GARCH] forecast ok', { symbol, returnsLen, minRequired, effectiveGarchWindow });
             }
           } catch (error: any) {
             const message = error?.message || '';
@@ -483,11 +558,40 @@ export async function POST(
           
           const estimator = model.split('-')[1] as "P" | "GK" | "RS" | "YZ";
           try {
+            // Compute adaptive window for range estimators
+            const filtered = date_t ? canonicalData.filter(row => row.date <= date_t) : canonicalData;
+            const availableRows = filtered.length;
+            const configWindow = volParams.range.window;
+            const rangeMinWindow = 252;
+            const rangeMaxWindowCap = configWindow;
+            const maxFeasibleWindow = Math.min(rangeMaxWindowCap, Math.max(0, availableRows - 1));
+
+            if (maxFeasibleWindow < rangeMinWindow) {
+              if (process.env.NODE_ENV === 'development') {
+                console.info('[VOL][Range] pre-window insufficient', {
+                  symbol,
+                  estimator,
+                  availableRows,
+                  rangeMinWindow,
+                  configWindow
+                });
+              }
+              return NextResponse.json(
+                {
+                  error: `Insufficient data for range estimator: have ${availableRows} rows, need at least ${rangeMinWindow + 1}`,
+                  code: 'INSUFFICIENT_RANGE_DATA'
+                },
+                { status: 422 }
+              );
+            }
+
+            const effectiveRangeWindow = maxFeasibleWindow;
+
             sigmaForecast = await computeRangeSigma({
               symbol,
               date_t,
               estimator,
-              window: volParams.range.window,
+              window: effectiveRangeWindow,
               ewma_lambda: volParams.range.ewma_lambda
             });
           } catch (error: any) {

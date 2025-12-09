@@ -39,7 +39,10 @@ export interface GarchParams {
   dist: "normal" | "student-t";
   variance_targeting: boolean;
   df?: number | null;
+  returns?: number[]; // optional precomputed returns (log)
 }
+
+const MIN_GARCH_WINDOW = 500;
 
 /**
  * Fit GARCH(1,1) and forecast one-step variance
@@ -49,37 +52,49 @@ export interface GarchParams {
  * Multi-step: σ²_{t+h|t} = ω [1-(α+β)^h]/(1-α-β) + (α+β)^h σ²_t
  */
 export async function fitAndForecastGarch(params: GarchParams): Promise<SigmaForecast> {
-  const { symbol, date_t, window, dist, variance_targeting, df } = params;
+  const { symbol, date_t, window, dist, variance_targeting, df, returns: precomputedReturns } = params;
+
+  if (process.env.NODE_ENV === 'development') {
+    // Log once per call for visibility into usable window/returns
+    console.info('[GARCH][engine] input', { symbol, window, returnsLen: precomputedReturns?.length });
+  }
   
   // Validate window
-  if (window < 600) {
-    throw new Error('GARCH requires window >= 600 (recommend 1000)');
+  if (window < MIN_GARCH_WINDOW) {
+    throw new Error(`GARCH requires window >= ${MIN_GARCH_WINDOW} (recommend 1000)`);
   }
   
-  // Load canonical data
-  const data = await loadCanonicalData(symbol);
-  if (!data || data.length === 0) {
-    throw new Error(`No canonical data found for ${symbol}`);
+  let returns: number[] = [];
+
+  if (precomputedReturns && precomputedReturns.length > 0) {
+    returns = precomputedReturns.slice(-(window - 1));
+  } else {
+    // Load canonical data
+    const data = await loadCanonicalData(symbol);
+    if (!data || data.length === 0) {
+      throw new Error(`No canonical data found for ${symbol}`);
+    }
+    
+    // Filter up to date_t if specified
+    let filteredData = data;
+    if (date_t) {
+      filteredData = data.filter((row: CanonicalRow) => row.date <= date_t);
+    }
+    
+    if (filteredData.length < window) {
+      throw new Error(`Insufficient data: need ${window}, have ${filteredData.length}`);
+    }
+    
+    // Get the last 'window' observations
+    const windowData = filteredData.slice(-window);
+    
+    // Extract log returns (demeaned)
+    returns = windowData
+      .map((row: CanonicalRow) => row.r)
+      .filter((r: number | null | undefined): r is number => r !== null && r !== undefined);
   }
-  
-  // Filter up to date_t if specified
-  let filteredData = data;
-  if (date_t) {
-    filteredData = data.filter((row: CanonicalRow) => row.date <= date_t);
-  }
-  
-  if (filteredData.length < window) {
-    throw new Error(`Insufficient data: need ${window}, have ${filteredData.length}`);
-  }
-  
-  // Get the last 'window' observations
-  const windowData = filteredData.slice(-window);
-  
-  // Extract log returns (demeaned)
-  const returns = windowData
-    .map((row: CanonicalRow) => row.r)
-    .filter((r: number | null | undefined): r is number => r !== null && r !== undefined);
-  // Need one fewer returns than prices: require >= window - 1 non-null r values (window validated >= 600)
+
+  // Need one fewer returns than prices: require >= window - 1 non-null r values (window validated against MIN_GARCH_WINDOW)
   if (returns.length < window - 1) {
     throw new Error('Insufficient returns for GARCH estimation');
   }

@@ -20,6 +20,7 @@ interface EwmaWalkerPathPoint {
   y_hat_tp1: number;
   L_tp1: number;
   U_tp1: number;
+  sigma_t: number;
 }
 
 // EWMA Summary stats
@@ -62,6 +63,8 @@ interface TrendSectionProps {
   onMomentumPeriodChange?: (period: number) => void;
   /** Optional EWMA crossover data to avoid duplicate fetches */
   ewmaCrossoverOverride?: Partial<UseEwmaCrossoverResult>;
+  trendWeight?: number | null;
+  trendWeightUpdatedAt?: string | null;
 }
 
 /**
@@ -130,6 +133,8 @@ export default function TrendSection({
   momentumPeriodOverride,
   onMomentumPeriodChange,
   ewmaCrossoverOverride,
+  trendWeight,
+  trendWeightUpdatedAt,
 }: TrendSectionProps) {
   const isDarkMode = useDarkMode();
 
@@ -277,6 +282,7 @@ export default function TrendSection({
         y_hat_tp1: p.y_hat_tp1,
         L_tp1: p.L_tp1,
         U_tp1: p.U_tp1,
+        sigma_t: p.sigma_t,
       }));
 
       // Append OOS forecast if available
@@ -289,6 +295,7 @@ export default function TrendSection({
           y_hat_tp1: json.oosForecast.y_hat,
           L_tp1: json.oosForecast.L,
           U_tp1: json.oosForecast.U,
+          sigma_t: json.oosForecast.sigma_t,
         });
       }
 
@@ -475,6 +482,26 @@ export default function TrendSection({
                               </div>
                             </div>
                             <p className="text-[10px] text-slate-500">H(d): {horizon} · λ: 0.94</p>
+                            {trendWeight != null ? (
+                              <p
+                                className="text-[10px] text-slate-500"
+                                title="Trend Weight is the estimated contribution of the EWMA Trend signal to the forecast, calibrated from historical data."
+                              >
+                                Trend Weight:{' '}
+                                <span className="text-slate-200">
+                                  {trendWeight.toFixed(3)}
+                                </span>
+                                {trendWeightUpdatedAt ? (
+                                  <span className="ml-1 text-[10px] text-slate-500">
+                                    (updated {trendWeightUpdatedAt})
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : (
+                              <p className="text-[10px] text-slate-500">
+                                Trend Weight: <span className="text-slate-400">not available</span>
+                              </p>
+                            )}
                           </div>
                         </div>
 

@@ -206,3 +206,69 @@ export function computeEwmaGapStats(
     sampleSize,
   };
 }
+
+export interface EwmaGapZPoint {
+  date: string;
+  z: number;
+}
+
+/**
+ * Compute a rolling z-score series for the EWMA gap (short - long).
+ * This mirrors the logic used for Trend tilt so both chart and sim can share the same z_t.
+ */
+export function computeEwmaGapZSeries(
+  priceRows: { date: string; close: number }[],
+  shortWindow: number,
+  longWindow: number,
+  lookback: number
+): EwmaGapZPoint[] {
+  if (priceRows.length === 0) return [];
+
+  const shortSeries = computeEwmaSeries(priceRows, shortWindow);
+  const longSeries = computeEwmaSeries(priceRows, longWindow);
+
+  const longMap = new Map<string, number>();
+  for (const p of longSeries) {
+    if (Number.isFinite(p.value)) {
+      longMap.set(p.date, p.value);
+    }
+  }
+
+  const gaps: { date: string; gap: number }[] = [];
+  for (const s of shortSeries) {
+    const l = longMap.get(s.date);
+    if (l == null || !Number.isFinite(l) || !Number.isFinite(s.value)) continue;
+    gaps.push({ date: s.date, gap: s.value - l });
+  }
+
+  const result: EwmaGapZPoint[] = [];
+  const n = gaps.length;
+  for (let i = 0; i < n; i++) {
+    const windowStart = Math.max(0, i - lookback + 1);
+    const window = gaps.slice(windowStart, i + 1);
+    const sampleSize = window.length;
+    if (sampleSize < lookback / 2) continue; // require reasonable history to avoid noisy z
+
+    let mean = 0;
+    for (const g of window) mean += g.gap;
+    mean /= sampleSize;
+
+    let variance = 0;
+    for (const g of window) {
+      const d = g.gap - mean;
+      variance += d * d;
+    }
+    variance /= sampleSize;
+    const std = Math.sqrt(variance);
+
+    if (std <= 1e-8 || !Number.isFinite(std)) continue;
+
+    const lastGap = window[window.length - 1].gap;
+    const z = (lastGap - mean) / std;
+    if (!Number.isFinite(z)) continue;
+
+    result.push({ date: gaps[i].date, z });
+  }
+
+  return result;
+}

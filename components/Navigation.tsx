@@ -227,69 +227,15 @@ export default function Navigation() {
               }, HOVER_CLOSE_MS);
             }}
           >
-            <div className={`${containerClass} py-10 md:py-12`}>
-              <div className="max-w-4xl space-y-8">
-                <div className="flex items-center gap-4 text-4xl md:text-[42px]">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.6}
-                    className={`h-9 w-9 ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35" />
-                    <circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.6" fill="none" />
-                  </svg>
-                  <div className="flex-1">
-                    <TickerSearch
-                      initialSymbol={currentTicker}
-                      isDarkMode={isDarkMode}
-                      compact={false}
-                      autoFocus={true}
-                      variant="panel"
-                      className="w-full"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {/* Show 'Suggested' with static picks when no recent searches, otherwise 'Last searched' */}
-                  <h3
-                    className={`text-sm font-semibold ${
-                      isDarkMode ? 'text-slate-400' : 'text-gray-600'
-                    }`}
-                  >
-                    {lastSearches.length === 0 ? 'Suggested' : 'Last searched'}
-                  </h3>
-                  <ul className="space-y-3">
-                    {(lastSearches.length === 0 ? ['AAPL', 'MSFT', 'AMZN', 'GOOGL', 'TSLA'] : lastSearches.slice(0, 5)).map((s) => (
-                      <li key={s}>
-                        <Link
-                          href={`/company/${encodeURIComponent(s)}/timing`}
-                          className={`flex items-center gap-3 py-1.5 text-[17px] font-semibold ${
-                            isDarkMode ? 'text-slate-100 hover:text-white' : 'text-gray-800 hover:text-gray-900'
-                          }`}
-                          onClick={() => setIsSearchOpen(false)}
-                        >
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={1.3}
-                            className="h-[18px] w-[18px] text-slate-400"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14" />
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 5l7 7-7 7" />
-                          </svg>
-                          <span className="leading-none">{s}</span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
+            <div className="w-full">
+              <TickerSearch
+                initialSymbol={currentTicker}
+                isDarkMode={isDarkMode}
+                compact={false}
+                autoFocus={true}
+                variant="panel"
+                className="w-full"
+              />
             </div>
           </div>
         </>

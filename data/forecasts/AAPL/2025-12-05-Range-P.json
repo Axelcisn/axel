@@ -2,58 +2,58 @@
   "symbol": "AAPL",
   "method": "Range-P",
   "date_t": "2025-12-05",
-  "horizonTrading": 5,
-  "h_eff_days": 7,
-  "verifyDate": "2025-12-12",
+  "horizonTrading": 1,
+  "h_eff_days": 3,
+  "verifyDate": "2025-12-08",
   "domain": "log",
-  "created_at": "2025-12-08T13:13:19.135Z",
+  "created_at": "2025-12-09T12:39:03.363Z",
   "locked": true,
   "y_hat": 278.7799987792969,
   "target": {
-    "h": 5,
-    "coverage": 0.99,
+    "h": 1,
+    "coverage": 0.95,
     "window_requirements": {
-      "min_days": 126
+      "min_days": 504
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.01228205075630625,
+    "sigma_hat": 0.01228150454217447,
     "mu_star_used": 0,
-    "window_start": "2025-06-09",
+    "window_start": "2023-12-04",
     "window_end": "2025-12-05",
     "n": 1256,
     "S_t": 278.7799987792969,
-    "sigma_forecast": 0.01228205075630625,
-    "sigma2_forecast": 0.00015084877078048293,
-    "critical_value": 2.576,
+    "sigma_forecast": 0.01228150454217447,
+    "sigma2_forecast": 0.00015083535381945216,
+    "critical_value": 1.96,
     "window_span": {
-      "start": "2025-06-09",
+      "start": "2023-12-04",
       "end": "2025-12-05"
     },
     "volatility_diagnostics": {
       "estimator": "P",
-      "window": 126,
+      "window": 504,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 2 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 2.66, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 14 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 6.76, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 259.7389164255764,
-    "U_h": 299.2169551983698,
-    "band_width_bp": 653.2202622293325
+    "L_h": 272.1494018530956,
+    "U_h": 285.5721423240041,
+    "band_width_bp": 493.2121981349802
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "model": "Range-P",
-      "h": 5,
-      "coverage": 0.99,
+      "h": 1,
+      "coverage": 0.95,
       "range": {
         "estimator": "P",
-        "window": 126,
+        "window": 504,
         "ewma_lambda": 0.94
       }
     },
@@ -63,16 +63,17 @@
   "diagnostics": {
     "method_source": "Range-P",
     "m_log": 5.630422935923008,
-    "s_scale": 0.02746350039420348,
+    "s_scale": 0.01228150454217447,
     "critical_type": "normal"
   },
   "critical": {
     "type": "normal",
-    "value": 2.576
+    "value": 1.96
   },
   "window_period": {
-    "start": "2025-06-09",
+    "start": "2023-12-04",
     "end": "2025-12-05",
-    "n_obs": 126
-  }
+    "n_obs": 504
+  },
+  "is_active": false
 }

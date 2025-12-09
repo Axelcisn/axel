@@ -1,0 +1,34 @@
+{
+  "rows": [
+    {
+      "date": "2025-12-09",
+      "open": 43.61000061035156,
+      "high": 44.720001220703125,
+      "low": 43.310001373291016,
+      "close": 44.720001220703125,
+      "adj_close": 44.720001220703125,
+      "volume": 2163,
+      "split_factor": null,
+      "cash_dividend": null,
+      "r": null,
+      "valid": true,
+      "issues": []
+    }
+  ],
+  "meta": {
+    "symbol": "UI314B.MI",
+    "exchange_tz": "America/New_York",
+    "calendar_span": {
+      "start": "2025-12-09",
+      "end": "2025-12-09"
+    },
+    "rows": 1,
+    "missing_trading_days": [],
+    "invalid_rows": 0,
+    "generated_at": "2025-12-09T11:22:36.120Z",
+    "vendor": "yahoo",
+    "source": "yahoo-chart-api",
+    "range": "5y",
+    "interval": "1d"
+  }
+}

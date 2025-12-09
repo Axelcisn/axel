@@ -47,14 +47,13 @@ function calculateTargetDate(dateT: string | null, horizon: number): string | nu
   if (!dateT) return null;
   
   try {
-    const date = new Date(dateT);
-    if (isNaN(date.getTime())) return null;
-    
+    const [y, m, d] = dateT.split("-").map(Number);
+    if (!y || !m || !d) return null;
+    let currentDate = new Date(Date.UTC(y, m - 1, d));
     let businessDaysAdded = 0;
-    let currentDate = new Date(date);
     
     while (businessDaysAdded < horizon) {
-      currentDate.setDate(currentDate.getDate() + 1);
+      currentDate.setUTCDate(currentDate.getUTCDate() + 1);
       const dayOfWeek = currentDate.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
       
       // Count only business days (Monday = 1 to Friday = 5)
@@ -98,6 +97,8 @@ interface ChartPoint {
   forecastLower?: number | null;
   forecastUpper?: number | null;
   forecastModelName?: string | null;
+  forecastModelMethod?: string | null;
+  forecastWindowN?: number | null;
   // GBM parameters
   forecastMuStar?: number | null;
   forecastSigma?: number | null;
@@ -192,6 +193,7 @@ export interface EwmaWalkerPathPoint {
   y_hat_tp1: number;
   L_tp1: number;
   U_tp1: number;
+  sigma_t: number;
 }
 
 type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
@@ -299,6 +301,7 @@ export interface SimulationRunSummary {
 }
 
 type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
+type SimBase = "biased" | "max";
 export type TrendOverlayState = {
   ewma: boolean;
   momentum: boolean;
@@ -351,6 +354,12 @@ interface PriceChartProps {
   onToggleT212Run?: (runId: T212RunId) => void;  // Toggle T212 run visibility
   isCfdEnabled?: boolean;  // Whether CFD simulation is enabled
   onToggleCfd?: () => void;  // Toggle CFD simulation on/off
+  simBase?: SimBase;
+  onSelectSimBase?: (base: SimBase) => void;
+  trendWeight?: number | null;
+  trendWeightUpdatedAt?: string | null;
+  isTrendTiltEnabled?: boolean;
+  onToggleTrendTilt?: () => void;
   onDateRangeChange?: (startDate: string | null, endDate: string | null) => void;  // Callback when date range changes
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
 }
@@ -399,6 +408,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onToggleT212Run,
   isCfdEnabled,
   onToggleCfd,
+  simBase = "biased",
+  onSelectSimBase,
+  trendWeight = null,
+  trendWeightUpdatedAt = null,
+  isTrendTiltEnabled = false,
+  onToggleTrendTilt,
   onDateRangeChange,
   simulationRuns,
 }) => {
@@ -1977,26 +1992,16 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     garchEstimator?: string | null,
     rangeEstimator?: string | null
   ): string => {
-    // Prefer method string when available (e.g., Range-P, GARCH11-t, GBM-CC)
     if (method) {
-      if (method.startsWith("Range-")) {
-        const code = method.split("-")[1];
-        const label = code === "P"
-          ? "Parkinson"
-          : code === "GK"
-            ? "Garman-Klass"
-            : code === "RS"
-              ? "Rogers-Satchell"
-              : code === "YZ"
-                ? "Yang-Zhang"
-                : code;
-        return `Range - ${label}`;
-      }
-      if (method.startsWith("GARCH11")) {
-        return method.includes("-t") ? "GARCH (Student-t)" : "GARCH (Normal)";
-      }
       if (method.startsWith("GBM")) return "GBM";
+      if (method === "GARCH11-N") return "GARCH (1,1) - Normal";
+      if (method === "GARCH11-t") return "GARCH (1,1) - Student-t";
+      if (method === "Range-P") return "Range - Parkinson";
+      if (method === "Range-GK") return "Range - Garman-Klass";
+      if (method === "Range-RS") return "Range - Rogers-Satchell";
+      if (method === "Range-YZ") return "Range - Yang Zhang";
       if (method === "HAR-RV") return "HAR-RV";
+      return method;
     }
 
     // Fallback: use current UI selections
@@ -2008,14 +2013,16 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           : rangeEstimator === "RS"
             ? "Rogers-Satchell"
             : rangeEstimator === "YZ"
-              ? "Yang-Zhang"
+              ? "Yang Zhang"
               : "Range";
       return `Range - ${label}`;
     }
     if (volModel === "GARCH") {
-      return garchEstimator === "Student-t" ? "GARCH (Student-t)" : "GARCH (Normal)";
+      return garchEstimator === "Student-t" ? "GARCH (1,1) - Student-t" : "GARCH (1,1) - Normal";
     }
-    return volModel || "Model";
+    if (volModel === "GBM") return "GBM";
+    if (volModel === "HAR-RV") return "HAR-RV";
+    return volModel || "Unknown";
   };
 
   // Get model name for forecast overlay (method-aware + estimator labels)
@@ -2025,6 +2032,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     horizonCoverage?.garchEstimator || null,
     horizonCoverage?.rangeEstimator || null
   );
+  const forecastModelMethod = typeof af?.method === "string" ? af.method : null;
+  const forecastWindowN = (af as any)?.estimates?.n ?? null;
 
   // Create chart data with forecast band for rendering the connecting lines and filled area
   const chartDataWithForecastBand = useMemo(() => {
@@ -2069,6 +2078,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           forecastLower: overlayLower,
           forecastUpper: overlayUpper,
           forecastModelName,
+          forecastModelMethod,
+          forecastWindowN,
           forecastMuStar: overlayMuStar,
           forecastSigma: overlaySigma,
           forecastOmega: overlayOmega,
@@ -2100,6 +2111,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               forecastLower: lastHistValue,
               forecastUpper: lastHistValue,
               forecastModelName,
+              forecastModelMethod,
+              forecastWindowN,
             };
           }
           
@@ -2111,6 +2124,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               forecastLower: overlayLower,
               forecastUpper: overlayUpper,
               forecastModelName,
+              forecastModelMethod,
+              forecastWindowN,
               forecastMuStar: overlayMuStar,
               forecastSigma: overlaySigma,
               forecastOmega: overlayOmega,
@@ -2131,6 +2146,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               forecastLower: overlayLower != null ? lastHistValue + t * (overlayLower - lastHistValue) : null,
               forecastUpper: overlayUpper != null ? lastHistValue + t * (overlayUpper - lastHistValue) : null,
               forecastModelName,
+              forecastModelMethod,
+              forecastWindowN,
             };
           }
           
@@ -2140,7 +2157,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
     
     return data;
-  }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName]);
+  }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName, forecastModelMethod, forecastWindowN]);
 
   // Compute Y-axis domain that includes EWMA values when overlay is active
   const priceYDomain = useMemo(() => {
@@ -5271,6 +5288,75 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             {isCfdEnabled ? 'CFD On' : 'CFD Off'}
           </button>
 
+          {/* Sim base buttons */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={`
+                px-3 py-1 text-xs rounded-full transition-colors font-medium
+                ${simBase === 'biased'
+                  ? 'bg-sky-500 text-white'
+                  : isDarkMode 
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }
+              `}
+              onClick={() => onSelectSimBase && onSelectSimBase('biased')}
+            >
+              Biased
+            </button>
+            <button
+              type="button"
+              className={`
+                px-3 py-1 text-xs rounded-full transition-colors font-medium
+                ${simBase === 'max'
+                  ? 'bg-sky-500 text-white'
+                  : isDarkMode 
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }
+              `}
+              onClick={() => onSelectSimBase && onSelectSimBase('max')}
+          >
+            Biased (Max)
+          </button>
+        </div>
+
+          {/* Trend tilt toggle */}
+          <button
+            type="button"
+            onClick={() => onToggleTrendTilt && onToggleTrendTilt()}
+            className={`
+              px-3 py-1 text-xs rounded-full transition-colors font-medium
+              ${isTrendTiltEnabled
+                ? 'bg-sky-500 text-white'
+                : isDarkMode
+                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }
+            `}
+            title="Toggle Trend-tilted EWMA simulation on/off. (UI hook only for now.)"
+          >
+            Trend tilt
+          </button>
+
+          {/* Trend Weight chip */}
+          {trendWeight != null && (
+            <span
+              className={`
+                ml-1 rounded-full px-3 py-1 text-[10px] font-medium
+                ${isDarkMode ? 'bg-slate-800 text-sky-200' : 'bg-slate-100 text-sky-700'}
+              `}
+              title={
+                trendWeightUpdatedAt
+                  ? `Trend Weight calibrated on ${trendWeightUpdatedAt}.`
+                  : 'Global Trend Weight estimated from historical panel regression.'
+              }
+            >
+              Trend Weight {trendWeight.toFixed(3)}
+            </span>
+          )}
+
           {/* Simulation Settings Button (⋯) with Dropdown */}
           <div className="relative" ref={simulationSettingsDropdownRef}>
             <button
@@ -6557,8 +6643,8 @@ type TradeMarkerPointForTooltip = {
 const formatDateShort = (dateStr: string | null | undefined): string | null => {
   if (!dateStr) return null;
   try {
-    const d = new Date(dateStr + 'T00:00:00');
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
   } catch {
     return dateStr;
   }
@@ -6609,7 +6695,9 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   }
   
   // Get model name for forecast display
-  const modelName = data.forecastModelName || 'Model';
+  const modelFriendly = data.forecastModelName || 'Model';
+  const modelWindow = data.forecastWindowN ?? null;
+  const modelHeader = modelFriendly;
   
   // Get Trading212 events for this date from the map (opens AND closes)
   const t212Events = trading212EventsByDate?.get(labelStr) ?? [];
@@ -6642,15 +6730,21 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
           <div className="px-3 py-2">
             {/* Section Header */}
             <div className="flex items-center gap-1.5 mb-1">
-              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-blue-400' : 'bg-blue-500'}`} />
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-blue-400' : 'text-blue-600'
               }`}>
-                {modelName}
+                {modelHeader}
               </span>
             </div>
             
             <div className="space-y-0.5 text-[10px]">
+              {/* Window (N) */}
+              <div className="flex justify-between gap-3">
+                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>N</span>
+                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
+                  {modelWindow != null ? modelWindow.toLocaleString() : '–'}
+                </span>
+              </div>
               {/* Model Forecast (center) */}
               {data.forecastCenter != null && (
                 <div className="flex justify-between gap-3">
@@ -6786,47 +6880,6 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
             </div>
           </div>
         )}
-
-        {/* EWMA trend block */}
-        {showEwmaTrend && (() => {
-          // Derive the term label from window values
-          let termLabel = 'Custom';
-          if (ewmaShortWindow === 5 && ewmaLongWindow === 20) {
-            termLabel = 'Short-term';
-          } else if (ewmaShortWindow === 14 && ewmaLongWindow === 50) {
-            termLabel = 'Medium-term';
-          } else if (ewmaShortWindow === 50 && ewmaLongWindow === 200) {
-            termLabel = 'Long-term';
-          }
-          
-          return (
-            <div className="px-3 py-2">
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <span className="font-semibold text-[11px] text-slate-300">EWMA</span>
-                  <span className={`text-[9px] ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>{termLabel}</span>
-                </div>
-                <span className={`font-mono text-[10px] ${trendClass}`}>{trendLabel}</span>
-              </div>
-              <div className="flex items-baseline justify-between text-[10px] mt-1">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
-                  Short ({ewmaShortWindow})
-                </span>
-                <span className="font-mono text-slate-100">
-                  {formatPrice(shortValue)}
-                </span>
-              </div>
-              <div className="flex items-baseline justify-between text-[10px]">
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>
-                  Long ({ewmaLongWindow})
-                </span>
-                <span className="font-mono text-slate-100">
-                  {formatPrice(longValue)}
-                </span>
-              </div>
-            </div>
-          );
-        })()}
         
         {/* EWMA Unbiased Section */}
         {(data.ewma_past_forecast != null || data.ewma_future_forecast != null) && (

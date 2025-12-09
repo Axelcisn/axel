@@ -1,0 +1,48 @@
+{
+  "symbol": "AMD",
+  "date_t": "2025-12-05",
+  "method": "GBM-CC",
+  "y_hat": 217.97000122070312,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.0011614066396012988,
+    "sigma_hat": 0.03389449042458308,
+    "mu_star_used": 0,
+    "window_start": "2023-12-01",
+    "window_end": "2025-12-05",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 217.97000122070312,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 5.384357444240748,
+  "s_scale": 0.03389449042458308,
+  "L_h": 203.96031970626842,
+  "U_h": 232.94198352197017,
+  "band_width_bp": 1421,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-09T10:04:21.064Z"
+}

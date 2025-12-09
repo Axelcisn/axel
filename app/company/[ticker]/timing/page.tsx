@@ -46,7 +46,8 @@ import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import TrendSection from '@/components/trend/TrendSection';
 import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
-import { computeEwmaSeries } from '@/lib/indicators/ewmaCrossover';
+import { computeEwmaSeries, computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
+import { useLiveQuote } from '@/lib/hooks/useLiveQuote';
 
 /**
  * Data flow (Timing/Trend):
@@ -162,6 +163,9 @@ interface TimingPageProps {
 export default function TimingPage({ params }: TimingPageProps) {
   // Dark mode hook
   const isDarkMode = useDarkMode();
+  const { quote, isLoading: isQuoteLoading } = useLiveQuote(params.ticker, {
+    pollMs: 10000,
+  });
   
   // Auto-cleanup hook for generated forecast files
   const { trackGeneratedFile, cleanupTrackedFiles } = useAutoCleanupForecasts(params.ticker);
@@ -212,6 +216,13 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Current price state for header display
   const [headerPrice, setHeaderPrice] = useState<{ price: number | null; date: string | null }>({ price: null, date: null });
+  const [priceDirection, setPriceDirection] = useState<"up" | "down" | null>(null);
+  const prevPriceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    console.info("[Header] quote", quote);
+  }, [quote]);
 
   // Single source for what the "Final Prediction Intervals" card shows
   const [activeForecast, setActiveForecast] = useState<any | null>(null);
@@ -362,13 +373,25 @@ export default function TimingPage({ params }: TimingPageProps) {
   // GBM state for volatility models (separate from standalone GBM card)
   const [gbmWindow, setGbmWindow] = useState<number>(504);
   const [gbmLambda, setGbmLambda] = useState<number>(0);
+
+  const DEFAULT_GARCH_WINDOW = 756;
+  const DEFAULT_RANGE_WINDOW = 504;
   
-  // Volatility window state - defaults to 1000 for GARCH, can be manually set or synced with GBM
-  const [volWindow, setVolWindow] = useState(1000);
+  // Volatility window state - softer defaults for GARCH/Range, can be manually set or synced with GBM
+  const [volWindow, setVolWindow] = useState(DEFAULT_GARCH_WINDOW);
   const [volWindowAutoSync, setVolWindowAutoSync] = useState(false); // Default to manual (1000) not auto-sync
   const [rvAvailable, setRvAvailable] = useState<boolean>(false);
   const [isGeneratingVolatility, setIsGeneratingVolatility] = useState(false);
   const [volatilityError, setVolatilityError] = useState<string | null>(null);
+  const [modelAvailabilityMessage, setModelAvailabilityMessage] = useState<string | null>(null);
+  // Adjust default volatility window when switching models to avoid overly aggressive defaults
+  useEffect(() => {
+    if (volModel === 'GARCH' && volWindow > DEFAULT_GARCH_WINDOW) {
+      setVolWindow(DEFAULT_GARCH_WINDOW);
+    } else if (volModel === 'Range' && volWindow > DEFAULT_RANGE_WINDOW) {
+      setVolWindow(DEFAULT_RANGE_WINDOW);
+    }
+  }, [volModel, volWindow]);
   
   // Track when horizon changes but forecast hasn't been regenerated
   const [forecastHorizonMismatch, setForecastHorizonMismatch] = useState(false);
@@ -377,12 +400,13 @@ export default function TimingPage({ params }: TimingPageProps) {
   type EwmaWalkerPathPoint = {
     date_t: string;
     date_tp1: string;
-    S_t: number;
-    S_tp1: number;
-    y_hat_tp1: number;
-    L_tp1: number;
-    U_tp1: number;
-  };
+  S_t: number;
+  S_tp1: number;
+  y_hat_tp1: number;
+  L_tp1: number;
+  U_tp1: number;
+  sigma_t: number; // EWMA daily volatility at t
+};
 
   const [ewmaSummary, setEwmaSummary] = useState<EwmaSummary | null>(null);
   const [ewmaPath, setEwmaPath] = useState<EwmaWalkerPathPoint[] | null>(null);
@@ -455,7 +479,11 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isReactionMaximized, setIsReactionMaximized] = useState(false);  // Track if Biased has been optimized
   const [reactionOptimizeError, setReactionOptimizeError] = useState<string | null>(null);
   type EwmaMode = 'unbiased' | 'biased' | 'max';
+  type SimBase = 'biased' | 'max';
   const [activeEwmaMode, setActiveEwmaMode] = useState<EwmaMode>('max');
+  const [trendWeight, setTrendWeight] = useState<number | null>(null);
+  const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
+  const [isTrendTiltEnabled, setIsTrendTiltEnabled] = useState(false); // Phase 5 UI hook; no sim math yet
 
   // Trading212 CFD Simulation state
   const [isCfdEnabled, setIsCfdEnabled] = useState(false);  // CFD simulation toggle
@@ -506,13 +534,14 @@ export default function TimingPage({ params }: TimingPageProps) {
   type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
 
   type Trading212SimRun = {
-    id: T212RunId;
-    label: string;
-    signalSource: "unbiased" | "biased";
-    result: Trading212SimulationResult;
-    lambda?: number;
-    trainFraction?: number;
-  };
+  id: T212RunId;
+  label: string;
+  signalSource: "unbiased" | "biased";
+  result: Trading212SimulationResult;
+  lambda?: number;
+  trainFraction?: number;
+  trendTiltEnabled?: boolean;
+};
 
   // Type for trade overlays passed to PriceChart
   type Trading212TradeOverlay = {
@@ -761,6 +790,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
   }, [t212RunsFiltered]);
 
+  const simBase: SimBase = activeEwmaMode === 'max' ? 'max' : 'biased';
+
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
     if (volWindowAutoSync) {
@@ -805,7 +836,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Company Registry state
   const [companyTicker, setCompanyTicker] = useState(params.ticker);
   const [companyName, setCompanyName] = useState('');
-  const [companyExchange, setCompanyExchange] = useState('NASDAQ');
+  const [companyExchange, setCompanyExchange] = useState<string | null>(null);
   const [availableExchanges, setAvailableExchanges] = useState<string[]>([]);
   const [exchangesByRegion, setExchangesByRegion] = useState<Record<string, string[]>>({});
   const [isSavingCompany, setIsSavingCompany] = useState(false);
@@ -1047,6 +1078,49 @@ export default function TimingPage({ params }: TimingPageProps) {
     initializeComponent();
   }, [params.ticker]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Load global Trend Weight calibration (UI only)
+  useEffect(() => {
+    let cancelled = false;
+    const loadCalibration = async () => {
+      try {
+        const res = await fetch('/api/trend/calibration');
+        if (!res.ok) {
+          console.warn('[Timing] Failed to load Trend calibration, status:', res.status);
+          return;
+        }
+        const json = await res.json();
+        const calibration = json?.calibration as {
+          trendSignalWeightGlobal?: number;
+          calibrationDate?: string;
+        } | null;
+
+        if (
+          calibration &&
+          typeof calibration.trendSignalWeightGlobal === 'number' &&
+          Number.isFinite(calibration.trendSignalWeightGlobal)
+        ) {
+          if (!cancelled) {
+            setTrendWeight(calibration.trendSignalWeightGlobal);
+            setTrendWeightUpdatedAt(calibration.calibrationDate ?? null);
+          }
+        } else if (!cancelled) {
+          setTrendWeight(null);
+          setTrendWeightUpdatedAt(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          console.warn('[Timing] Error loading Trend calibration:', err);
+        }
+      }
+    };
+
+    loadCalibration();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Helper function to parse method string to UI state on client-side
   const parseMethodToUIState = (method: string): {
     volModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
@@ -1188,20 +1262,25 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   };
 
-  // Fetch current price for header display
+  // Fetch current price for header display (canonical fallback)
   const loadCurrentPrice = async () => {
     try {
-      const response = await fetch(`/api/history/${params.ticker}`);
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.length > 0) {
-          const latest = data[data.length - 1];
-          const price = latest.adj_close ?? latest.close ?? null;
-          setHeaderPrice({ price, date: latest.date });
-        }
+      const res = await fetch(`/api/history/${params.ticker}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : data?.rows;
+
+      if (rows && rows.length > 0) {
+        const last = rows[rows.length - 1];
+        const price = last?.adj_close ?? last?.close;
+        const date = last?.date;
+        setHeaderPrice({ price: price ?? null, date: date ?? null });
       }
-    } catch (error) {
-      console.error('Failed to load current price:', error);
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[Header] loadCurrentPrice error", err);
+      }
     }
   };
 
@@ -1523,6 +1602,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         y_hat_tp1: p.y_hat_tp1,
         L_tp1: p.L_tp1,
         U_tp1: p.U_tp1,
+        sigma_t: p.sigma_t,
       }));
 
       // Append OOS tail if present (extends EWMA line/band into future)
@@ -1536,6 +1616,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           y_hat_tp1: oosForecast.y_hat,
           L_tp1: oosForecast.L,
           U_tp1: oosForecast.U,
+          sigma_t: oosForecast.sigma_t,
         });
       }
 
@@ -1620,6 +1701,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         y_hat_tp1: p.y_hat_tp1,
         L_tp1: p.L_tp1,
         U_tp1: p.U_tp1,
+        sigma_t: p.sigma_t,
       }));
 
       // Append OOS tail if present
@@ -1632,6 +1714,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           y_hat_tp1: oosForecast.y_hat,
           L_tp1: oosForecast.L,
           U_tp1: oosForecast.U,
+          sigma_t: oosForecast.sigma_t,
         });
       }
 
@@ -1845,12 +1928,31 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [reactionOptimizationNeutral]);
 
   // Trading212 CFD Simulation: Build bars from any EWMA path (Unbiased or Biased)
+  type Trading212SimBarsOptions = {
+    useTrendTilt?: boolean;
+    trendWeight?: number | null;
+    trendZByDate?: Map<string, number>;
+    horizon?: number;
+  };
+
   const buildTrading212SimBarsFromEwmaPath = useCallback((
     canonicalRows: CanonicalRow[],
     ewmaPathArg: EwmaWalkerPathPoint[] | null,
-    thresholdPct: number
+    thresholdPct: number,
+    options?: Trading212SimBarsOptions
   ): Trading212SimBar[] => {
     if (!ewmaPathArg) return [];
+
+    const useTrendTilt =
+      !!options?.useTrendTilt &&
+      options.trendWeight != null &&
+      options.trendZByDate instanceof Map &&
+      typeof options.horizon === 'number' &&
+      options.horizon > 0;
+
+    const trendWeight = options?.trendWeight ?? null;
+    const trendZByDate = options?.trendZByDate;
+    const horizon = options?.horizon ?? 1;
 
     // Build lookup from target date to forecast
     const ewmaMap = new Map<string, EwmaWalkerPathPoint>();
@@ -1868,11 +1970,43 @@ export default function TimingPage({ params }: TimingPageProps) {
       if (!ewma) continue; // no forecast for this date
 
       // Compare forecast center vs origin price
-      const diffPct = (ewma.y_hat_tp1 - ewma.S_t) / ewma.S_t;
+      const diffPctBase = (ewma.y_hat_tp1 - ewma.S_t) / ewma.S_t;
+
+      let diffForSignal = diffPctBase;
+
+      // Optional Trend tilt adjustment (only applies to biased runs)
+      if (
+        useTrendTilt &&
+        trendWeight != null &&
+        trendZByDate &&
+        ewma.sigma_t != null &&
+        Number.isFinite(ewma.sigma_t)
+      ) {
+        const zRaw = trendZByDate.get(row.date);
+        if (zRaw != null && Number.isFinite(zRaw)) {
+          const zClamped = Math.max(-2, Math.min(2, zRaw));
+
+          const muBase = Math.log(ewma.y_hat_tp1 / ewma.S_t);
+          const sigmaH = ewma.sigma_t * Math.sqrt(horizon);
+
+          if (
+            Number.isFinite(muBase) &&
+            Number.isFinite(sigmaH) &&
+            sigmaH > 0
+          ) {
+            const muTrend = muBase + trendWeight * zClamped * sigmaH;
+            const relChange = Math.exp(muTrend) - 1;
+            if (Number.isFinite(relChange)) {
+              diffForSignal = relChange;
+            }
+          }
+        }
+      }
+
       let signal: Trading212Signal = "flat";
-      if (diffPct > thresholdPct) {
+      if (diffForSignal > thresholdPct) {
         signal = "long";
-      } else if (diffPct < -thresholdPct) {
+      } else if (diffForSignal < -thresholdPct) {
         signal = "short";
       }
 
@@ -1887,13 +2021,20 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, []);
 
   // Trading212 CFD Simulation: Reusable helper to run sim for a specific EWMA source
+  interface RunTrading212SimOptions {
+    autoSelect?: boolean;
+    useTrendTilt?: boolean;
+    trendWeight?: number | null;
+  }
+
   const runTrading212SimForSource = useCallback(
     async (
       source: "unbiased" | "biased",
       runId: T212RunId,
       label: string,
-      opts?: { autoSelect?: boolean }
+      opts?: RunTrading212SimOptions
     ) => {
+      const { autoSelect, useTrendTilt, trendWeight } = opts ?? {};
       setT212Error(null);
       setIsRunningT212Sim(true);
 
@@ -1962,10 +2103,49 @@ export default function TimingPage({ params }: TimingPageProps) {
           throw new Error('No canonical rows available for Trading212 sim.');
         }
 
+        const canUseTrendTilt =
+          source === "biased" &&
+          !!useTrendTilt &&
+          trendWeight != null &&
+          Number.isFinite(trendWeight);
+
+        let trendZByDate: Map<string, number> | undefined;
+
+        if (canUseTrendTilt) {
+          const priceRowsForZ = rowsForSim
+            .map((row) => {
+              const close = row.adj_close ?? row.close;
+              return close && close > 0
+                ? { date: row.date, close }
+                : null;
+            })
+            .filter((r): r is { date: string; close: number } => !!r);
+
+          const zSeries = computeEwmaGapZSeries(
+            priceRowsForZ,
+            trendShortWindow,
+            trendLongWindow,
+            60
+          );
+
+          trendZByDate = new Map<string, number>();
+          for (const p of zSeries) {
+            if (Number.isFinite(p.z)) {
+              trendZByDate.set(p.date, p.z);
+            }
+          }
+        }
+
         const bars = buildTrading212SimBarsFromEwmaPath(
           rowsForSim,
           ewmaPathForSim,
-          t212ThresholdPct
+          t212ThresholdPct,
+          {
+            useTrendTilt: canUseTrendTilt,
+            trendWeight: canUseTrendTilt ? trendWeight! : null,
+            trendZByDate,
+            horizon: h,
+          }
         );
 
         if (bars.length === 0) {
@@ -2021,6 +2201,7 @@ export default function TimingPage({ params }: TimingPageProps) {
               result,
               lambda: storedLambda,
               trainFraction: storedTrainFraction,
+              trendTiltEnabled: canUseTrendTilt,
             },
           ];
         });
@@ -2052,6 +2233,9 @@ export default function TimingPage({ params }: TimingPageProps) {
       reactionOptimizationBest,
       buildTrading212SimBarsFromEwmaPath,
       t212DateRange,
+      h,
+      trendShortWindow,
+      trendLongWindow,
     ]
   );
 
@@ -2129,6 +2313,16 @@ export default function TimingPage({ params }: TimingPageProps) {
     trendMomentumPeriod,
   ]);
 
+  const handleSelectSimBase = useCallback((base: SimBase) => {
+    const nextMode: EwmaMode = base === 'max' ? 'max' : 'biased';
+    setActiveEwmaMode(nextMode);
+    setT212VisibleRunIds(new Set<T212RunId>([modeToRunId(nextMode)]));
+  }, [modeToRunId]);
+
+  const handleToggleTrendTilt = useCallback(() => {
+    setIsTrendTiltEnabled((prev) => !prev);
+  }, []);
+
   // Auto-run T212 sims when CFD is enabled and data is ready
   useEffect(() => {
     console.log("[T212 Auto-Run] Checking conditions:", {
@@ -2162,6 +2356,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
     runTrading212SimForSource("biased", "ewma-biased", "EWMA Biased", {
       autoSelect: false,
+      useTrendTilt: isTrendTiltEnabled,
+      trendWeight,
     });
 
     // Biased (Max): only if we have an optimisation best config
@@ -2170,7 +2366,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         "biased",
         "ewma-biased-max",
         "EWMA Biased (Max)",
-        { autoSelect: false }
+        { autoSelect: false, useTrendTilt: isTrendTiltEnabled, trendWeight }
       );
     }
   }, [
@@ -2181,6 +2377,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     reactionMapSummary,
     reactionOptimizationBest,
     runTrading212SimForSource,
+    isTrendTiltEnabled,
+    trendWeight,
   ]);
 
   // Add "EWMA Biased (Max)" and "EWMA Trend (Max)" runs when optimization completes (if not already present)
@@ -2201,10 +2399,10 @@ export default function TimingPage({ params }: TimingPageProps) {
         "biased",
         "ewma-biased-max",
         "EWMA Biased (Max)",
-        { autoSelect: false }
+        { autoSelect: false, useTrendTilt: isTrendTiltEnabled, trendWeight }
       );
     }
-  }, [isCfdEnabled, reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource]);
+  }, [isCfdEnabled, reactionOptimizationBest, ewmaBiasedPath, reactionMapSummary, t212Runs, runTrading212SimForSource, isTrendTiltEnabled, trendWeight]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -2418,6 +2616,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     console.log("[VOL][handler] click", new Date().toISOString());
     console.log("[VOL][handler] click", { time: new Date().toISOString() });
     setVolatilityError(null);
+    setModelAvailabilityMessage(null);
 
     // Read current values from state instead of depending on them
     const currentTargetSpec = targetSpecResult || serverTargetSpec;
@@ -2452,40 +2651,13 @@ export default function TimingPage({ params }: TimingPageProps) {
       : `Range-${rangeEstimator}`;
     const windowN = volModel === 'GBM' ? gbmWindow : volWindow;
     const requiredWindowN = windowN;
-    const maxFeasibleWindowN = currentCanonicalCount > 0 ? currentCanonicalCount - 1 : 0;
+    const maxFeasibleWindowN = currentCanonicalCount > 0 ? Math.min(requiredWindowN, currentCanonicalCount - 1) : 0;
     if (maxFeasibleWindowN <= 0) {
       const message = 'Insufficient history: no observations available.';
       setVolatilityError(message);
       return { ok: false, forecast: null, reason: 'NO_HISTORY' };
     }
-    const effectiveWindowN = Math.min(requiredWindowN, maxFeasibleWindowN);
-    if (
-      process.env.NODE_ENV === 'development' &&
-      effectiveWindowN < requiredWindowN
-    ) {
-      const prev = windowReductionLogRef.current;
-      if (
-        !prev ||
-        prev.required !== requiredWindowN ||
-        prev.effective !== effectiveWindowN ||
-        prev.canonical !== currentCanonicalCount
-      ) {
-        console.info(
-          '[VOL] Reducing windowN from',
-          requiredWindowN,
-          'to',
-          effectiveWindowN,
-          'due to limited history (canonicalCount =',
-          currentCanonicalCount,
-          ')'
-        );
-        windowReductionLogRef.current = {
-          required: requiredWindowN,
-          effective: effectiveWindowN,
-          canonical: currentCanonicalCount,
-        };
-      }
-    }
+    let effectiveWindowN = maxFeasibleWindowN;
 
     if (process.env.NODE_ENV === "development") {
       console.info("[VOL][client] window-check", {
@@ -2501,34 +2673,44 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
 
     if (volModel === 'GARCH') {
-      const minRequiredGarchReturns = Math.max(effectiveWindowN - 1, 599); // window >= 600 ⇒ at least 599 returns
-      const availableReturnsUpperBound = Math.max(currentCanonicalCount - 1, 0);
-      if (availableReturnsUpperBound < minRequiredGarchReturns || effectiveWindowN < 600) {
+      const configWindow = requiredWindowN;
+      const garchMinWindow = 500;
+      const maxFeasibleGarchWindow = Math.min(configWindow, currentCanonicalCount - 1);
+      if (maxFeasibleGarchWindow < garchMinWindow) {
         if (process.env.NODE_ENV === 'development') {
           console.info("[VOL][client] garch-precheck insufficient", {
             ticker: params.ticker,
             canonicalCount: currentCanonicalCount,
-            canonicalReturns: availableReturnsUpperBound,
-            minRequiredGarchReturns,
+            configWindow,
+            maxFeasibleGarchWindow,
+            garchMinWindow,
           });
         }
-        setVolatilityError(`Insufficient history for GARCH: need at least ${minRequiredGarchReturns + 1} observations, have ${currentCanonicalCount}.`);
+        setVolatilityError(`Insufficient history for GARCH: need at least ${garchMinWindow} observations, have ${currentCanonicalCount}.`);
+        setModelAvailabilityMessage("GARCH needs roughly 600 clean daily returns; this ticker doesn't have enough data for this window. Showing GBM instead.");
         return { ok: false, forecast: null, reason: "INSUFFICIENT_GARCH_DATA" };
       }
+      effectiveWindowN = maxFeasibleGarchWindow;
     }
     if (volModel === 'Range') {
-      const minRequiredRangeObs = effectiveWindowN + 1; // window + 1 for overnight gaps
-      if (currentCanonicalCount < minRequiredRangeObs) {
+      const configWindow = requiredWindowN;
+      const rangeMinWindow = 252;
+      const maxFeasibleRangeWindow = Math.min(configWindow, currentCanonicalCount - 1);
+      if (maxFeasibleRangeWindow < rangeMinWindow) {
         if (process.env.NODE_ENV === 'development') {
           console.info("[VOL][client] range-precheck insufficient", {
             ticker: params.ticker,
             canonicalCount: currentCanonicalCount,
-            window: effectiveWindowN,
+            window: maxFeasibleRangeWindow,
+            rangeMinWindow,
+            configWindow,
           });
         }
-        setVolatilityError(`Insufficient history for Range estimator: need ${minRequiredRangeObs} observations, have ${currentCanonicalCount}.`);
+        setVolatilityError(`Insufficient history for Range estimator: need at least ${rangeMinWindow + 1} observations, have ${currentCanonicalCount}.`);
+        setModelAvailabilityMessage("Range estimator needs more clean OHLC data for this window; try a smaller window or a different model.");
         return { ok: false, forecast: null, reason: "INSUFFICIENT_RANGE_DATA" };
       }
+      effectiveWindowN = maxFeasibleRangeWindow;
     }
     if (volModel === 'HAR-RV') {
       const minRequiredHarObs = Math.max(effectiveWindowN + 1, 50); // need window plus one, and a modest floor for RV proxies
@@ -2591,21 +2773,30 @@ export default function TimingPage({ params }: TimingPageProps) {
 
     setIsGeneratingVolatility(true);
 
-    // Resolve distribution and estimator based on new UI state
-    const resolvedDist = volModel === 'GARCH' && garchEstimator === 'Student-t' ? 'student-t' : 'normal';
-    const resolvedEstimator = volModel === 'Range' ? rangeEstimator : 'P'; // fallback for non-range models
-
-    // Construct the model name for API
+    // Construct the model name for API (explicit, user-driven)
     let selectedModel: string;
-    if (volModel === 'GBM') {
-      selectedModel = 'GBM-CC';
-    } else if (volModel === 'GARCH') {
-      selectedModel = garchEstimator === 'Student-t' ? 'GARCH11-t' : 'GARCH11-N';
-    } else if (volModel === 'HAR-RV') {
-      selectedModel = 'HAR-RV';
-    } else { // Range
-      selectedModel = `Range-${rangeEstimator}`;
+    switch (volModel) {
+      case 'GBM':
+        selectedModel = 'GBM-CC';
+        break;
+      case 'GARCH':
+        selectedModel = garchEstimator === 'Student-t' ? 'GARCH11-t' : 'GARCH11-N';
+        break;
+      case 'HAR-RV':
+        selectedModel = 'HAR-RV';
+        break;
+      case 'Range':
+        selectedModel = `Range-${rangeEstimator}`;
+        break;
+      default:
+        selectedModel = recommendedModel ?? 'GBM-CC';
+        break;
     }
+
+    const isGarchModel = selectedModel === 'GARCH11-N' || selectedModel === 'GARCH11-t';
+    const isRangeModel = selectedModel.startsWith('Range-');
+    const resolvedDist = isGarchModel && selectedModel === 'GARCH11-t' ? 'student-t' : 'normal';
+    const resolvedEstimator = isRangeModel ? selectedModel.split('-')[1] || rangeEstimator : rangeEstimator;
 
     console.log("[VOL][handler] inputs", { 
       volModel,
@@ -2622,27 +2813,27 @@ export default function TimingPage({ params }: TimingPageProps) {
     });
 
     try {
-      // Build params using resolved values
+      // Build params using selected model (single source of truth)
       let modelParams: any = {};
       
-      if (volModel === 'GBM') {
+      if (selectedModel === 'GBM-CC') {
         modelParams.gbm = {
           windowN: effectiveWindowN,
           lambdaDrift: gbmLambda,
         };
-      } else if (volModel === 'GARCH') {
+      } else if (isGarchModel) {
         modelParams.garch = {
           window: effectiveWindowN,
           variance_targeting: garchVarianceTargeting,
           dist: resolvedDist,
           ...(resolvedDist === 'student-t' ? { df: garchDf } : {})
         };
-      } else if (volModel === 'HAR-RV') {
+      } else if (selectedModel === 'HAR-RV') {
         modelParams.har = {
           window: effectiveWindowN,
           use_intraday_rv: harUseIntradayRv
         };
-      } else { // Range
+      } else { // Range-* (default path)
         modelParams.range = {
           estimator: resolvedEstimator,
           window: effectiveWindowN,
@@ -2684,6 +2875,16 @@ export default function TimingPage({ params }: TimingPageProps) {
         gbmWindow,
         volWindow
       });
+      if (process.env.NODE_ENV === "development") {
+        console.info("[VOL][client] generating", {
+          ticker: params.ticker,
+          volModel,
+          garchEstimator,
+          rangeEstimator,
+          selectedModel,
+          volParams: modelParams,
+        });
+      }
 
       const resp = await fetch(`/api/volatility/${encodeURIComponent(tickerParam)}`, {
         method: "POST",
@@ -2737,6 +2938,22 @@ export default function TimingPage({ params }: TimingPageProps) {
           setVolatilityError(`Server error ${resp.status}. Check console for details.`);
           reason = 'SERVER_ERROR';
         }
+        switch (reason) {
+          case 'INSUFFICIENT_GARCH_DATA':
+            setModelAvailabilityMessage("GARCH needs roughly 600 clean daily returns; this ticker doesn't have enough data for this window. Showing GBM instead.");
+            break;
+          case 'INSUFFICIENT_RANGE_DATA':
+            setModelAvailabilityMessage("Range estimator needs more clean OHLC data for this window; try a smaller window or a different model.");
+            break;
+          case 'INSUFFICIENT_GBM_DATA':
+            setModelAvailabilityMessage("Not enough history for this GBM window; try a smaller window or another model.");
+            break;
+          case 'INSUFFICIENT_HAR_DATA':
+            setModelAvailabilityMessage("HAR-RV needs more realized volatility data; try another model.");
+            break;
+          default:
+            setModelAvailabilityMessage(null);
+        }
         return { ok: false, forecast: null, reason };
       }
 
@@ -2744,6 +2961,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log("[VOL][handler] resp.body =", bodyText);
 
       const data = JSON.parse(bodyText);
+      setModelAvailabilityMessage(null);
       
       if (volModel === 'GBM') {
         // GBM from Volatility card is our baseline
@@ -2795,6 +3013,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     serverTargetSpec,
     targetSpecResult,
     h, // Add horizon as dependency
+    recommendedModel,
   ]);
 
   // Validation Gates Functions
@@ -3480,7 +3699,8 @@ export default function TimingPage({ params }: TimingPageProps) {
 
     const availableObs = canonicalCount;
     const requiredWindowForAuto = volModel === 'GBM' ? gbmWindow : volWindow;
-    const effectiveAutoWindowN = availableObs > 0 ? Math.min(requiredWindowForAuto, availableObs - 1) : 0;
+    const maxFeasibleAutoWindow = availableObs > 0 ? Math.min(requiredWindowForAuto, availableObs - 1) : 0;
+    let effectiveAutoWindowN = maxFeasibleAutoWindow;
     const autoKey = JSON.stringify({
       ticker: params.ticker,
       volModel,
@@ -3495,6 +3715,24 @@ export default function TimingPage({ params }: TimingPageProps) {
       lastAutoForecastKeyRef.current = autoKey;
       setAutoForecastError('INSUFFICIENT_DATA');
       return;
+    }
+
+    if (volModel === 'GARCH') {
+      const garchMinWindow = 600;
+      if (maxFeasibleAutoWindow < garchMinWindow) {
+        setAutoForecastError('INSUFFICIENT_GARCH_DATA');
+        lastAutoForecastKeyRef.current = autoKey;
+        return;
+      }
+      effectiveAutoWindowN = maxFeasibleAutoWindow;
+    } else if (volModel === 'Range') {
+      const rangeMinWindow = 252;
+      if (maxFeasibleAutoWindow < rangeMinWindow) {
+        setAutoForecastError('INSUFFICIENT_RANGE_DATA');
+        lastAutoForecastKeyRef.current = autoKey;
+        return;
+      }
+      effectiveAutoWindowN = maxFeasibleAutoWindow;
     }
 
     const skipReasons = new Set([
@@ -4048,13 +4286,13 @@ export default function TimingPage({ params }: TimingPageProps) {
     setCompanySaveSuccess(false);
 
     try {
-      const exchangeInfo = getExchangeInfo(companyExchange);
-      const formattedTicker = formatTicker(companyTicker, companyExchange);
+      const exchangeInfo = companyExchange ? getExchangeInfo(companyExchange) : null;
+      const formattedTicker = companyExchange ? formatTicker(companyTicker, companyExchange) : companyTicker;
 
       const companyData: CompanyInfo = {
         ticker: companyTicker,
         name: companyName,
-        exchange: companyExchange,
+        exchange: companyExchange ?? '',
         exchangeInfo: exchangeInfo ? {
           country: exchangeInfo.country,
           region: exchangeInfo.region,
@@ -4538,13 +4776,21 @@ export default function TimingPage({ params }: TimingPageProps) {
         }
         if (response.ok) {
           const company: CompanyInfo = await response.json();
-          setCompanyName(company.name);
-          setCompanyExchange(company.exchange || 'NASDAQ');
+          setCompanyName(company.name || '');
+          setCompanyTicker(params.ticker);
+          setCompanyExchange(
+            (company as any).exchange ??
+              (company as any)?.exchangeInfo?.primaryExchange ??
+              null
+          );
+          return;
         } else {
           console.error('Failed to load company info:', response.status, response.statusText);
+          setCompanyTicker(params.ticker);
         }
       } catch (error) {
         console.error('Failed to load company info:', error);
+        setCompanyTicker(params.ticker);
       }
     };
 
@@ -4560,30 +4806,68 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const tickerDisplay = companyTicker || params.ticker.toUpperCase();
   const logoLetter = tickerDisplay.slice(0, 1);
-  const lastClose =
+  const exchangeDisplay = companyExchange ?? '—';
+  const historyLastClose =
     headerPriceSeries && headerPriceSeries.length > 0
       ? headerPriceSeries[headerPriceSeries.length - 1].close
       : headerPrice.price;
-  const prevClose =
+  const historyPrevClose =
     headerPriceSeries && headerPriceSeries.length > 1
       ? headerPriceSeries[headerPriceSeries.length - 2].close
       : null;
-  const priceDisplay =
-    lastClose != null
-      ? lastClose.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-      : '—';
-  const priceChangeAbs =
-    lastClose != null && prevClose != null ? lastClose - prevClose : null;
-  const priceChangePct =
-    lastClose != null && prevClose != null && prevClose !== 0
-      ? ((lastClose - prevClose) / prevClose) * 100
+  const historyChangeAbs =
+    historyLastClose != null && historyPrevClose != null
+      ? historyLastClose - historyPrevClose
       : null;
+  const historyChangePct =
+    historyLastClose != null && historyPrevClose != null && historyPrevClose !== 0
+      ? ((historyLastClose - historyPrevClose) / historyPrevClose) * 100
+      : null;
+
+  const livePrice = quote?.price ?? null;
+  const liveChange = quote ? quote.change : null;
+  const liveChangePct = quote ? quote.changePct : null;
+
+  const priceValue = livePrice ?? historyLastClose ?? headerPrice?.price ?? null;
+  const priceDisplay =
+    priceValue != null
+      ? priceValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : isQuoteLoading
+        ? '—'
+        : '—';
+
+  const changeValue = quote ? liveChange : historyChangeAbs;
+  const changePctValue = quote ? liveChangePct : historyChangePct;
+
   const changeColor =
-    priceChangeAbs == null ? 'text-slate-400' : priceChangeAbs >= 0 ? 'text-emerald-400' : 'text-rose-400';
+    changeValue == null ? 'text-slate-400' : changeValue >= 0 ? 'text-emerald-400' : 'text-rose-400';
   const changeDisplay =
-    priceChangeAbs != null ? `${priceChangeAbs >= 0 ? '+' : ''}${priceChangeAbs.toFixed(2)}` : '—';
+    changeValue != null ? `${changeValue >= 0 ? '+' : ''}${changeValue.toFixed(2)}` : '—';
   const changePctDisplay =
-    priceChangePct != null ? `${priceChangePct >= 0 ? '+' : ''}${priceChangePct.toFixed(2)}%` : null;
+    changePctValue != null ? `${changePctValue >= 0 ? '+' : ''}${changePctValue.toFixed(2)}%` : null;
+
+  const historyAsOf =
+    headerPriceSeries && headerPriceSeries.length > 0
+      ? headerPriceSeries[headerPriceSeries.length - 1].date
+      : headerPrice.date;
+  const headerTimestamp = quote?.asOf ?? historyAsOf ?? headerPrice?.date ?? null;
+  const headerTimestampDisplay =
+    headerTimestamp && !Number.isNaN(Date.parse(headerTimestamp))
+      ? new Date(headerTimestamp).toLocaleString()
+      : headerTimestamp;
+
+  useEffect(() => {
+    if (priceValue == null) return;
+    const prev = prevPriceRef.current;
+    if (prev != null && prev !== priceValue) {
+      const dir = priceValue > prev ? 'up' : 'down';
+      setPriceDirection(dir);
+      const timeout = setTimeout(() => setPriceDirection(null), 500);
+      prevPriceRef.current = priceValue;
+      return () => clearTimeout(timeout);
+    }
+    prevPriceRef.current = priceValue;
+  }, [priceValue]);
 
   const actionButtons = (
     <>
@@ -4695,13 +4979,13 @@ export default function TimingPage({ params }: TimingPageProps) {
               <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-slate-200">
                 <span className="font-medium">{tickerDisplay}</span>
                 <span className="text-slate-500">·</span>
-                <span>{companyExchange || 'NASDAQ'}</span>
+                <span>{exchangeDisplay}</span>
               </div>
               <MarketSessionBadge symbol={params.ticker} />
             </div>
             <div className="flex flex-wrap items-baseline gap-3">
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl md:text-6xl font-semibold text-slate-100 tracking-tight">
+                <span className={`text-5xl md:text-6xl font-semibold tracking-tight transition-colors duration-300 ${priceDirection === 'up' ? 'price-up' : priceDirection === 'down' ? 'price-down' : 'text-slate-100'}`}>
                   {priceDisplay}
                 </span>
                 <span className="text-sm uppercase text-slate-400">USD</span>
@@ -4717,9 +5001,9 @@ export default function TimingPage({ params }: TimingPageProps) {
                 )}
               </div>
             </div>
-            {headerPrice.date && (
+            {headerTimestampDisplay && (
               <p className="text-xs text-slate-500">
-                At close at {headerPrice.date}
+                As of {headerTimestampDisplay}
               </p>
             )}
             {watchlistSuccess && (
@@ -4828,6 +5112,12 @@ export default function TimingPage({ params }: TimingPageProps) {
           onToggleT212Run={toggleT212RunVisibility}
           isCfdEnabled={isCfdEnabled}
           onToggleCfd={() => setIsCfdEnabled(prev => !prev)}
+          simBase={simBase}
+          onSelectSimBase={handleSelectSimBase}
+          trendWeight={trendWeight}
+          trendWeightUpdatedAt={trendWeightUpdatedAt}
+          isTrendTiltEnabled={isTrendTiltEnabled}
+          onToggleTrendTilt={handleToggleTrendTilt}
           onDateRangeChange={handleDateRangeChange}
           simulationRuns={simulationRunsSummary}
         />
@@ -4847,6 +5137,12 @@ export default function TimingPage({ params }: TimingPageProps) {
           forecastError={forecastError}
         />
       </div>
+
+      {modelAvailabilityMessage && (
+        <div className={`mb-4 text-sm ${isDarkMode ? 'text-amber-200' : 'text-amber-700'}`}>
+          {modelAvailabilityMessage}
+        </div>
+      )}
 
       {/* GARCH Forecast Inspector */}
       <div className="mb-8">
@@ -5117,6 +5413,8 @@ export default function TimingPage({ params }: TimingPageProps) {
         momentumPeriodOverride={trendMomentumPeriod}
         onMomentumPeriodChange={setTrendMomentumPeriod}
         ewmaCrossoverOverride={trendEwmaCrossover}
+        trendWeight={trendWeight}
+        trendWeightUpdatedAt={trendWeightUpdatedAt}
       />
 
       {/* Unified Forecast Bands Card - Full Width */}
@@ -6480,7 +6778,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                     <select
                       id="modal-companyExchange"
                       name="companyExchange"
-                      value={companyExchange}
+                      value={companyExchange ?? ''}
                       onChange={(e) => setCompanyExchange(e.target.value)}
                       required
                       className="block w-full px-3 py-2 border border-gray-300 rounded-md"
