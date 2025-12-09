@@ -11,6 +11,7 @@ export default function Navigation() {
   const isDarkMode = useDarkMode();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [lastSearches, setLastSearches] = useState<string[]>([]);
+  const [isHidden, setIsHidden] = useState(false);
 
   // Panel mount / close animation states
   const [panelMounted, setPanelMounted] = useState(false);
@@ -27,6 +28,20 @@ export default function Navigation() {
     { href: '/memory', label: 'Memory' },
     { href: '/watchlist', label: 'Watchlist' },
   ];
+
+  // Hide navigation when scrolled past 50vh (where StickyTickerBar appears)
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollY = window.scrollY;
+      const viewportHeight = window.innerHeight;
+      setIsHidden(scrollY > viewportHeight * 0.5);
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Extract current ticker from pathname if on a company page
   const tickerMatch = pathname.match(/\/company\/([^/]+)/);
@@ -112,6 +127,11 @@ export default function Navigation() {
   }, [isSearchOpen]);
 
   const containerClass = 'mx-auto w-full max-w-[1400px] px-6 md:px-10';
+
+  // Don't render the navigation when hidden (scrolled past 50vh)
+  if (isHidden) {
+    return null;
+  }
 
   return (
     <nav
