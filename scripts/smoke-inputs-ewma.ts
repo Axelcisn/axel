@@ -3,14 +3,24 @@ import assert from 'node:assert/strict';
 import { loadCanonicalData } from '@/lib/storage/canonical';
 import { runEwmaWalker, type EwmaWalkerPoint } from '@/lib/volatility/ewmaWalker';
 import { computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
-import { loadTrendWeightCalibration, type TrendWeightCalibration } from '@/lib/storage/trendCalibration';
-import type { CanonicalRow } from '@/lib/types/canonical';
+import { loadTrendWeightCalibration } from '@/lib/storage/trendCalibration';
+import {
+  buildEwmaReactionMap,
+  buildEwmaTiltConfigFromReactionMap,
+  defaultReactionConfig,
+} from '@/lib/volatility/ewmaReaction';
 
 const SMOKE_SYMBOLS = ['AAPL', 'TSLA', 'MSFT']; // you can adjust later
 const EWMA_LAMBDA_UNBIASED = 0.94;
 const EWMA_COVERAGE = 0.95;
 const EWMA_INITIAL_WINDOW = 252;
 const EWMA_HORIZON = 1;
+const EWMA_LAMBDA_MAX = 0.9;
+
+const REACTION_TRAIN_FRACTION_DEFAULT = 0.7;
+const REACTION_TRAIN_FRACTION_MAX = 0.8;
+const REACTION_MIN_TRAIN_OBS = 500;
+const REACTION_SHRINK = 0.5;
 
 const TREND_SHORT = 14;
 const TREND_LONG = 50;
@@ -23,6 +33,25 @@ function expectFinite(name: string, value: number) {
 function expectInRange(name: string, value: number, min: number, max: number) {
   expectFinite(name, value);
   assert.ok(value >= min && value <= max, `${name}=${value} out of range [${min}, ${max}]`);
+}
+
+function assertEwmaPointsHealthy(symbol: string, mode: string, points: EwmaWalkerPoint[]) {
+  assert.ok(points.length > 0, `${symbol}: ${mode} ewma points empty`);
+
+  let finiteSigma = 0;
+  for (const p of points) {
+    expectFinite(`${symbol}.${mode}.S_t`, p.S_t);
+    expectFinite(`${symbol}.${mode}.y_hat`, p.y_hat_tp1);
+    expectFinite(`${symbol}.${mode}.L_tp1`, p.L_tp1);
+    expectFinite(`${symbol}.${mode}.U_tp1`, p.U_tp1);
+    if (Number.isFinite(p.sigma_t) && p.sigma_t > 0) finiteSigma++;
+  }
+  assert.ok(
+    finiteSigma > points.length * 0.8,
+    `${symbol}: too few finite sigma_t values in ${mode} EWMA points`
+  );
+
+  return finiteSigma;
 }
 
 async function checkCanonical(symbol: string) {
@@ -61,32 +90,74 @@ async function checkEwmaUnbiased(symbol: string) {
     horizon: EWMA_HORIZON,
   });
 
-  const points = ewmaResult.points;
-  assert.ok(points.length > 0, `${symbol}: ewma points empty`);
-
-  let finiteSigma = 0;
-  for (const p of points) {
-    expectFinite(`${symbol}.S_t`, p.S_t);
-    expectFinite(`${symbol}.y_hat`, p.y_hat_tp1);
-    expectFinite(`${symbol}.L_tp1`, p.L_tp1);
-    expectFinite(`${symbol}.U_tp1`, p.U_tp1);
-    if (Number.isFinite(p.sigma_t) && p.sigma_t > 0) finiteSigma++;
-  }
-  assert.ok(
-    finiteSigma > points.length * 0.8,
-    `${symbol}: too few finite sigma_t values in EWMA points`
+  const finiteSigma = assertEwmaPointsHealthy(symbol, 'unbiased', ewmaResult.points);
+  console.log(
+    `  ✓ ${symbol}: EWMA points=${ewmaResult.points.length}, sigma_t finite in ${finiteSigma}`
   );
-
-  console.log(`  ✓ ${symbol}: EWMA points=${points.length}, sigma_t finite in ${finiteSigma}`);
 }
 
-async function checkEwmaConfigs(symbol: string, calibration: TrendWeightCalibration | null) {
+async function checkEwmaConfigs(symbol: string) {
   console.log(`▶ EWMA configs for ${symbol}`);
 
-  // For now, we just log lambda/trainFraction choices from timing logic indirectly via walker.
-  // You can extend this later to call biased/optimized endpoints.
-  // For Phase 2, just ensure unbiased walker works; Biased/Max will be covered in sim-level smoke.
-  console.log('  (Biased/Max configs will be exercised in sim-level smoke tests)');
+  // Biased: use default reaction map settings (tilt on train split)
+  const reactionDefault = await buildEwmaReactionMap(symbol, {
+    ...defaultReactionConfig,
+    lambda: EWMA_LAMBDA_UNBIASED,
+    coverage: EWMA_COVERAGE,
+    horizons: [EWMA_HORIZON],
+    trainFraction: REACTION_TRAIN_FRACTION_DEFAULT,
+    minTrainObs: REACTION_MIN_TRAIN_OBS,
+  });
+  const tiltDefault = buildEwmaTiltConfigFromReactionMap(reactionDefault, {
+    shrinkFactor: REACTION_SHRINK,
+    horizon: EWMA_HORIZON,
+  });
+  assert.ok(
+    Object.values(tiltDefault.muByBucket || {}).some((v) => Number.isFinite(v)),
+    `${symbol}: no finite tilt values for biased EWMA`
+  );
+
+  const biased = await runEwmaWalker({
+    symbol,
+    lambda: EWMA_LAMBDA_UNBIASED,
+    coverage: EWMA_COVERAGE,
+    initialWindow: EWMA_INITIAL_WINDOW,
+    horizon: EWMA_HORIZON,
+    tiltConfig: tiltDefault,
+  });
+  const finiteBiased = assertEwmaPointsHealthy(symbol, 'biased', biased.points);
+
+  // Max: use a more aggressive λ/train split to mimic optimized path
+  const reactionMax = await buildEwmaReactionMap(symbol, {
+    ...defaultReactionConfig,
+    lambda: EWMA_LAMBDA_MAX,
+    coverage: EWMA_COVERAGE,
+    horizons: [EWMA_HORIZON],
+    trainFraction: REACTION_TRAIN_FRACTION_MAX,
+    minTrainObs: REACTION_MIN_TRAIN_OBS,
+  });
+  const tiltMax = buildEwmaTiltConfigFromReactionMap(reactionMax, {
+    shrinkFactor: REACTION_SHRINK,
+    horizon: EWMA_HORIZON,
+  });
+  assert.ok(
+    Object.values(tiltMax.muByBucket || {}).some((v) => Number.isFinite(v)),
+    `${symbol}: no finite tilt values for max EWMA`
+  );
+
+  const maxWalker = await runEwmaWalker({
+    symbol,
+    lambda: EWMA_LAMBDA_MAX,
+    coverage: EWMA_COVERAGE,
+    initialWindow: EWMA_INITIAL_WINDOW,
+    horizon: EWMA_HORIZON,
+    tiltConfig: tiltMax,
+  });
+  const finiteMax = assertEwmaPointsHealthy(symbol, 'max', maxWalker.points);
+
+  console.log(
+    `  ✓ ${symbol}: Biased and Max EWMA paths healthy (tilt buckets present; points=${biased.points.length}/${maxWalker.points.length}, finite sigma=${finiteBiased}/${finiteMax})`
+  );
 }
 
 async function checkTrendZSeries(symbol: string) {
@@ -170,13 +241,13 @@ async function checkTrendCalibration() {
 async function main() {
   console.log('=== EWMA / Trend INPUTS smoke test ===');
 
-  const { calibration, effectiveTrendWeight } = await checkTrendCalibration();
+  await checkTrendCalibration();
 
   for (const symbol of SMOKE_SYMBOLS) {
     await checkCanonical(symbol);
     await checkEwmaUnbiased(symbol);
     await checkTrendZSeries(symbol);
-    await checkEwmaConfigs(symbol, calibration);
+    await checkEwmaConfigs(symbol);
   }
 
   console.log('\nAll input-level smoke checks completed.');

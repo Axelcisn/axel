@@ -174,69 +174,92 @@ export function StickyTickerBar({
         </div>
       </div>
 
-      {/* Search modal - Apple style dropdown */}
+      {/* Search modal - Apple style dropdown attached to sleek bar */}
       {panelMounted && (
         <>
-          {/* Backdrop with blur */}
+          {/* Backdrop with blur only - no dark overlay */}
           <div
-            className={`fixed inset-0 z-[65] bg-black/60 supports-[backdrop-filter]:backdrop-blur-2xl transition-opacity duration-300 ${
+            className={`fixed inset-0 z-[65] transition-opacity duration-300 ${
               isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'
             }`}
+            style={{
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+            }}
             onClick={() => setIsSearchOpen(false)}
           />
 
-          {/* Modal panel - centered Apple style */}
+          {/* Modal panel - positioned right below the sleek bar */}
           <div
-            className={`fixed inset-0 z-[70] flex items-start justify-center pt-[10vh] px-4 ${
+            className={`fixed top-0 left-0 right-0 z-[70] flex justify-center pt-3 px-4 ${
               isClosing ? 'pointer-events-none' : ''
             }`}
           >
             <div
-              className={`w-full max-w-2xl rounded-2xl border shadow-2xl overflow-hidden transform transition-all duration-300 ${
+              className={`w-full max-w-[720px] overflow-hidden transform transition-all duration-300 ${
                 isClosing
-                  ? 'opacity-0 scale-95 -translate-y-4'
-                  : 'opacity-100 scale-100 translate-y-0'
-              } ${
-                isDarkMode
-                  ? 'bg-[#1d1d1f] border-white/10'
-                  : 'bg-white border-gray-200'
+                  ? 'opacity-0 scale-[0.98]'
+                  : 'opacity-100 scale-100'
               }`}
               onClick={(e) => e.stopPropagation()}
             >
-              {/* Close button */}
-              <div className="absolute top-3 right-3">
-                <button
-                  type="button"
-                  onClick={() => setIsSearchOpen(false)}
-                  className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-                    isDarkMode
-                      ? 'bg-white/10 text-white/80 hover:bg-white/20'
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                  }`}
+              {/* Connected container - sleek bar + search panel */}
+              <div
+                className="rounded-[24px] overflow-hidden"
+                style={{
+                  backgroundColor: isDarkMode ? 'rgba(38, 38, 40, 0.95)' : 'rgba(255, 255, 255, 0.95)',
+                  border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.08)',
+                  backdropFilter: 'saturate(180%) blur(20px)',
+                  WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+                }}
+              >
+                {/* Top bar - mimics sleek bar */}
+                <div className="h-[48px] px-6 flex items-center justify-between border-b"
+                  style={{
+                    borderColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)',
+                  }}
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    className="h-4 w-4"
+                  <span
+                    className="text-[17px] font-semibold tracking-[-0.022em]"
+                    style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
+                    {ticker}
+                  </span>
+                  
+                  {/* Close button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsSearchOpen(false)}
+                    className={`flex h-[28px] w-[28px] items-center justify-center rounded-full transition-colors ${
+                      isDarkMode
+                        ? 'bg-white/10 text-white/80 hover:bg-white/20'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      className="h-3.5 w-3.5"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
 
-              {/* Search content */}
-              <div className="p-6">
-                <TickerSearch
-                  initialSymbol={ticker}
-                  isDarkMode={isDarkMode}
-                  compact={false}
-                  autoFocus={true}
-                  variant="panel"
-                  className="w-full"
-                />
+                {/* Search content */}
+                <div className="p-5">
+                  <TickerSearch
+                    initialSymbol={ticker}
+                    isDarkMode={isDarkMode}
+                    compact={false}
+                    autoFocus={true}
+                    variant="panel"
+                    className="w-full"
+                  />
+                </div>
               </div>
             </div>
           </div>
