@@ -100,30 +100,32 @@ export function StickyTickerBar({
         }`}
         style={{ pointerEvents: isVisible ? 'auto' : 'none' }}
       >
-        {/* Floating rounded bar - transparent with blur */}
+        {/* Floating rounded bar - very dark background */}
         <div
           className="h-[48px] rounded-full max-w-[720px] w-full px-6 flex items-center justify-between"
           style={{
-            backgroundColor: 'transparent',
+            backgroundColor: isDarkMode ? 'rgba(28, 28, 30, 0.95)' : 'rgba(250, 250, 252, 0.95)',
             backdropFilter: 'saturate(180%) blur(20px)',
             WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(0, 0, 0, 0.1)',
+            border: isDarkMode ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid rgba(0, 0, 0, 0.1)',
           }}
         >
-          {/* Left: Ticker name - Apple typography */}
-          <div className="flex items-center">
-            <span
-              className="text-[17px] font-semibold tracking-[-0.022em]"
-              style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
-            >
-              {ticker}
-            </span>
-          </div>
+          {/* Left: Ticker name - hidden when search is open */}
+          {!isSearchOpen && (
+            <div className="flex items-center">
+              <span
+                className="text-[17px] font-semibold tracking-[-0.022em]"
+                style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
+              >
+                {ticker}
+              </span>
+            </div>
+          )}
 
-          {/* Right: Price + Search icon */}
-          <div className="flex items-center gap-4">
-            {/* Price display - larger */}
-            {currentPrice != null && (
+          {/* Right: Price + Search/Close icon - price hidden when search is open */}
+          <div className={`flex items-center gap-4 ${isSearchOpen ? 'w-full justify-between' : ''}`}>
+            {/* Price display - hidden when search is open */}
+            {!isSearchOpen && currentPrice != null && (
               <div className="flex items-center gap-3">
                 <span
                   className="text-[15px] font-medium"
@@ -139,10 +141,10 @@ export function StickyTickerBar({
               </div>
             )}
 
-            {/* Search button - icon only with border */}
+            {/* Search/Close button - toggles between search icon and X */}
             <button
               type="button"
-              onClick={() => setIsSearchOpen(true)}
+              onClick={() => setIsSearchOpen(!isSearchOpen)}
               className="flex items-center justify-center h-[32px] w-[32px] rounded-full transition-all duration-200"
               style={{
                 backgroundColor: 'transparent',
@@ -158,17 +160,32 @@ export function StickyTickerBar({
                 e.currentTarget.style.backgroundColor = 'transparent';
               }}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-[16px] w-[16px]"
-              >
-                <circle cx="11" cy="11" r="6" />
-                <path strokeLinecap="round" d="M21 21l-4.35-4.35" />
-              </svg>
+              {isSearchOpen ? (
+                /* X icon when search is open */
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-[16px] w-[16px]"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              ) : (
+                /* Search icon when search is closed */
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-[16px] w-[16px]"
+                >
+                  <circle cx="11" cy="11" r="6" />
+                  <path strokeLinecap="round" d="M21 21l-4.35-4.35" />
+                </svg>
+              )}
             </button>
           </div>
         </div>
