@@ -13,7 +13,7 @@ interface StickyTickerBarProps {
 }
 
 /**
- * Apple-style sticky navigation bar that appears after scrolling past first viewport.
+ * Apple-style sticky navigation bar that appears after scrolling past 50vh.
  * Features a search button that opens a modal similar to Apple's "Explore" menu.
  */
 export function StickyTickerBar({
@@ -31,13 +31,13 @@ export function StickyTickerBar({
   const timeoutRef = useRef<number | null>(null);
   const CLOSE_ANIM_MS = 280;
 
-  // Track scroll position to show/hide bar
+  // Track scroll position to show/hide bar - show after 50vh
   useEffect(() => {
     const handleScroll = () => {
       const scrollY = window.scrollY;
       const viewportHeight = window.innerHeight;
-      // Show bar after scrolling past 100vh
-      setIsVisible(scrollY > viewportHeight);
+      // Show bar after scrolling past 50vh
+      setIsVisible(scrollY > viewportHeight * 0.5);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -91,76 +91,72 @@ export function StickyTickerBar({
   const isPositive = (priceChange ?? 0) >= 0;
   const changeColor = isPositive ? 'text-emerald-400' : 'text-rose-400';
 
-  if (!isVisible) return null;
-
   return (
     <>
-      {/* Sticky bar - Apple style */}
+      {/* Apple-style sticky bar - slides in from top */}
       <div
-        className={`fixed top-0 left-0 right-0 z-[60] transform transition-all duration-300 ease-out ${
-          isVisible ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'
+        className={`fixed top-0 left-0 right-0 z-[100] transform transition-transform duration-300 ease-[cubic-bezier(0.25,0.1,0.25,1)] ${
+          isVisible ? 'translate-y-0' : '-translate-y-full'
         }`}
+        style={{ pointerEvents: isVisible ? 'auto' : 'none' }}
       >
+        {/* Apple-style bar with exact styling */}
         <div
-          className={`h-12 border-b backdrop-blur-xl ${
-            isDarkMode
-              ? 'bg-[#1d1d1f]/95 border-white/10'
-              : 'bg-white/95 border-gray-200'
-          }`}
+          className="h-[44px]"
+          style={{
+            backgroundColor: isDarkMode ? 'rgba(29, 29, 31, 0.94)' : 'rgba(255, 255, 255, 0.94)',
+            backdropFilter: 'saturate(180%) blur(20px)',
+            WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+            borderBottom: isDarkMode ? '1px solid rgba(255, 255, 255, 0.08)' : '1px solid rgba(0, 0, 0, 0.1)',
+          }}
         >
-          <div className="mx-auto max-w-[1400px] h-full px-6 md:px-10">
+          <div className="mx-auto max-w-[980px] h-full px-[22px]">
             <div className="flex items-center justify-between h-full">
-              {/* Left: Ticker name */}
-              <div className="flex items-center gap-3">
+              {/* Left: Ticker name - Apple typography */}
+              <div className="flex items-center">
                 <span
-                  className={`text-[15px] font-semibold ${
-                    isDarkMode ? 'text-white' : 'text-gray-900'
-                  }`}
+                  className="text-[17px] font-semibold tracking-[-0.022em]"
+                  style={{ color: isDarkMode ? '#f5f5f7' : '#1d1d1f' }}
                 >
                   {ticker}
                 </span>
-                {companyName && (
-                  <span
-                    className={`text-[13px] hidden sm:inline ${
-                      isDarkMode ? 'text-slate-400' : 'text-gray-500'
-                    }`}
-                  >
-                    {companyName}
-                  </span>
-                )}
               </div>
 
-              {/* Right: Price info + Search button */}
-              <div className="flex items-center gap-4">
+              {/* Right: Price + Buttons */}
+              <div className="flex items-center gap-3">
                 {/* Price display */}
                 {currentPrice != null && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 mr-2">
                     <span
-                      className={`text-[13px] font-medium ${
-                        isDarkMode ? 'text-slate-300' : 'text-gray-700'
-                      }`}
+                      className="text-[12px] font-normal"
+                      style={{ color: isDarkMode ? '#86868b' : '#6e6e73' }}
                     >
                       ${currentPrice.toFixed(2)}
                     </span>
                     {priceChange != null && priceChangePercent != null && (
-                      <span className={`text-[12px] font-medium ${changeColor}`}>
-                        {isPositive ? '+' : ''}
-                        {priceChange.toFixed(2)} ({isPositive ? '+' : ''}
-                        {priceChangePercent.toFixed(2)}%)
+                      <span className={`text-[12px] font-normal ${changeColor}`}>
+                        {isPositive ? '+' : ''}{priceChange.toFixed(2)} ({isPositive ? '+' : ''}{priceChangePercent.toFixed(2)}%)
                       </span>
                     )}
                   </div>
                 )}
 
-                {/* Search button - Apple style */}
+                {/* Search button - Apple "Explore" style */}
                 <button
                   type="button"
                   onClick={() => setIsSearchOpen(true)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[13px] font-medium transition-all duration-200 ${
-                    isDarkMode
-                      ? 'border-white/20 bg-white/5 text-slate-200 hover:bg-white/10 hover:border-white/30'
-                      : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-400'
-                  }`}
+                  className="flex items-center justify-center h-[28px] px-[14px] rounded-full text-[12px] font-normal transition-all duration-200"
+                  style={{
+                    backgroundColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)',
+                    color: isDarkMode ? '#f5f5f7' : '#1d1d1f',
+                    border: 'none',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.04)';
+                  }}
                 >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
@@ -168,12 +164,12 @@ export function StickyTickerBar({
                     fill="none"
                     stroke="currentColor"
                     strokeWidth="2"
-                    className="h-4 w-4"
+                    className="h-[14px] w-[14px] mr-1.5"
                   >
                     <circle cx="11" cy="11" r="6" />
                     <path strokeLinecap="round" d="M21 21l-4.35-4.35" />
                   </svg>
-                  <span className="hidden sm:inline">Search</span>
+                  Search
                 </button>
               </div>
             </div>
