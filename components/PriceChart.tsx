@@ -7309,12 +7309,12 @@ const AnimatedPriceDot = (props: any) => {
     <circle
       cx={cx}
       cy={cy}
-      r={4}
+      r={6}
       fill={dotColor}
       stroke="#ffffff"
-      strokeWidth={1.5}
+      strokeWidth={2.5}
       style={{
-        filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6))`,
+        filter: `drop-shadow(0 0 8px rgba(${glowColor}, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))`,
         transition: 'all 0.12s ease-out',
       }}
     />
@@ -7333,12 +7333,12 @@ const AnimatedEwmaDot = (props: any) => {
     <circle
       cx={cx}
       cy={cy}
-      r={4}
+      r={6}
       fill="#A855F7"
       stroke="#ffffff"
-      strokeWidth={1.5}
+      strokeWidth={2.5}
       style={{
-        filter: 'drop-shadow(0 0 4px rgba(168, 85, 247, 0.6))',
+        filter: 'drop-shadow(0 0 8px rgba(168, 85, 247, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))',
         transition: 'all 0.12s ease-out',
       }}
     />
@@ -7356,16 +7356,18 @@ const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: bo
     
     // Orange when maximized, amber when not
     const fillColor = isMaximized ? "#F97316" : "#F59E0B";
+    const glowColor = isMaximized ? "249, 115, 22" : "245, 158, 11";
     
     return (
       <circle
         cx={cx}
         cy={cy}
-        r={4}
+        r={6}
         fill={fillColor}
         stroke="#ffffff"
-        strokeWidth={1.5}
+        strokeWidth={2.5}
         style={{
+          filter: `drop-shadow(0 0 8px rgba(${glowColor}, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))`,
           transition: 'all 0.15s ease-out',
         }}
       />
