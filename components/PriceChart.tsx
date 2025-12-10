@@ -1835,21 +1835,31 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Default price for position lines (previous close)
   const defaultPositionPrice = lastHistoricalPoint?.close ?? null;
 
-  // Handler to toggle Long/Short position
+  // Handler to toggle Long/Short position (on/off behavior)
   const handlePositionClick = useCallback((type: 'long' | 'short') => {
     if (activePosition === type) {
-      // Clicking same button again - just keep it active (line stays visible)
-      // Do nothing - line persists
-      return;
+      // Clicking same button again - toggle OFF (remove the line)
+      if (type === 'long') {
+        setLongPrice(null);
+      } else {
+        setShortPrice(null);
+      }
+      setActivePosition(null);
+      setPositionPriceInput('');
     } else {
-      // Switching to new position type
+      // Switching to new position type or activating
       setActivePosition(type);
       // Set default price if input is empty
-      if (!positionPriceInput && defaultPositionPrice != null) {
+      if (defaultPositionPrice != null) {
         setPositionPriceInput(defaultPositionPrice.toFixed(2));
+        if (type === 'long') {
+          setLongPrice(defaultPositionPrice);
+        } else {
+          setShortPrice(defaultPositionPrice);
+        }
       }
     }
-  }, [activePosition, positionPriceInput, defaultPositionPrice]);
+  }, [activePosition, defaultPositionPrice]);
 
   // Handler for price input change
   const handlePositionPriceChange = useCallback((value: string) => {
