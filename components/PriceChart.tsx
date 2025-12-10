@@ -5856,6 +5856,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       : 'bg-gray-50 border-gray-200'
                   }`}>
                     <div className="overflow-x-auto">
+                      {(() => {
+                        console.log('[SIM-TABLE] rows to render', simulationRuns);
+                        return null;
+                      })()}
                       <table className={`min-w-full text-[11px] ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
                         <thead className={`border-b ${isDarkMode ? 'text-slate-400 border-slate-700/70' : 'text-gray-500 border-gray-200'}`}>
                           <tr>

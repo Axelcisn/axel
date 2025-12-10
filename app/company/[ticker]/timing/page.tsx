@@ -793,6 +793,18 @@ const effectiveTrendWeight = useMemo(() => {
 
   // Create simulation runs summary for PriceChart Overview tab
   const simulationRunsSummary = useMemo(() => {
+    console.log('[SIM-TABLE] building summary', {
+      simulationMode,
+      t212Runs: t212Runs.map((r) => ({
+        id: r.id,
+        label: r.label,
+        lambda: r.lambda,
+        trainFraction: r.trainFraction,
+        trendTiltEnabled: r.trendTiltEnabled,
+        returnPct: r.result ? ((r.result.finalEquity - r.result.initialEquity) / r.result.initialEquity) * 100 : null,
+        trades: r.result?.trades.length ?? null,
+      })),
+    });
     return t212RunsFiltered.map((run) => {
       const r = run.result;
       const stats = run.filteredStats;
@@ -1263,6 +1275,18 @@ const effectiveTrendWeight = useMemo(() => {
 
   const loadCompanyInfo = async () => {
     try {
+      // First try to fetch from Yahoo Finance API for live company name
+      const yahooRes = await fetch(`/api/company-info/${params.ticker}`);
+      if (yahooRes.ok) {
+        const yahooData = await yahooRes.json();
+        if (yahooData.name) {
+          setCompanyName(yahooData.name);
+          setCompanyTicker(params.ticker);
+          return;
+        }
+      }
+      
+      // Fallback to local companies registry
       const response = await fetch(`/api/companies?ticker=${params.ticker}`);
       if (response.status === 404) {
         setCompanyTicker(params.ticker);
