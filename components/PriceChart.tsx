@@ -2750,6 +2750,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [tradeOverlays, t212AccountHistory, dateRangeSpan.raw.start, dateRangeSpan.raw.end]);
 
+  useEffect(() => {
+    console.log('[UI] Simulation header metrics', {
+      simulationMode,
+      equitySummary: {
+        pnlAbs: equitySummary.pnlAbs,
+        pnlPct: equitySummary.pnlPct,
+        maxDrawdownAbs: equitySummary.maxDrawdownAbs,
+        maxDrawdownPct: equitySummary.maxDrawdownPct,
+      },
+      tradeSummary: {
+        totalTrades: tradeSummary.totalTrades,
+        profitableTrades: tradeSummary.profitableTrades,
+        profitFactor: tradeSummary.profitFactor,
+      },
+    });
+  }, [simulationMode, equitySummary, tradeSummary]);
+
   // Additional derived stats for the insight tabs (buy & hold, size, risk ratios)
   const insightStats = useMemo(() => {
     const priceSeries = chartDataWithEquity.filter((p) => p.close != null);
@@ -4891,6 +4908,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 <div className="relative group">
                   <button
                     onClick={() => {
+                      console.log('[UI] EWMA header mode change', { mode: 'unbiased' });
                       // Ensure unbiased EWMA is loaded if needed
                       if (onLoadEwmaUnbiased) {
                         onLoadEwmaUnbiased();
@@ -4992,6 +5010,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   <div className="relative group">
                     <button
                     onClick={() => {
+                      console.log('[UI] EWMA header mode change', { mode: 'biased' });
                       // Ensure biased EWMA path is loaded if needed
                       if (onLoadEwmaBiased) {
                         onLoadEwmaBiased();

@@ -558,6 +558,10 @@ const effectiveTrendWeight = useMemo(() => {
   const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
   const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
   const hasMaxRun = useMemo(() => t212Runs.some((r) => r.id === "ewma-biased-max"), [t212Runs]);
+  const activeT212RunId = useMemo(
+    () => (t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null),
+    [t212VisibleRunIds]
+  );
 
   // State for real Trading212 trades (from actual account history)
   const [realT212Trades, setRealT212Trades] = useState<T212SimpleTrade[]>([]);
@@ -623,9 +627,17 @@ const effectiveTrendWeight = useMemo(() => {
   // Get the account history for the currently visible T212 run (for equity chart)
   const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
     // Find the first visible run (we only show one at a time in solo mode)
-    const visibleRun = t212Runs.find((run) => t212VisibleRunIds.has(run.id));
+    const visibleRun = activeT212RunId
+      ? t212Runs.find((run) => run.id === activeT212RunId)
+      : t212Runs.find((run) => t212VisibleRunIds.has(run.id));
+    console.log("[UI-SYNC] t212AccountHistory derive", {
+      simulationModeBase: simulationMode.baseMode,
+      visibleRunId: visibleRun?.id ?? null,
+      visibleRunIds: Array.from(t212VisibleRunIds),
+      runs: t212Runs.map((r) => ({ id: r.id, lambda: r.lambda, trainFraction: r.trainFraction, trend: r.trendTiltEnabled })),
+    });
     return visibleRun?.result.accountHistory ?? null;
-  }, [t212Runs, t212VisibleRunIds]);
+  }, [t212Runs, activeT212RunId, t212VisibleRunIds, simulationMode.baseMode]);
 
   // Keep visible run in sync with SimulationMode and available runs
   useEffect(() => {
@@ -649,6 +661,12 @@ const effectiveTrendWeight = useMemo(() => {
     }
 
     if (chosen != null) {
+      console.log("[SYNC] simulationMode.baseMode", simulationMode.baseMode, "chosenVisibleRunId", chosen, "t212Runs", t212Runs.map((r) => ({
+        id: r.id,
+        lambda: r.lambda,
+        trainFraction: r.trainFraction,
+        trendTiltEnabled: r.trendTiltEnabled,
+      })));
       setT212VisibleRunIds(new Set<T212RunId>([chosen]));
     }
   }, [t212Runs, simulationMode.baseMode]);
@@ -2346,6 +2364,7 @@ const effectiveTrendWeight = useMemo(() => {
     if (!reactionMapSummary) return;
 
     console.log("[T212 Auto-Run] All conditions met, running sims...");
+    console.log("[SEED] simulationMode", simulationMode, "creating runs", ["ewma-unbiased", "ewma-biased", "ewma-biased-max"], "effectiveTrendWeight", effectiveTrendWeight);
 
     // Baseline runs: Unbiased + Biased
     runTrading212SimForSource("unbiased", "ewma-unbiased", "EWMA Unbiased", {
@@ -5128,7 +5147,7 @@ const effectiveTrendWeight = useMemo(() => {
           }}
           tradeOverlays={t212TradeOverlays}
           t212AccountHistory={t212AccountHistory}
-          activeT212RunId={t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null}
+          activeT212RunId={activeT212RunId}
           onToggleT212Run={toggleT212RunVisibility}
           simulationMode={simulationMode}
           onChangeSimulationMode={setSimulationMode}

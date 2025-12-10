@@ -6,6 +6,13 @@
     "createdAt": "2025-11-09T23:54:23.789Z",
     "updatedAt": "2025-11-09T23:54:23.789Z"
   },
+  "MCD": {
+    "ticker": "MCD",
+    "name": "McDonald's Corporation",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-10T12:00:00.000Z",
+    "updatedAt": "2025-12-10T12:00:00.000Z"
+  },
   "PLTR": {
     "ticker": "PLTR",
     "name": "Palantir Technologies Inc.",
