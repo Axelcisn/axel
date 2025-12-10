@@ -73,7 +73,7 @@ export async function GET(
   } catch (error) {
     console.error("Company info API error:", error);
     return NextResponse.json(
-      { symbol, name: null, shortName: null, exchange: null },
+      { symbol: params.symbol.toUpperCase(), name: null, shortName: null, exchange: null },
       { status: 200 }
     );
   }

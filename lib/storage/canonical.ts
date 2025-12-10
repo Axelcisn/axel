@@ -45,3 +45,54 @@ export async function loadCanonicalDataWithMeta(symbol: string): Promise<Canonic
  * Alias for compatibility
  */
 export const loadCanonical = loadCanonicalDataWithMeta;
+
+/**
+ * Load canonical data supplemented with fresh Yahoo data for missing recent dates.
+ * This ensures EWMA and other calculations have up-to-date data.
+ */
+export async function loadCanonicalDataWithYahooSupplement(symbol: string): Promise<CanonicalRow[]> {
+  // Dynamic import to avoid circular dependencies
+  const { fetchYahooOhlcv } = await import('@/lib/marketData/yahoo');
+  
+  let canonicalRows: CanonicalRow[] = [];
+  
+  // Try to load canonical data
+  try {
+    canonicalRows = await loadCanonicalData(symbol);
+  } catch {
+    // No canonical data, will try Yahoo only
+  }
+  
+  // Check if canonical data is stale (last date is more than 1 day old)
+  const today = new Date().toISOString().split('T')[0];
+  const lastCanonicalDate = canonicalRows.length > 0 
+    ? canonicalRows[canonicalRows.length - 1].date 
+    : null;
+  const isStale = !lastCanonicalDate || lastCanonicalDate < today;
+  
+  // If stale or no canonical data, supplement with Yahoo data
+  if (isStale) {
+    try {
+      const yahooRows = await fetchYahooOhlcv(symbol, { range: "1mo", interval: "1d" });
+      if (yahooRows.length > 0) {
+        // Merge: Yahoo takes precedence for overlapping dates
+        const dateMap = new Map<string, CanonicalRow>();
+        for (const row of canonicalRows) {
+          dateMap.set(row.date, row);
+        }
+        for (const row of yahooRows) {
+          dateMap.set(row.date, row);
+        }
+        canonicalRows = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+      }
+    } catch (err) {
+      console.warn(`[canonical] Yahoo supplement failed for ${symbol}:`, err);
+    }
+  }
+  
+  if (canonicalRows.length === 0) {
+    throw new Error(`No data found for ${symbol}`);
+  }
+  
+  return canonicalRows;
+}

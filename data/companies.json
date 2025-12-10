@@ -25,6 +25,13 @@
     "name": "McDonald's Corporation",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T03:31:43.141Z",
-    "updatedAt": "2025-12-10T03:54:54.281Z"
+    "updatedAt": "2025-12-10T04:12:14.310Z"
+  },
+  "TSLA": {
+    "ticker": "TSLA",
+    "name": "Tesla, Inc.",
+    "exchange": "NasdaqGS",
+    "createdAt": "2025-12-10T04:12:30.516Z",
+    "updatedAt": "2025-12-10T04:13:47.178Z"
   }
 }

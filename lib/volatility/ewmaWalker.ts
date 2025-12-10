@@ -12,7 +12,7 @@
  * Default horizon h=1 gives the classic 1-day forecast.
  */
 
-import { loadCanonicalData } from '../storage/canonical';
+import { loadCanonicalDataWithYahooSupplement } from '../storage/canonical';
 import { getNormalCritical } from '../forecast/critical';
 import { generateFutureTradingDates } from '../chart/tradingDays';
 import type { EwmaTiltConfig, ZBucketId } from './ewmaReaction';
@@ -178,8 +178,8 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
     Object.keys(tiltConfig.muByBucket).length > 0 &&
     (tiltHorizon === undefined || tiltHorizon === h);
 
-  // Load canonical data
-  const rawData = await loadCanonicalData(symbol);
+  // Load canonical data (supplemented with Yahoo for recent dates)
+  const rawData = await loadCanonicalDataWithYahooSupplement(symbol);
   if (!rawData || rawData.length === 0) {
     throw new Error(`No canonical data found for ${symbol}`);
   }
