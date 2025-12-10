@@ -2382,10 +2382,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     console.log('[SIM-CHART] data source', {
       simulationMode,
       activeT212RunId,
-      dataSample: equityPanelData.slice(0, 3),
-      chartSample: chartDataWithEquity.slice(0, 3),
+      ewmaHeaderState: {
+        showEwmaOverlay,
+        showEwmaBiasedOverlay,
+        ewmaIsMaximized: ewmaReactionMapDropdown?.isMaximized ?? false,
+      },
+      equityPanelSample: equityPanelData.slice(0, 3),
+      filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
+      priceChartSample: chartDataWithForecastBand.slice(0, 3),
     });
-  }, [simulationMode, activeT212RunId, equityPanelData, chartDataWithEquity]);
+  }, [
+    simulationMode,
+    activeT212RunId,
+    showEwmaOverlay,
+    showEwmaBiasedOverlay,
+    ewmaReactionMapDropdown?.isMaximized,
+    equityPanelData,
+    filteredEquityPanelData,
+    chartDataWithForecastBand,
+  ]);
 
   const equityYDomain = useMemo(() => {
     // Use filtered data for the equity chart Y domain in Overview
