@@ -1061,7 +1061,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   
   // Watchlist state
   const [isAddingToWatchlist, setIsAddingToWatchlist] = useState(false);
-  const [watchlistSuccess, setWatchlistSuccess] = useState(false);
   const [isInWatchlist, setIsInWatchlist] = useState(false);
 
   // Breakout Detection state
@@ -4879,15 +4878,16 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         const response = await fetch('/api/watchlist');
         if (response.ok) {
           const data = await response.json();
-          const rows = data.rows || [];
+          const rows = data.rows || data.summary?.rows || [];
           const isInList = rows.some((row: any) => row.symbol === params.ticker);
           setIsInWatchlist(isInList);
-        } else {
-          // If no watchlist data exists yet, check if we should persist from localStorage
-          const savedWatchlistState = localStorage.getItem(`watchlist_${params.ticker}`);
-          if (savedWatchlistState === 'true') {
-            setIsInWatchlist(true);
-          }
+          return;
+        }
+
+        // If no watchlist data exists yet, check if we should persist from localStorage
+        const savedWatchlistState = localStorage.getItem(`watchlist_${params.ticker}`);
+        if (savedWatchlistState === 'true') {
+          setIsInWatchlist(true);
         }
       } catch (err) {
         console.error('Failed to check watchlist status:', err);
@@ -4927,13 +4927,9 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       }
 
       setIsInWatchlist(true);
-      setWatchlistSuccess(true);
       
       // Save to localStorage for persistence
       localStorage.setItem(`watchlist_${params.ticker}`, 'true');
-      
-      // Clear success message after 3 seconds but keep button as "Added"
-      setTimeout(() => setWatchlistSuccess(false), 3000);
     } catch (err) {
       console.error('Failed to add to watchlist:', err);
     } finally {
@@ -5260,13 +5256,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
               <p className="text-xs text-slate-500">
                 As of {headerTimestampDisplay}
               </p>
-            )}
-            {watchlistSuccess && (
-              <span className={`text-sm font-medium ${
-                isDarkMode ? 'text-green-400' : 'text-green-600'
-              }`}>
-                ✓ Added to Watchlist
-              </span>
             )}
         </div>
         <div className="flex items-center gap-2">

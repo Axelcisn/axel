@@ -39,6 +39,18 @@ export async function POST(request: NextRequest) {
       targetSymbols = await getCanonicalSymbols();
     }
 
+    // Merge with existing watchlist for this as_of to allow incremental adds
+    const existingSummary = await loadWatchlistSummary(as_of);
+    const fallbackLatestSummary = existingSummary ? null : await getLatestWatchlistSummary();
+    const symbolsToCarry = existingSummary?.rows ?? fallbackLatestSummary?.rows;
+
+    if (symbolsToCarry?.length) {
+      const existingSymbols = symbolsToCarry
+        .map(row => row.symbol)
+        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+      targetSymbols = Array.from(new Set([...existingSymbols, ...targetSymbols]));
+    }
+
     if (targetSymbols.length === 0) {
       return NextResponse.json(
         { error: 'No symbols provided and no canonical symbols found' },
@@ -51,9 +63,10 @@ export async function POST(request: NextRequest) {
     // Assemble watchlist
     const summary = await assembleWatchlist(targetSymbols, as_of);
 
-    return NextResponse.json({
+    const responseBody = {
       success: true,
       summary,
+      rows: summary.rows,
       metadata: {
         symbols_requested: targetSymbols.length,
         symbols_processed: summary.rows.length,
@@ -64,7 +77,9 @@ export async function POST(request: NextRequest) {
         ).length,
         processing_timestamp: new Date().toISOString()
       }
-    });
+    };
+
+    return NextResponse.json(responseBody);
 
   } catch (error) {
     console.error('Watchlist assembly error:', error);
@@ -97,6 +112,7 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         summary,
+        rows: summary.rows,
         metadata: {
           is_latest: true,
           symbols_count: summary.rows.length,
@@ -129,6 +145,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       summary,
+      rows: summary.rows,
       metadata: {
         is_latest: false,
         requested_date: asOf,

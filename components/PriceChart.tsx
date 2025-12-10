@@ -578,6 +578,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     | "List of trades";
   const [activeInsightTab, setActiveInsightTab] = useState<InsightTab>("Overview");
 
+  // Position lines state (Long/Short)
+  type PositionType = 'long' | 'short' | null;
+  const [activePosition, setActivePosition] = useState<PositionType>(null);
+  const [positionPriceInput, setPositionPriceInput] = useState<string>('');
+  const [longPrice, setLongPrice] = useState<number | null>(null);
+  const [shortPrice, setShortPrice] = useState<number | null>(null);
 
   // Build canonical date list from fullData
   const allDates = React.useMemo(
@@ -1825,6 +1831,64 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const lastChartPoint = chartDataWithEwma[chartDataWithEwma.length - 1];
   const lastHistoricalPoint =
     chartDataWithEwma.slice().reverse().find((p) => p.close != null) || null;
+
+  // Default price for position lines (previous close)
+  const defaultPositionPrice = lastHistoricalPoint?.close ?? null;
+
+  // Handler to toggle Long/Short position
+  const handlePositionClick = useCallback((type: 'long' | 'short') => {
+    if (activePosition === type) {
+      // Clicking same button again - deactivate
+      setActivePosition(null);
+    } else {
+      // Switching to new position type
+      setActivePosition(type);
+      // Set default price if input is empty
+      if (!positionPriceInput && defaultPositionPrice != null) {
+        setPositionPriceInput(defaultPositionPrice.toFixed(2));
+      }
+    }
+  }, [activePosition, positionPriceInput, defaultPositionPrice]);
+
+  // Handler for price input change
+  const handlePositionPriceChange = useCallback((value: string) => {
+    // Allow empty string, numbers, and decimals only
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+      setPositionPriceInput(value);
+      const numValue = parseFloat(value);
+      if (!isNaN(numValue) && numValue > 0) {
+        if (activePosition === 'long') {
+          setLongPrice(numValue);
+        } else if (activePosition === 'short') {
+          setShortPrice(numValue);
+        }
+      } else if (value === '') {
+        // Empty input = 0 (effectively no line)
+        if (activePosition === 'long') {
+          setLongPrice(null);
+        } else if (activePosition === 'short') {
+          setShortPrice(null);
+        }
+      }
+    }
+  }, [activePosition]);
+
+  // Sync price input when position changes
+  useEffect(() => {
+    if (activePosition === 'long' && longPrice != null) {
+      setPositionPriceInput(longPrice.toFixed(2));
+    } else if (activePosition === 'short' && shortPrice != null) {
+      setPositionPriceInput(shortPrice.toFixed(2));
+    } else if (activePosition && defaultPositionPrice != null) {
+      // Set default price when activating for first time
+      setPositionPriceInput(defaultPositionPrice.toFixed(2));
+      if (activePosition === 'long') {
+        setLongPrice(defaultPositionPrice);
+      } else {
+        setShortPrice(defaultPositionPrice);
+      }
+    }
+  }, [activePosition, longPrice, shortPrice, defaultPositionPrice]);
 
   // Extract forecast band from activeForecast (if any)
   let overlayDate: string | null = null;
@@ -3809,6 +3873,130 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               />
             )}
             
+            {/* Long Position Reference Line - light blue glow */}
+            {longPrice != null && (
+              <ReferenceLine
+                y={longPrice}
+                yAxisId="price"
+                stroke="#22D3EE"
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                ifOverflow="extendDomain"
+                label={{
+                  position: "right",
+                  content: ({ viewBox }: any) => {
+                    const { x, y, width } = viewBox;
+                    const text = `$${longPrice.toFixed(2)}`;
+                    const pillWidth = 48;
+                    const pillHeight = 16;
+                    const pillX = (x || 0) + (width || 0) - pillWidth - 6;
+                    const pillY = y - pillHeight / 2;
+                    return (
+                      <g>
+                        {/* Glow effect */}
+                        <rect
+                          x={pillX - 2}
+                          y={pillY - 2}
+                          width={pillWidth + 4}
+                          height={pillHeight + 4}
+                          rx={5}
+                          ry={5}
+                          fill="#22D3EE"
+                          fillOpacity={0.15}
+                        />
+                        <rect
+                          x={pillX}
+                          y={pillY}
+                          width={pillWidth}
+                          height={pillHeight}
+                          rx={3}
+                          ry={3}
+                          fill="#22D3EE"
+                          fillOpacity={0.2}
+                          stroke="#22D3EE"
+                          strokeWidth={1}
+                          strokeOpacity={0.6}
+                        />
+                        <text
+                          x={pillX + pillWidth / 2}
+                          y={pillY + pillHeight / 2}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#22D3EE"
+                          fontSize={10}
+                          fontWeight={600}
+                        >
+                          {text}
+                        </text>
+                      </g>
+                    );
+                  },
+                }}
+              />
+            )}
+            
+            {/* Short Position Reference Line - light blue glow */}
+            {shortPrice != null && (
+              <ReferenceLine
+                y={shortPrice}
+                yAxisId="price"
+                stroke="#22D3EE"
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                ifOverflow="extendDomain"
+                label={{
+                  position: "right",
+                  content: ({ viewBox }: any) => {
+                    const { x, y, width } = viewBox;
+                    const text = `$${shortPrice.toFixed(2)}`;
+                    const pillWidth = 48;
+                    const pillHeight = 16;
+                    const pillX = (x || 0) + (width || 0) - pillWidth - 6;
+                    const pillY = y - pillHeight / 2;
+                    return (
+                      <g>
+                        {/* Glow effect */}
+                        <rect
+                          x={pillX - 2}
+                          y={pillY - 2}
+                          width={pillWidth + 4}
+                          height={pillHeight + 4}
+                          rx={5}
+                          ry={5}
+                          fill="#22D3EE"
+                          fillOpacity={0.15}
+                        />
+                        <rect
+                          x={pillX}
+                          y={pillY}
+                          width={pillWidth}
+                          height={pillHeight}
+                          rx={3}
+                          ry={3}
+                          fill="#22D3EE"
+                          fillOpacity={0.2}
+                          stroke="#22D3EE"
+                          strokeWidth={1}
+                          strokeOpacity={0.6}
+                        />
+                        <text
+                          x={pillX + pillWidth / 2}
+                          y={pillY + pillHeight / 2}
+                          textAnchor="middle"
+                          dominantBaseline="central"
+                          fill="#22D3EE"
+                          fontSize={10}
+                          fontWeight={600}
+                        >
+                          {text}
+                        </text>
+                      </g>
+                    );
+                  },
+                }}
+              />
+            )}
+            
             {/* TEMP: Test dot at last historical point */}
             {lastHistoricalPoint && lastHistoricalPoint.close != null && (
               <ReferenceDot
@@ -4942,9 +5130,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         {!horizonCoverage && <div />}
       </div>
       
-      {/* Range Selector - independent row below controls */}
+      {/* Range Selector + Position Controls - independent row below controls */}
       {perfByRange && (
-        <div className="mt-7 mb-2">
+        <div className="mt-7 mb-2 flex items-center justify-between">
           <RangeSelector
             selectedRange={selectedRange}
             perfByRange={perfByRange}
@@ -4952,6 +5140,63 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             isDarkMode={isDarkMode}
             compact={true}
           />
+          
+          {/* Long/Short Position Controls */}
+          <div className="flex items-center gap-2">
+            {/* Long Button */}
+            <button
+              type="button"
+              onClick={() => handlePositionClick('long')}
+              className={`
+                px-3 py-0.5 text-xs font-medium transition-all rounded-full border
+                ${activePosition === 'long'
+                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400/50 shadow-[0_0_8px_rgba(34,211,238,0.4)]'
+                  : isDarkMode
+                    ? 'text-gray-500 hover:text-cyan-400 hover:bg-cyan-500/10 border-transparent hover:border-cyan-400/30'
+                    : 'text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 border-transparent hover:border-cyan-300'
+                }
+              `}
+            >
+              Long
+            </button>
+            
+            {/* Price Input Box */}
+            <input
+              type="text"
+              value={positionPriceInput}
+              onChange={(e) => handlePositionPriceChange(e.target.value)}
+              placeholder={defaultPositionPrice?.toFixed(2) ?? '0.00'}
+              disabled={!activePosition}
+              className={`
+                w-20 px-2 py-0.5 text-xs font-medium text-center rounded-md border transition-all
+                ${activePosition
+                  ? isDarkMode
+                    ? 'bg-gray-800 text-cyan-400 border-cyan-400/40 placeholder-gray-600 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 shadow-[0_0_6px_rgba(34,211,238,0.2)]'
+                    : 'bg-white text-cyan-700 border-cyan-300 placeholder-gray-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200'
+                  : isDarkMode
+                    ? 'bg-gray-800/50 text-gray-600 border-gray-700 cursor-not-allowed'
+                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                }
+              `}
+            />
+            
+            {/* Short Button */}
+            <button
+              type="button"
+              onClick={() => handlePositionClick('short')}
+              className={`
+                px-3 py-0.5 text-xs font-medium transition-all rounded-full border
+                ${activePosition === 'short'
+                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400/50 shadow-[0_0_8px_rgba(34,211,238,0.4)]'
+                  : isDarkMode
+                    ? 'text-gray-500 hover:text-cyan-400 hover:bg-cyan-500/10 border-transparent hover:border-cyan-400/30'
+                    : 'text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 border-transparent hover:border-cyan-300'
+                }
+              `}
+            >
+              Short
+            </button>
+          </div>
         </div>
       )}
       
