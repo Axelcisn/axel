@@ -9,6 +9,11 @@ import { loadCanonicalData } from '@/lib/storage/canonical';
 import { runEwmaWalker, type EwmaWalkerPoint } from '@/lib/volatility/ewmaWalker';
 import { computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
 import {
+  buildEwmaReactionMap,
+  buildEwmaTiltConfigFromReactionMap,
+  defaultReactionConfig,
+} from '@/lib/volatility/ewmaReaction';
+import {
   simulateTrading212Cfd,
   type Trading212CfdConfig,
   type Trading212SimBar,
@@ -22,6 +27,12 @@ const COVERAGE = 0.95;
 const SHORT_WINDOW = 14;
 const LONG_WINDOW = 50;
 const Z_LOOKBACK = 60;
+const EWMA_LAMBDA_BIASED = 0.94;
+const EWMA_LAMBDA_MAX = 0.9;
+const TRAIN_FRACTION_BIASED = 0.7;
+const TRAIN_FRACTION_MAX = 0.8;
+const MIN_TRAIN_OBS = 500;
+const REACTION_SHRINK = 0.5;
 
 const INITIAL_EQUITY = 10000;
 const LEVERAGE = 1;
@@ -239,18 +250,21 @@ async function checkTrendTiltBranchOnSymbol(symbol: string, trendWeight: number)
 
 interface SimVariantSummary {
   symbol: string;
-  variant: 'biased' | 'biased-trend' | 'max' | 'max-trend';
+  variant: 'unbiased' | 'biased' | 'biased-trend' | 'max' | 'max-trend';
   lambda?: number;
   trainFraction?: number;
   totalReturnPct: number;
   maxDrawdownPct: number;
   trades: number;
+  profitableTrades: number;
+  winRatePct: number;
+  profitFactor: number;
   stopOuts: number;
 }
 
 async function runSimVariant(
   symbol: string,
-  baseMode: 'biased' | 'max',
+  baseMode: 'unbiased' | 'biased' | 'max',
   withTrend: boolean,
   trendWeight: number | null
 ): Promise<SimVariantSummary> {
@@ -260,12 +274,34 @@ async function runSimVariant(
     .sort((a, b) => a.date.localeCompare(b.date));
   assert.ok(canonicalRows.length > 0, `${symbol}: no canonical rows for sim`);
 
+  const lambda =
+    baseMode === 'max' ? EWMA_LAMBDA_MAX : EWMA_LAMBDA_BIASED;
+  const trainFraction =
+    baseMode === 'max' ? TRAIN_FRACTION_MAX : TRAIN_FRACTION_BIASED;
+
+  let tiltConfig = undefined;
+  if (baseMode !== 'unbiased') {
+    const reactionMap = await buildEwmaReactionMap(symbol, {
+      ...defaultReactionConfig,
+      lambda,
+      coverage: COVERAGE,
+      horizons: [HORIZON],
+      trainFraction,
+      minTrainObs: MIN_TRAIN_OBS,
+    });
+    tiltConfig = buildEwmaTiltConfigFromReactionMap(reactionMap, {
+      shrinkFactor: REACTION_SHRINK,
+      horizon: HORIZON,
+    });
+  }
+
   const ewmaResult = await runEwmaWalker({
     symbol,
-    lambda: 0.94,
+    lambda,
     coverage: COVERAGE,
     horizon: HORIZON,
     initialWindow: 252,
+    tiltConfig,
   });
 
   const ewmaPath = ewmaResult.points;
@@ -286,13 +322,25 @@ async function runSimVariant(
     }
   }
 
+  const appliedTrendWeight =
+    withTrend && baseMode !== 'unbiased'
+      ? (() => {
+          const tw = trendWeight ?? 0;
+          const minMag = 0.2;
+          const sign = Math.sign(tw || 1);
+          const mag = Math.abs(tw);
+          return mag >= minMag ? tw : sign * minMag;
+        })()
+      : null;
+
+  const thresholdPct = baseMode === 'unbiased' ? 0 : THRESHOLD_PCT;
+
   const bars = buildBarsFromEwmaPath(canonicalRows, ewmaPath, {
-    useTrendTilt: withTrend,
-    trendWeight: withTrend ? trendWeight : null,
+    useTrendTilt: withTrend && baseMode !== 'unbiased',
+    trendWeight: appliedTrendWeight,
     trendZByDate,
     horizon: HORIZON,
-    // For smoke testing, force trades to occur by treating any non-zero expected move as a signal.
-    thresholdPct: 0,
+    thresholdPct,
   });
 
   assert.ok(
@@ -303,32 +351,60 @@ async function runSimVariant(
   const longs = bars.filter((b) => b.signal === 'long').length;
   const shorts = bars.filter((b) => b.signal === 'short').length;
   console.log(
-    `  [DEBUG] ${symbol}/${baseMode}${withTrend ? '+trend' : ''} bars=${bars.length}, long=${longs}, short=${shorts}`
+    `  [DEBUG] ${symbol}/${baseMode}${withTrend ? '+trend' : ''} bars=${bars.length}, long=${longs}, short=${shorts}, tw=${appliedTrendWeight ?? 0}, threshold=${thresholdPct}`
   );
 
   const sim: Trading212SimulationResult = simulateTrading212Cfd(bars, INITIAL_EQUITY, T212_CONFIG);
 
-  // Consistency checks on simulation result
   const pnl = sim.finalEquity - sim.initialEquity;
   const totalReturnPct = (pnl / sim.initialEquity) * 100;
   expectFinite(`${symbol}/${baseMode}/ret`, totalReturnPct);
 
   const maxDrawdownPct = sim.maxDrawdown * 100;
   expectInRange(`${symbol}/${baseMode}/dd`, maxDrawdownPct, 0, 100);
-  assert.strictEqual(
-    sim.trades.length,
-    sim.trades.length,
-    `${symbol}/${baseMode}: trades length inconsistent`
-  );
+
+  const trades = sim.trades.length;
+  let profitableTrades = 0;
+  let grossProfit = 0;
+  let grossLoss = 0;
+
+  for (const t of sim.trades) {
+    expectFinite(`${symbol}/${baseMode}/trade.netPnl`, t.netPnl);
+    if (t.netPnl > 0) {
+      profitableTrades++;
+      grossProfit += t.netPnl;
+    } else if (t.netPnl < 0) {
+      grossLoss += t.netPnl;
+    }
+  }
+
+  const winRatePct = trades > 0 ? (profitableTrades / trades) * 100 : 0;
+  let profitFactor = Number.POSITIVE_INFINITY;
+  if (grossLoss < 0) {
+    profitFactor = grossProfit / Math.abs(grossLoss);
+  } else if (trades === 0) {
+    profitFactor = 0;
+  }
+  if (Number.isNaN(profitFactor)) {
+    throw new Error(`${symbol}/${baseMode}: profitFactor NaN`);
+  }
 
   return {
     symbol,
-    variant: withTrend ? (`${baseMode}-trend` as const) : baseMode,
+    variant:
+      baseMode === 'unbiased'
+        ? 'unbiased'
+        : withTrend
+        ? (`${baseMode}-trend` as const)
+        : baseMode,
     lambda: ewmaResult.params.lambda,
-    trainFraction: undefined,
+    trainFraction: baseMode === 'unbiased' ? undefined : trainFraction,
     totalReturnPct,
     maxDrawdownPct,
-    trades: sim.trades.length,
+    trades,
+    profitableTrades,
+    winRatePct,
+    profitFactor,
     stopOuts: sim.stopOutEvents ?? 0,
   };
 }
@@ -337,6 +413,7 @@ async function checkSimVariantsForSymbol(symbol: string, trendWeight: number) {
   console.log(`▶ Check 4: sims for ${symbol}`);
 
   const variants: SimVariantSummary[] = [];
+  variants.push(await runSimVariant(symbol, 'unbiased', false, trendWeight));
   variants.push(await runSimVariant(symbol, 'biased', false, trendWeight));
   variants.push(await runSimVariant(symbol, 'biased', true, trendWeight));
   variants.push(await runSimVariant(symbol, 'max', false, trendWeight));
@@ -347,17 +424,22 @@ async function checkSimVariantsForSymbol(symbol: string, trendWeight: number) {
   const max = variants.find((v) => v.variant === 'max')!;
   const maxTrend = variants.find((v) => v.variant === 'max-trend')!;
 
+  const metricsIdentical = (a: SimVariantSummary, b: SimVariantSummary) =>
+    a.totalReturnPct === b.totalReturnPct &&
+    a.maxDrawdownPct === b.maxDrawdownPct &&
+    a.trades === b.trades &&
+    a.profitableTrades === b.profitableTrades &&
+    a.winRatePct === b.winRatePct &&
+    a.profitFactor === b.profitFactor &&
+    a.stopOuts === b.stopOuts;
+
   // Warn if Biased vs Max share config or are identical
   if (
     biased.lambda !== undefined &&
     max.lambda !== undefined &&
     (biased.lambda !== max.lambda || biased.trainFraction !== max.trainFraction)
   ) {
-    if (
-      biased.totalReturnPct === max.totalReturnPct &&
-      biased.maxDrawdownPct === max.maxDrawdownPct &&
-      biased.trades === max.trades
-    ) {
+    if (metricsIdentical(biased, max)) {
       console.warn(
         `  ⚠ ${symbol}: Biased and Max use different λ/train, but metrics are identical. Check Max config.`
       );
@@ -367,12 +449,6 @@ async function checkSimVariantsForSymbol(symbol: string, trendWeight: number) {
       `  ⚠ ${symbol}: Biased and Max share λ/train or config missing; Max may just be a fallback to Biased.`
     );
   }
-
-  const metricsIdentical = (a: SimVariantSummary, b: SimVariantSummary) =>
-    a.totalReturnPct === b.totalReturnPct &&
-    a.maxDrawdownPct === b.maxDrawdownPct &&
-    a.trades === b.trades &&
-    a.stopOuts === b.stopOuts;
 
   if (metricsIdentical(biased, biasedTrend)) {
     console.warn(
@@ -396,15 +472,29 @@ async function checkSimVariantsForSymbol(symbol: string, trendWeight: number) {
     expectFinite(`${symbol}/${v.variant}/ret`, v.totalReturnPct);
     expectFinite(`${symbol}/${v.variant}/dd`, v.maxDrawdownPct);
     assert.ok(v.trades >= 0, `${symbol}/${v.variant}/trades negative`);
+    assert.ok(
+      v.profitFactor >= 0 || v.profitFactor === Number.POSITIVE_INFINITY,
+      `${symbol}/${v.variant}/profitFactor invalid: ${v.profitFactor}`
+    );
+    assert.ok(
+      v.winRatePct >= 0 && v.winRatePct <= 100,
+      `${symbol}/${v.variant}/winRatePct out of [0,100]: ${v.winRatePct}`
+    );
   }
 
   console.log(
     variants
       .map(
         (v) =>
-          `${v.symbol}  ${v.variant.padEnd(12)}  Ret: ${v.totalReturnPct.toFixed(
-            2
-          )}%  DD: ${v.maxDrawdownPct.toFixed(2)}%  Trades: ${v.trades}`
+          [
+            v.symbol.padEnd(6),
+            v.variant.padEnd(12),
+            `Ret: ${v.totalReturnPct.toFixed(2)}%`.padEnd(14),
+            `DD: ${v.maxDrawdownPct.toFixed(2)}%`.padEnd(14),
+            `Trades: ${v.trades.toString().padEnd(4)}`,
+            `Wins: ${v.profitableTrades} (${v.winRatePct.toFixed(1)}%)`.padEnd(18),
+            `PF: ${Number.isFinite(v.profitFactor) ? v.profitFactor.toFixed(2) : 'Inf'}`,
+          ].join('  ')
       )
       .join('\n')
   );

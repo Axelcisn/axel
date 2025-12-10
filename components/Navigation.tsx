@@ -191,7 +191,7 @@ export default function Navigation() {
         <>
           {/* Backdrop with blur, starts below navbar so navbar remains visible */}
           <div
-            className={`fixed inset-x-0 top-14 bottom-0 z-40 bg-black/65 supports-[backdrop-filter]:backdrop-blur-[22px] supports-[backdrop-filter]:backdrop-saturate-150 transition-opacity duration-[420ms] ${
+            className={`fixed inset-x-0 top-14 bottom-0 z-[110] bg-black/65 supports-[backdrop-filter]:backdrop-blur-[22px] supports-[backdrop-filter]:backdrop-saturate-150 transition-opacity duration-[420ms] ${
               isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'
             }`}
             onClick={() => setIsSearchOpen(false)}
@@ -203,7 +203,7 @@ export default function Navigation() {
           />
 
           <div
-            className={`fixed inset-x-0 top-14 z-50 ${
+            className={`fixed inset-x-0 top-14 z-[120] ${
               isClosing ? 'animate-slideUpFade' : 'animate-slideDownFade'
             } border-b ${isDarkMode ? 'bg-[#0f0f0f]/95 border-white/10' : 'bg-white/95 border-gray-200'} backdrop-blur-xl shadow-2xl`}
             onMouseEnter={() => {
