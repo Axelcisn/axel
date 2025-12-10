@@ -364,11 +364,6 @@ interface PriceChartProps {
   hasMaxRun?: boolean;
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
-  onDateRangeChange?: (
-    startDate: string | null,
-    endDate: string | null,
-    preset: DateRangePreset
-  ) => void;  // Callback when date range changes
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
 }
 
@@ -420,7 +415,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   hasMaxRun = true,
   trendWeight = null,
   trendWeightUpdatedAt = null,
-  onDateRangeChange,
   simulationRuns,
 }) => {
   const isDarkMode = useDarkMode();
@@ -567,17 +561,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const pendingHoverIndexRef = useRef<number | null>(null);
   const hoverRafRef = useRef<number | null>(null);
 
-  // Date range dropdown state (TradingView-style)
-  const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>("chart");
-  const [showDateRangeDropdown, setShowDateRangeDropdown] = useState(false);
-
   // Reset view + range state when ticker changes
   useEffect(() => {
     setSelectedRange("1M");
     setZoomDays(null);
     setViewStartIdx(null);
     setViewEndIdx(null);
-    setDateRangePreset("chart");
   }, [symbol]);
 
   // Insights tab state (TradingView-style)
@@ -611,57 +600,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       end: end ? normalizeDateString(end) : null,
     };
   }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
-
-  // Compute date range label for dropdown
-  const dateRangeSpan = useMemo(() => {
-    const format = (d: string | null | undefined) => {
-      if (!d) return null;
-      const dt = new Date(d);
-      if (isNaN(dt.getTime())) return null;
-      return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-    };
-
-    const latestDate = allDates[allDates.length - 1] ?? null;
-    const pickSpan = (days: number | null) => {
-      if (!latestDate || !allDates.length) return { start: null, end: null };
-      if (days == null || days >= allDates.length) {
-        return { start: allDates[0], end: latestDate };
-      }
-      const startIdx = Math.max(0, allDates.length - days);
-      return { start: allDates[startIdx], end: latestDate };
-    };
-
-    const chartSpan =
-      priceViewWindow.start || priceViewWindow.end
-        ? { start: priceViewWindow.start, end: priceViewWindow.end }
-        : { start: allDates[0] ?? null, end: latestDate };
-
-    const presetSpan: Record<DateRangePreset, { start: string | null; end: string | null }> = {
-      chart: chartSpan,
-      "7d": pickSpan(7),
-      "30d": pickSpan(30),
-      "90d": pickSpan(90),
-      "365d": pickSpan(365),
-      all: pickSpan(null),
-      custom: chartSpan,
-    };
-
-    const span = presetSpan[dateRangePreset];
-    return {
-      raw: span,
-      label:
-        span.start && span.end
-          ? `${format(span.start) ?? span.start} — ${format(span.end) ?? span.end}`
-          : "No trades",
-    };
-  }, [allDates, dateRangePreset, priceViewWindow]);
-
-  useEffect(() => {
-    if (!onDateRangeChange) return;
-    const startDate = dateRangeSpan.raw.start;
-    const endDate = dateRangeSpan.raw.end;
-    onDateRangeChange(startDate, endDate, dateRangePreset);
-  }, [dateRangePreset, dateRangeSpan.raw.end, dateRangeSpan.raw.start, onDateRangeChange]);
 
   // Helper to parse rows into PricePoint[]
   const parseRowsToPoints = (rows: any[]): PricePoint[] => {
@@ -1187,8 +1125,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const handleRangeChange = (range: PriceRange) => {
     setSelectedRange(range);
     setZoomDays(null);
-    // Sync simulation date range to follow chart range
-    setDateRangePreset("chart");
 
     if (fullData.length > 0) {
       const [start, end] = computeDefaultWindowForRange(fullData, range);
@@ -2340,56 +2276,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     showTrendEwma,
   ]);
 
-  // Filter equity data by selected date range - nullify equity outside the range
-  // This keeps charts synced but only shows equity within the selected period
+  // Filtered equity data for Overview stats (full history when date-range dropdown is disabled)
   const filteredEquityData = useMemo(() => {
-    const startDate = dateRangeSpan.raw.start;
-    const endDate = dateRangeSpan.raw.end;
-    
-    if (!startDate || !endDate) {
-      return chartDataWithEquity;
-    }
-    
-    // Get all trades from tradeOverlays
-    const allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
-    
-    // Find trades that have entry within the selected date range
-    const tradesInRange = allTrades
-      .filter((t) => t.entryDate && t.entryDate >= startDate && t.entryDate <= endDate)
-      .sort((a, b) => (a.entryDate || "").localeCompare(b.entryDate || ""));
-    
-    if (tradesInRange.length === 0) {
-      return chartDataWithEquity.map((pt) => ({ ...pt, equity: null }));
-    }
-    
-    const firstTradeDate = tradesInRange[0].entryDate!;
-    
-    // Find the last relevant date: either the last exit date or endDate if there's an open position
-    const hasOpenPosition = tradesInRange.some((t) => !t.exitDate);
-    let lastTradeDate: string;
-    
-    if (hasOpenPosition) {
-      // If there's an open position, extend equity to endDate
-      lastTradeDate = endDate;
-    } else {
-      // Find the latest exit date among trades in range
-      const exitDates = tradesInRange
-        .map((t) => t.exitDate)
-        .filter((d): d is string => !!d)
-        .sort((a, b) => b.localeCompare(a)); // Sort descending
-      lastTradeDate = exitDates.length > 0 ? exitDates[0] : firstTradeDate;
-    }
-    
-    // Keep full data structure but nullify equity outside the active range
-    return chartDataWithEquity.map((pt) => {
-      if (!pt.date) return { ...pt, equity: null };
-      // Only show equity from first trade date to last trade date
-      if (pt.date >= firstTradeDate && pt.date <= lastTradeDate) {
-        return pt; // Keep equity
-      }
-      return { ...pt, equity: null }; // Nullify equity outside range
-    });
-  }, [chartDataWithEquity, dateRangeSpan.raw.start, dateRangeSpan.raw.end, tradeOverlays]);
+    return chartDataWithEquity;
+  }, [chartDataWithEquity]);
 
   const hoveredDate =
     hoverIndex != null && hoverIndex >= 0 && hoverIndex < chartDataWithEquity.length
@@ -2656,22 +2546,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return `${(v * 100).toFixed(precision)}%`;
   };
 
-  // Comprehensive trade summary for all tabs (filtered by date range)
+  // Comprehensive trade summary for all tabs (full history)
   const tradeSummary = useMemo(() => {
-    const startDate = dateRangeSpan.raw.start;
-    const endDate = dateRangeSpan.raw.end;
-    
-    // Get all trades and filter by date range
-    let allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
-    
-    // Filter trades to only include those within the date range
-    if (startDate && endDate) {
-      allTrades = allTrades.filter((t) => {
-        const entryDate = t.entryDate;
-        if (!entryDate) return false;
-        return entryDate >= startDate && entryDate <= endDate;
-      });
-    }
+    const allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
     
     const longTrades = allTrades.filter((t) => t.side === "long");
     const shortTrades = allTrades.filter((t) => t.side === "short");
@@ -2848,7 +2725,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         return dateB.localeCompare(dateA);
       }),
     };
-  }, [tradeOverlays, t212AccountHistory, dateRangeSpan.raw.start, dateRangeSpan.raw.end]);
+  }, [tradeOverlays, t212AccountHistory]);
 
   useEffect(() => {
     console.log('[UI] Simulation header metrics', {
@@ -3871,7 +3748,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               cursor={false}
             />
             
-            {/* Live Price Reference Line - horizontal dotted line with price pill on right */}
+            {/* Live Price Reference Line - horizontal dotted line with price pill */}
             {livePrice != null && (
               <ReferenceLine
                 y={livePrice}
@@ -3886,28 +3763,33 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     // viewBox for horizontal line: { x, y, width, height }
                     const { x, y, width } = viewBox;
                     const text = `$${livePrice.toFixed(2)}`;
-                    const pillWidth = 54;
-                    const pillHeight = 18;
-                    // Position pill inside the chart area, anchored to the right edge
-                    const pillX = (x || 0) + (width || 0) - pillWidth - 8;
+                    const pillWidth = 48;
+                    const pillHeight = 16;
+                    // Position pill at the right edge where the dotted line ends
+                    const pillX = (x || 0) + (width || 0) - pillWidth - 6;
+                    const pillY = y - pillHeight / 2;
                     return (
                       <g>
                         <rect
                           x={pillX}
-                          y={y - pillHeight / 2}
+                          y={pillY}
                           width={pillWidth}
                           height={pillHeight}
                           rx={3}
                           ry={3}
                           fill="#F87171"
+                          fillOpacity={0.75}
+                          stroke="#EF4444"
+                          strokeWidth={1}
+                          strokeOpacity={0.8}
                         />
                         <text
                           x={pillX + pillWidth / 2}
-                          y={y}
+                          y={pillY + pillHeight / 2}
                           textAnchor="middle"
-                          dominantBaseline="middle"
+                          dominantBaseline="central"
                           fill="#FFFFFF"
-                          fontSize={11}
+                          fontSize={10}
                           fontWeight={600}
                         >
                           {text}
@@ -5354,100 +5236,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               })}
             </div>
 
-            {/* Date Range Dropdown */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowDateRangeDropdown((v) => !v)}
-                className={`
-                  flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-all
-                  ${isDarkMode
-                    ? "bg-slate-900/70 text-slate-200 hover:bg-slate-800/80"
-                    : "bg-white text-slate-700 hover:bg-slate-50"}
-                `}
-              >
-                <svg 
-                  className={`w-4 h-4 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`} 
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <rect x="3" y="4" width="18" height="18" rx="2" ry="2" strokeWidth="2"/>
-                  <line x1="16" y1="2" x2="16" y2="6" strokeWidth="2"/>
-                  <line x1="8" y1="2" x2="8" y2="6" strokeWidth="2"/>
-                  <line x1="3" y1="10" x2="21" y2="10" strokeWidth="2"/>
-                </svg>
-                <span className="font-medium">{dateRangeSpan.label}</span>
-                <svg 
-                  className={`w-3 h-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`} 
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <polyline points="6 9 12 15 18 9" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </button>
-
-              {showDateRangeDropdown && (
-                <div className={`
-                  absolute right-0 mt-2 w-64 rounded-2xl border shadow-2xl z-50
-                  ${isDarkMode ? "bg-slate-900 border-slate-700/70" : "bg-white border-slate-200"}
-                `}>
-                  <div className="px-3 py-2">
-                    <div className={`text-xs mb-2 ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Selected range</div>
-                    <input
-                      readOnly
-                      value={dateRangeSpan.label}
-                      className={`
-                        w-full text-sm px-2 py-1.5 rounded-lg border focus:outline-none
-                        ${isDarkMode ? "bg-slate-800 border-slate-700 text-slate-100" : "bg-slate-50 border-slate-200 text-slate-800"}
-                      `}
-                    />
-                  </div>
-                  <div className={`text-xs px-3 py-2 border-t ${isDarkMode ? "border-slate-800 text-slate-500" : "border-slate-100 text-slate-500"}`}>
-                    Other ranges
-                  </div>
-                  {[
-                    { key: "chart", label: "Range from chart" },
-                    { key: "7d", label: "Last 7 days" },
-                    { key: "30d", label: "Last 30 days" },
-                    { key: "90d", label: "Last 90 days" },
-                    { key: "365d", label: "Last 365 days" },
-                    { key: "all", label: "Entire history" },
-                  ].map((opt) => (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      onClick={() => {
-                        setDateRangePreset(opt.key as DateRangePreset);
-                        setShowDateRangeDropdown(false);
-                      }}
-                      className={`
-                        w-full text-left px-3 py-2 text-sm hover:bg-slate-800/50 transition
-                        ${dateRangePreset === opt.key ? (isDarkMode ? "text-white" : "text-slate-900 font-semibold") : (isDarkMode ? "text-slate-200" : "text-slate-700")}
-                      `}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                  <div className={`px-3 py-3 border-t ${isDarkMode ? "border-slate-800" : "border-slate-100"}`}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDateRangePreset("custom");
-                        setShowDateRangeDropdown(false);
-                      }}
-                      className={`
-                        w-full text-left text-sm px-2 py-2 rounded-lg border
-                        ${isDarkMode ? "border-slate-700 text-slate-200 hover:bg-slate-800" : "border-slate-200 text-slate-700 hover:bg-slate-50"}
-                      `}
-                    >
-                      Custom date range…
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Overview Tab - Stats + Equity Chart */}
