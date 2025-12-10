@@ -506,11 +506,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showSimulationSettingsDropdown]);
   
-  // Determine whether the current overlay is in log domain
-  const isLogDomain =
-    forecastOverlay?.conformalState &&
-    typeof forecastOverlay.conformalState === "object" &&
-    forecastOverlay.conformalState.domain === "log";
+  // Determine whether the current overlay claims a log domain
+  const overlayDomain =
+    (forecastOverlay?.conformalState &&
+      typeof forecastOverlay.conformalState === "object" &&
+      forecastOverlay.conformalState.domain) ||
+    (forecastOverlay?.activeForecast && typeof forecastOverlay.activeForecast === "object"
+      ? (forecastOverlay.activeForecast as any).domain
+      : null);
+  const isLogDomain = overlayDomain === "log";
   
   const [fullData, setFullData] = useState<PricePoint[]>([]);
   const [selectedRange, setSelectedRange] = useState<PriceRange>("1M");
@@ -1862,27 +1866,41 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [activePosition, defaultPositionPrice]);
 
   // Handler for price input change
+  // Handler for price input change - only update display, not the line
   const handlePositionPriceChange = useCallback((value: string) => {
     // Allow empty string, numbers, and decimals only
     if (value === '' || /^\d*\.?\d*$/.test(value)) {
       setPositionPriceInput(value);
-      const numValue = parseFloat(value);
-      if (!isNaN(numValue) && numValue > 0) {
-        if (activePosition === 'long') {
-          setLongPrice(numValue);
-        } else if (activePosition === 'short') {
-          setShortPrice(numValue);
-        }
-      } else if (value === '') {
-        // Empty input = 0 (effectively no line)
-        if (activePosition === 'long') {
-          setLongPrice(null);
-        } else if (activePosition === 'short') {
-          setShortPrice(null);
-        }
+      // Don't update the line immediately - wait for blur or Enter
+    }
+  }, []);
+
+  // Handler to commit the price change (on blur or Enter)
+  const handlePositionPriceCommit = useCallback(() => {
+    const numValue = parseFloat(positionPriceInput);
+    if (!isNaN(numValue) && numValue > 0) {
+      if (activePosition === 'long') {
+        setLongPrice(numValue);
+      } else if (activePosition === 'short') {
+        setShortPrice(numValue);
+      }
+    } else if (positionPriceInput === '') {
+      // Empty input = remove the line
+      if (activePosition === 'long') {
+        setLongPrice(null);
+      } else if (activePosition === 'short') {
+        setShortPrice(null);
       }
     }
-  }, [activePosition]);
+  }, [positionPriceInput, activePosition]);
+
+  // Handler for Enter key press
+  const handlePositionPriceKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handlePositionPriceCommit();
+      (e.target as HTMLInputElement).blur();
+    }
+  }, [handlePositionPriceCommit]);
 
   // Sync price input when position changes
   useEffect(() => {
@@ -1900,6 +1918,34 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       }
     }
   }, [activePosition, longPrice, shortPrice, defaultPositionPrice]);
+
+  const toFinite = (value: any): number | null =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+
+  const firstFinite = (...values: any[]): number | null => {
+    for (const v of values) {
+      const n = toFinite(v);
+      if (n != null) return n;
+    }
+    return null;
+  };
+
+  const maybeFromLog = (value: number | null) => {
+    if (value == null) return null;
+    if (!isLogDomain) return value;
+    const lastPrice =
+      lastHistoricalPoint?.close ??
+      lastHistoricalPoint?.value ??
+      (chartData.length > 0 ? chartData[chartData.length - 1]?.close : null);
+    if (lastPrice != null && lastPrice > 0) {
+      const ratio = Math.abs(value) / lastPrice;
+      // Heuristic: treat as log only if magnitude is clearly out of line with current price
+      if (ratio < 0.5 || value < 0) {
+        return Math.exp(value);
+      }
+    }
+    return value;
+  };
 
   // Extract forecast band from activeForecast (if any)
   let overlayDate: string | null = null;
@@ -5176,6 +5222,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               type="text"
               value={positionPriceInput}
               onChange={(e) => handlePositionPriceChange(e.target.value)}
+              onBlur={handlePositionPriceCommit}
+              onKeyDown={handlePositionPriceKeyDown}
               placeholder={defaultPositionPrice?.toFixed(2) ?? '0.00'}
               disabled={!activePosition}
               className={`
