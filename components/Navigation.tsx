@@ -115,7 +115,7 @@ export default function Navigation() {
 
   return (
     <nav
-      className={`border-b backdrop-blur-xl transition-colors ${
+      className={`relative z-[130] border-b backdrop-blur-xl transition-colors ${
         isDarkMode
           ? 'bg-[#0f0f0f]/95 border-white/10'
           : 'bg-white/95 border-gray-200'
