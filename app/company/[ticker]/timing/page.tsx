@@ -491,7 +491,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   const [isOptimizingReaction, setIsOptimizingReaction] = useState(false);
   const [isReactionMaximized, setIsReactionMaximized] = useState(false);  // Track if Biased has been optimized
   const [reactionOptimizeError, setReactionOptimizeError] = useState<string | null>(null);
-  type BaseMode = 'biased' | 'max';
+  type BaseMode = 'unbiased' | 'biased' | 'max';
 
   interface SimulationMode {
     baseMode: BaseMode;
@@ -643,8 +643,19 @@ const effectiveTrendWeight = useMemo(() => {
   useEffect(() => {
     if (t212Runs.length === 0) return;
 
-    const desiredBaseRunId: T212RunId =
-      simulationMode.baseMode === "max" ? "ewma-biased-max" : "ewma-biased";
+    let desiredBaseRunId: T212RunId;
+    switch (simulationMode.baseMode) {
+      case "unbiased":
+        desiredBaseRunId = "ewma-unbiased";
+        break;
+      case "max":
+        desiredBaseRunId = "ewma-biased-max";
+        break;
+      case "biased":
+      default:
+        desiredBaseRunId = "ewma-biased";
+        break;
+    }
 
     const runIds = new Set(t212Runs.map((r) => r.id));
 

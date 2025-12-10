@@ -301,7 +301,7 @@ export interface SimulationRunSummary {
 }
 
 type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
-type BaseMode = "biased" | "max";
+type BaseMode = "unbiased" | "biased" | "max";
 
 interface SimulationMode {
   baseMode: BaseMode;
@@ -431,32 +431,43 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const longWindowLabel = ewmaLongWindow;
   const hasMomentumScore = momentumSeries.length > 0;
   const hasMomentumScorePane = hasMomentumScore || adxSeriesSafe.length > 0;
-  
-  // EWMA overlay toggles - sync with activeT212RunId
-  const [showEwmaOverlay, setShowEwmaOverlay] = useState(false);
-  const [showEwmaBiasedOverlay, setShowEwmaBiasedOverlay] = useState(false);
-  
-  // Sync EWMA overlays with activeT212RunId
+  const showUnbiasedEwma = simulationMode.baseMode === "unbiased";
+  const showBiasedEwma = simulationMode.baseMode === "biased" || simulationMode.baseMode === "max";
+  const isMaxBaseMode = simulationMode.baseMode === "max";
+  const ewmaHasOptimizationResults = ewmaReactionMapDropdown?.hasOptimizationResults ?? false;
+  const ewmaIsMaximizedFlag = ewmaReactionMapDropdown?.isMaximized ?? false;
+  const ewmaOnMaximize = ewmaReactionMapDropdown?.onMaximize;
+  const ewmaOnReset = ewmaReactionMapDropdown?.onReset;
+
+  // Ensure the active EWMA path for the selected base mode is loaded
   useEffect(() => {
-    if (activeT212RunId === "ewma-unbiased") {
-      setShowEwmaOverlay(true);
-      setShowEwmaBiasedOverlay(false);
-    } else if (activeT212RunId === "ewma-biased" || activeT212RunId === "ewma-biased-max") {
-      setShowEwmaOverlay(false);
-      setShowEwmaBiasedOverlay(true);
-    } else {
-      setShowEwmaOverlay(false);
-      setShowEwmaBiasedOverlay(false);
+    if (showUnbiasedEwma) {
+      if ((!ewmaPath || ewmaPath.length === 0) && onLoadEwmaUnbiased) {
+        onLoadEwmaUnbiased();
+      }
+    } else if (showBiasedEwma) {
+      if (!isLoadingEwmaBiased && (!ewmaBiasedPath || ewmaBiasedPath.length === 0) && onLoadEwmaBiased) {
+        onLoadEwmaBiased();
+      }
     }
-  }, [activeT212RunId]);
+  }, [showUnbiasedEwma, showBiasedEwma, ewmaPath, ewmaBiasedPath, onLoadEwmaUnbiased, onLoadEwmaBiased, isLoadingEwmaBiased]);
+
+  // Keep EWMA reaction-map state aligned with the selected Simulation base mode
+  useEffect(() => {
+    if (simulationMode.baseMode === "max") {
+      if (ewmaHasOptimizationResults && !ewmaIsMaximizedFlag) {
+        ewmaOnMaximize?.();
+      }
+    } else {
+      if (ewmaIsMaximizedFlag) {
+        ewmaOnReset?.();
+      }
+    }
+  }, [simulationMode.baseMode, ewmaHasOptimizationResults, ewmaIsMaximizedFlag, ewmaOnMaximize, ewmaOnReset]);
   
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
-  
-  // EWMA Settings dropdown state
-  const [showEwmaSettingsDropdown, setShowEwmaSettingsDropdown] = useState(false);
-  const ewmaSettingsDropdownRef = useRef<HTMLDivElement>(null);
   
   // Model Settings dropdown state (⋯ button next to Model)
   const [showModelSettingsDropdown, setShowModelSettingsDropdown] = useState(false);
@@ -469,18 +480,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [simulationLeverage, setSimulationLeverage] = useState(5);
   const [simulationPositionPct, setSimulationPositionPct] = useState(25);
   const [simulationBiasThreshold, setSimulationBiasThreshold] = useState(0);
-  
-  // Click outside to close EWMA settings dropdown
-  useEffect(() => {
-    if (!showEwmaSettingsDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (ewmaSettingsDropdownRef.current && !ewmaSettingsDropdownRef.current.contains(e.target as Node)) {
-        setShowEwmaSettingsDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showEwmaSettingsDropdown]);
   
   // Click outside to close Model settings dropdown
   useEffect(() => {
@@ -1569,8 +1568,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
   const chartDataWithEwma = useMemo(() => {
-    const showNeutral = showEwmaOverlay && ewmaPath && ewmaPath.length > 0;
-    const showBiased = showEwmaBiasedOverlay && ewmaBiasedPath && ewmaBiasedPath.length > 0;
+    const showNeutral = showUnbiasedEwma && ewmaPath && ewmaPath.length > 0;
+    const showBiased = showBiasedEwma && ewmaBiasedPath && ewmaBiasedPath.length > 0;
     
     if (!showNeutral && !showBiased) {
       return chartData;
@@ -1848,7 +1847,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
 
     return result;
-  }, [chartData, ewmaPath, showEwmaOverlay, ewmaBiasedPath, showEwmaBiasedOverlay]);
+  }, [chartData, ewmaPath, showUnbiasedEwma, ewmaBiasedPath, showBiasedEwma]);
 
   // Find last chart points
   const lastChartPoint = chartDataWithEwma[chartDataWithEwma.length - 1];
@@ -2168,10 +2167,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       if (p.forecastLower != null && Number.isFinite(p.forecastLower)) values.push(p.forecastLower);
       if (p.forecastUpper != null && Number.isFinite(p.forecastUpper)) values.push(p.forecastUpper);
       // Include EWMA values in domain calculation
-      if (showEwmaOverlay) {
+      if (showUnbiasedEwma) {
         if (p.ewma_forecast != null && Number.isFinite(p.ewma_forecast)) values.push(p.ewma_forecast);
         if (p.ewma_lower != null && Number.isFinite(p.ewma_lower)) values.push(p.ewma_lower);
         if (p.ewma_upper != null && Number.isFinite(p.ewma_upper)) values.push(p.ewma_upper);
+      }
+      if (showBiasedEwma) {
+        if (p.ewma_biased_forecast != null && Number.isFinite(p.ewma_biased_forecast)) values.push(p.ewma_biased_forecast);
+        if (p.ewma_biased_lower != null && Number.isFinite(p.ewma_biased_lower)) values.push(p.ewma_biased_lower);
+        if (p.ewma_biased_upper != null && Number.isFinite(p.ewma_biased_upper)) values.push(p.ewma_biased_upper);
       }
       if (showTrendEwma) {
         if (p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort)) values.push(p.trendEwmaShort);
@@ -2193,7 +2197,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const padding = (max - min) * 0.02;
     
     return [min - padding, max + padding];
-  }, [chartDataWithForecastBand, showEwmaOverlay, showTrendEwma]);
+  }, [chartDataWithForecastBand, showUnbiasedEwma, showBiasedEwma, showTrendEwma]);
 
   const priceYMinValue = useMemo(() => {
     return Array.isArray(priceYDomain) && typeof priceYDomain[0] === "number"
@@ -2416,10 +2420,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     console.log('[SIM-CHART] data source', {
       simulationMode,
       activeT212RunId,
-      ewmaHeaderState: {
-        showEwmaOverlay,
-        showEwmaBiasedOverlay,
-        ewmaIsMaximized: ewmaReactionMapDropdown?.isMaximized ?? false,
+      ewmaModeState: {
+        showUnbiasedEwma,
+        showBiasedEwma,
+        ewmaIsMaximized: ewmaIsMaximizedFlag,
       },
       equityPanelSample: equityPanelData.slice(0, 3),
       filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
@@ -2429,9 +2433,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [
     simulationMode,
     activeT212RunId,
-    showEwmaOverlay,
-    showEwmaBiasedOverlay,
-    ewmaReactionMapDropdown?.isMaximized,
+    showUnbiasedEwma,
+    showBiasedEwma,
+    ewmaIsMaximizedFlag,
     equityPanelData,
     filteredEquityPanelData,
     chartDataWithForecastBand,
@@ -3003,7 +3007,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [perfInitialEquity, tradeSummary.allTrades]);
 
   // Stable reference for ewma maximized state
-  const ewmaIsMaximized = ewmaReactionMapDropdown?.isMaximized ?? false;
+  const ewmaIsMaximized = isMaxBaseMode || ewmaIsMaximizedFlag;
 
   // === Trade Marker Types and Data ===
   type TradeMarkerType = 'entry' | 'exit' | 'pair';
@@ -4042,7 +4046,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             
             {/* EWMA Band - Upper boundary area */}
             {/* EWMA Band - Upper boundary area */}
-            {showEwmaOverlay && (
+            {showUnbiasedEwma && (
               <Area
                 yAxisId="price"
                 type="monotone"
@@ -4059,7 +4063,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             
             {/* EWMA Band - Lower boundary masks the upper area */}
-            {showEwmaOverlay && (
+            {showUnbiasedEwma && (
               <Area
                 yAxisId="price"
                 type="monotone"
@@ -4076,7 +4080,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             
             {/* EWMA Forecast Path Overlay - Center Line */}
-            {showEwmaOverlay && (
+            {showUnbiasedEwma && (
               <Line
                 yAxisId="price"
                 type="monotone"
@@ -4092,7 +4096,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             
             {/* EWMA Biased Band - Upper boundary area */}
-            {showEwmaBiasedOverlay && (
+            {showBiasedEwma && (
               <Area
                 yAxisId="price"
                 type="monotone"
@@ -4109,7 +4113,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             
             {/* EWMA Biased Band - Lower boundary masks the upper area */}
-            {showEwmaBiasedOverlay && (
+            {showBiasedEwma && (
               <Area
                 yAxisId="price"
                 type="monotone"
@@ -4126,7 +4130,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             
             {/* EWMA Biased Forecast Path Overlay - Center Line */}
-            {showEwmaBiasedOverlay && (
+            {showBiasedEwma && (
               <Line
                 yAxisId="price"
                 type="monotone"
@@ -4486,8 +4490,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     overlayCenter,
     overlayLower,
     overlayUpper,
-    showEwmaOverlay,
-    showEwmaBiasedOverlay,
+    showUnbiasedEwma,
+    showBiasedEwma,
     ewmaIsMaximized,
     tradeMarkers,
     getMarkerY,
@@ -4525,7 +4529,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   return (
     <div className={containerClasses}>
-      {/* Controls Row: Horizon/Coverage on left, Zoom/EWMA on right */}
+      {/* Controls Row: Horizon/Coverage on left, model controls on right */}
       <div className="flex justify-between items-center mb-2">
         {/* Left side: Horizon and Coverage */}
         {horizonCoverage && (
@@ -4956,340 +4960,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
               </div>
             )}
-            
-            {/* Vertical Divider - before EWMA */}
-            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-            
-            {/* EWMA Section */}
-            <div className="flex flex-col gap-0.5">
-              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>EWMA</span>
-              <div className="flex items-center gap-1">
-                {/* EWMA Unbiased Button - clicking also resets maximized state */}
-                <div className="relative group">
-                  <button
-                    onClick={() => {
-                      console.log('[UI] EWMA header mode change', { mode: 'unbiased' });
-                      // Ensure unbiased EWMA is loaded if needed
-                      if (onLoadEwmaUnbiased) {
-                        onLoadEwmaUnbiased();
-                      }
-                      // Radio behavior: if already on, turn off; otherwise turn on and turn off others
-                      if (showEwmaOverlay) {
-                        setShowEwmaOverlay(false);
-                      } else {
-                        setShowEwmaOverlay(true);
-                        setShowEwmaBiasedOverlay(false);
-                      }
-                      // Always reset the maximized state when clicking Unbiased (to restore default λ and train%)
-                      if (ewmaReactionMapDropdown) {
-                        ewmaReactionMapDropdown.onReset();
-                      }
-                    }}
-                    disabled={!ewmaPath || ewmaPath.length === 0}
-                    className={`
-                      px-2 py-0.5 text-xs rounded-full transition-colors
-                      ${activeT212RunId === "ewma-unbiased"
-                        ? isDarkMode
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-purple-500 text-white'
-                        : (!ewmaPath || ewmaPath.length === 0)
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : isDarkMode 
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }
-                    `}
-                  >
-                    Unbiased
-                  </button>
-                  
-                  {/* EWMA Stats Hover Card */}
-                  {activeT212RunId === "ewma-unbiased" && ewmaSummary && (
-                    <div 
-                      className={`absolute top-full mt-2 left-0 z-50 min-w-[280px] rounded-xl border shadow-xl p-3 backdrop-blur-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ${
-                        isDarkMode 
-                          ? 'bg-transparent border-gray-500/30' 
-                          : 'bg-transparent border-gray-400/30'
-                      }`}
-                    >
-                      <div className="mb-2">
-                        <h4 className={`text-xs font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                          EWMA Walker ({horizon ?? 1}D)
-                        </h4>
-                        <p className={`text-[10px] ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                          Baseline volatility-only forecast (λ = 0.94)
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-                        <div className="flex flex-col">
-                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Coverage</span>
-                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {(ewmaSummary.coverage * 100).toFixed(1)}%{' '}
-                            <span className={`text-[9px] font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              (target {(ewmaSummary.targetCoverage * 100).toFixed(1)}%)
-                            </span>
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Interval score</span>
-                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {ewmaSummary.intervalScore.toFixed(3)}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Avg width</span>
-                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {(ewmaSummary.avgWidth * 100).toFixed(2)}%
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>z-mean / z-std</span>
-                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {ewmaSummary.zMean.toFixed(3)} / {ewmaSummary.zStd.toFixed(3)}
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Direction hit-rate</span>
-                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {(ewmaSummary.directionHitRate * 100).toFixed(1)}%
-                          </span>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Points</span>
-                          <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            {ewmaSummary.nPoints.toLocaleString()}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                {/* EWMA Biased Button */}
-                {onLoadEwmaBiased && (
-                  <div className="relative group">
-                    <button
-                    onClick={() => {
-                      console.log('[UI] EWMA header mode change', { mode: 'biased' });
-                      // Ensure biased EWMA path is loaded if needed
-                      if (onLoadEwmaBiased) {
-                        onLoadEwmaBiased();
-                      }
 
-                      // Radio behavior: if already on, turn off; otherwise turn on and turn off others
-                      if (showEwmaBiasedOverlay) {
-                        setShowEwmaBiasedOverlay(false);
-                      } else {
-                        setShowEwmaBiasedOverlay(true);
-                        setShowEwmaOverlay(false);
-                      }
-                      // Reset the maximized state when clicking Biased (to restore default λ and train%)
-                      if (ewmaReactionMapDropdown) {
-                        ewmaReactionMapDropdown.onReset();
-                      }
-                    }}
-                      disabled={isLoadingEwmaBiased}
-                      className={`
-                        px-2 py-0.5 text-xs rounded-full transition-colors
-                        ${activeT212RunId === "ewma-biased"
-                          ? isDarkMode
-                            ? 'bg-amber-600 text-white'
-                            : 'bg-amber-500 text-white'
-                          : isLoadingEwmaBiased
-                            ? 'bg-gray-300 text-gray-500 cursor-wait'
-                            : isDarkMode 
-                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }
-                      `}
-                    >
-                      {isLoadingEwmaBiased ? 'Loading...' : 'Biased'}
-                    </button>
-                    
-                    {/* EWMA Biased Stats Hover Card */}
-                    {activeT212RunId === "ewma-biased" && ewmaBiasedSummary && (
-                      <div 
-                        className={`absolute top-full mt-2 left-0 z-50 min-w-[280px] rounded-xl border shadow-xl p-3 backdrop-blur-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 ${
-                          isDarkMode 
-                            ? 'bg-transparent border-gray-500/30' 
-                            : 'bg-transparent border-gray-400/30'
-                        }`}
-                      >
-                        <div className="mb-2">
-                          <h4 className={`text-xs font-semibold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                            EWMA Biased ({horizon ?? 1}D)
-                          </h4>
-                          <p className={`text-[10px] ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                            Reaction Map tilted forecast (λ = 0.94)
-                          </p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px]">
-                          <div className="flex flex-col">
-                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Coverage</span>
-                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {(ewmaBiasedSummary.coverage * 100).toFixed(1)}%{' '}
-                              <span className={`text-[9px] font-normal ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                                (target {(ewmaBiasedSummary.targetCoverage * 100).toFixed(1)}%)
-                              </span>
-                            </span>
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Interval score</span>
-                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {ewmaBiasedSummary.intervalScore.toFixed(3)}
-                            </span>
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Avg width</span>
-                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {(ewmaBiasedSummary.avgWidth * 100).toFixed(2)}%
-                            </span>
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>z-mean / z-std</span>
-                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {ewmaBiasedSummary.zMean.toFixed(3)} / {ewmaBiasedSummary.zStd.toFixed(3)}
-                            </span>
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Direction hit-rate</span>
-                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {(ewmaBiasedSummary.directionHitRate * 100).toFixed(1)}%
-                            </span>
-                          </div>
-                          <div className="flex flex-col">
-                            <span className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>Points</span>
-                            <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
-                              {ewmaBiasedSummary.nPoints.toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Max Button - clicking triggers maximize optimization */}
-                <button
-                  onClick={() => {
-                    // Radio behavior: turn off all other EWMA overlays
-                    setShowEwmaOverlay(false);
-                    setShowEwmaBiasedOverlay(true);
-                    // Trigger maximize when clicking Max button
-                    if (ewmaReactionMapDropdown && ewmaReactionMapDropdown.hasOptimizationResults && !ewmaReactionMapDropdown.isMaximized) {
-                      ewmaReactionMapDropdown.onMaximize();
-                    }
-                  }}
-                  disabled={ewmaReactionMapDropdown?.isOptimizingReaction}
-                  className={`
-                    px-2 py-0.5 text-xs rounded-full transition-colors
-                    ${activeT212RunId === "ewma-biased-max"
-                      ? isDarkMode
-                        ? 'bg-orange-600 text-white'
-                        : 'bg-orange-500 text-white'
-                      : ewmaReactionMapDropdown?.isOptimizingReaction
-                        ? 'bg-gray-300 text-gray-500 cursor-wait'
-                        : isDarkMode 
-                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }
-                  `}
-                  >
-                  {ewmaReactionMapDropdown?.isOptimizingReaction ? '...' : 'Max'}
-                </button>
-
-                {/* EWMA Settings Button (⋯) with Dropdown */}
-                {ewmaReactionMapDropdown && (
-                  <div className="relative" ref={ewmaSettingsDropdownRef}>
-                    <button
-                      onClick={() => setShowEwmaSettingsDropdown(!showEwmaSettingsDropdown)}
-                      className={`
-                        w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
-                        ${showEwmaSettingsDropdown
-                          ? (isDarkMode ? 'border-gray-400 text-white' : 'border-gray-500 text-gray-900')
-                          : (isDarkMode ? 'border-gray-500 text-gray-300 hover:border-gray-400' : 'border-gray-300 text-gray-700 hover:border-gray-400')
-                        }
-                      `}
-                      title="EWMA Reaction Map Settings"
-                    >
-                      ⋯
-                    </button>
-
-                    {/* Tooltip-style Dropdown Menu */}
-                    {showEwmaSettingsDropdown && (
-                      <div 
-                        className={`
-                          absolute top-10 right-0 z-50 min-w-[140px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
-                          ${isDarkMode 
-                            ? 'bg-gray-900/80 border-gray-500/30' 
-                            : 'bg-white/80 border-gray-400/30'
-                          }
-                        `}
-                      >
-                        <div className="space-y-2 text-xs">
-                          {/* Lambda Row */}
-                          <div className="flex items-center justify-between gap-4">
-                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ</span>
-                            <input
-                              type="number"
-                              min={0.01}
-                              max={0.999}
-                              step={0.01}
-                              value={ewmaReactionMapDropdown.reactionLambda}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                if (Number.isFinite(val)) {
-                                  ewmaReactionMapDropdown.setReactionLambda(Math.min(0.999, Math.max(0.01, val)));
-                                }
-                              }}
-                              className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                isDarkMode 
-                                  ? 'border-gray-600 text-white focus:border-amber-500' 
-                                  : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                              }`}
-                            />
-                          </div>
-
-                          {/* Train % Row */}
-                          <div className="flex items-center justify-between gap-4">
-                            <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Train%</span>
-                            <input
-                              type="number"
-                              min={10}
-                              max={90}
-                              step={5}
-                              value={Math.round(ewmaReactionMapDropdown.reactionTrainFraction * 100)}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                if (Number.isFinite(val)) {
-                                  const frac = Math.min(0.9, Math.max(0.1, val / 100));
-                                  ewmaReactionMapDropdown.setReactionTrainFraction(frac);
-                                }
-                              }}
-                              className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                isDarkMode 
-                                  ? 'border-gray-600 text-white focus:border-amber-500' 
-                                  : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                              }`}
-                            />
-                          </div>
-
-                          {/* Loading indicator */}
-                          {ewmaReactionMapDropdown.isLoadingReaction && (
-                            <div className={`text-[10px] text-center ${isDarkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                              Updating...
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </div>
         )}
-        
+
         {/* Spacer if no horizonCoverage */}
         {!horizonCoverage && <div />}
       </div>
@@ -5344,6 +5018,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         <div className="flex items-center gap-2">
           {/* Base mode pills */}
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={`
+                px-3 py-1 text-xs rounded-full transition-colors font-medium
+                ${simulationMode.baseMode === 'unbiased'
+                  ? 'bg-sky-500 text-white'
+                  : isDarkMode
+                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }
+              `}
+              onClick={() => onChangeSimulationMode?.({ baseMode: 'unbiased', withTrend: simulationMode.withTrend })}
+            >
+              Unbiased
+            </button>
             <button
               type="button"
               className={`
@@ -7387,19 +7076,19 @@ const AnimatedPriceDot = (props: any) => {
     <circle
       cx={cx}
       cy={cy}
-      r={6}
+      r={4}
       fill={dotColor}
       stroke="#ffffff"
-      strokeWidth={2.5}
+      strokeWidth={1.5}
       style={{
-        filter: `drop-shadow(0 0 8px rgba(${glowColor}, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))`,
+        filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6))`,
         transition: 'all 0.12s ease-out',
       }}
     />
   );
 };
 
-// Custom animated dot for EWMA line (purple)
+// Custom animated dot for EWMA line (purple) - smaller, refined style
 const AnimatedEwmaDot = (props: any) => {
   const { cx, cy, payload } = props;
   
@@ -7411,19 +7100,19 @@ const AnimatedEwmaDot = (props: any) => {
     <circle
       cx={cx}
       cy={cy}
-      r={6}
+      r={4}
       fill="#A855F7"
       stroke="#ffffff"
-      strokeWidth={2.5}
+      strokeWidth={1.5}
       style={{
-        filter: 'drop-shadow(0 0 8px rgba(168, 85, 247, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))',
+        filter: 'drop-shadow(0 0 4px rgba(168, 85, 247, 0.6))',
         transition: 'all 0.12s ease-out',
       }}
     />
   );
 };
 
-// Custom animated dot for EWMA Biased line (amber) - Apple style refinement
+// Custom animated dot for EWMA Biased line (amber) - smaller, refined style
 const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: boolean }) => {
   const DotComponent = (props: any) => {
     const { cx, cy, payload } = props;
@@ -7440,12 +7129,12 @@ const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: bo
       <circle
         cx={cx}
         cy={cy}
-        r={6}
+        r={4}
         fill={fillColor}
         stroke="#ffffff"
-        strokeWidth={2.5}
+        strokeWidth={1.5}
         style={{
-          filter: `drop-shadow(0 0 8px rgba(${glowColor}, 0.8)) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4))`,
+          filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6))`,
           transition: 'all 0.15s ease-out',
         }}
       />
@@ -7454,3 +7143,4 @@ const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: bo
   DotComponent.displayName = 'AnimatedEwmaBiasedDot';
   return DotComponent;
 };
+

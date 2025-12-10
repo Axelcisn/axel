@@ -6,44 +6,44 @@
   "h_eff_days": 3,
   "verifyDate": "2025-12-08",
   "domain": "log",
-  "created_at": "2025-12-07T14:59:18.148Z",
+  "created_at": "2025-12-10T04:18:04.249Z",
   "locked": true,
   "y_hat": 455,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 1000
+      "min_days": 504
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.025645412064809886,
+    "sigma_hat": 0.025645412064809685,
     "mu_star_used": 0,
-    "window_start": "2021-12-13",
+    "window_start": "2023-12-04",
     "window_end": "2025-12-05",
     "n": 1256,
     "S_t": 455,
-    "sigma_forecast": 0.025645412064809886,
-    "sigma2_forecast": 0.0006576871599738964,
+    "sigma_forecast": 0.025645412064809685,
+    "sigma2_forecast": 0.0006576871599738861,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2021-12-13",
+      "start": "2023-12-04",
       "end": "2025-12-05"
     },
     "volatility_diagnostics": {
       "estimator": "GK",
-      "window": 1000,
+      "window": 504,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 28 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 4.26, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 21 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 4.49, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 432.69470554681465,
-    "U_h": 478.4551263190837,
-    "band_width_bp": 1057.5683082241483
+    "L_h": 432.69470554681504,
+    "U_h": 478.45512631908326,
+    "band_width_bp": 1057.5683082241283
   },
   "provenance": {
     "rng_seed": null,
@@ -53,7 +53,7 @@
       "coverage": 0.95,
       "range": {
         "estimator": "GK",
-        "window": 1000,
+        "window": 504,
         "ewma_lambda": 0.94
       }
     },
@@ -63,7 +63,7 @@
   "diagnostics": {
     "method_source": "Range-GK",
     "m_log": 6.12029741895095,
-    "s_scale": 0.025645412064809886,
+    "s_scale": 0.025645412064809685,
     "critical_type": "normal"
   },
   "critical": {
@@ -71,9 +71,8 @@
     "value": 1.96
   },
   "window_period": {
-    "start": "2021-12-13",
+    "start": "2023-12-04",
     "end": "2025-12-05",
-    "n_obs": 1000
-  },
-  "is_active": false
+    "n_obs": 504
+  }
 }

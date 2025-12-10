@@ -33,5 +33,26 @@
     "exchange": "NasdaqGS",
     "createdAt": "2025-12-10T04:12:30.516Z",
     "updatedAt": "2025-12-10T04:13:47.178Z"
+  },
+  "NVDA": {
+    "ticker": "NVDA",
+    "name": "NVIDIA Corporation",
+    "exchange": "NasdaqGS",
+    "createdAt": "2025-12-10T04:18:33.582Z",
+    "updatedAt": "2025-12-10T05:03:45.832Z"
+  },
+  "KO": {
+    "ticker": "KO",
+    "name": "The Coca-Cola Company",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-10T06:24:36.971Z",
+    "updatedAt": "2025-12-10T06:25:28.244Z"
+  },
+  "META": {
+    "ticker": "META",
+    "name": "Meta Platforms, Inc.",
+    "exchange": "NasdaqGS",
+    "createdAt": "2025-12-10T06:25:40.474Z",
+    "updatedAt": "2025-12-10T06:25:40.782Z"
   }
 }
