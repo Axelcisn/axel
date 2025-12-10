@@ -1,22 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 
-interface YahooQuoteSummary {
-  quoteSummary: {
+interface YahooChartMeta {
+  symbol: string;
+  longName?: string;
+  shortName?: string;
+  exchangeName?: string;
+  fullExchangeName?: string;
+}
+
+interface YahooChartResponse {
+  chart: {
     result: Array<{
-      price?: {
-        shortName?: string;
-        longName?: string;
-        symbol?: string;
-        exchange?: string;
-        exchangeName?: string;
-      };
+      meta: YahooChartMeta;
     }> | null;
     error: null | { code: string; description: string };
   };
 }
 
 /**
- * Fetches company info (name, exchange) from Yahoo Finance.
+ * Fetches company info (name, exchange) from Yahoo Finance chart endpoint.
  * GET /api/company-info/[symbol]
  */
 export async function GET(
@@ -26,12 +28,13 @@ export async function GET(
   try {
     const symbol = params.symbol.toUpperCase();
 
-    // Use Yahoo Finance quoteSummary endpoint to get company details
+    // Use Yahoo Finance chart endpoint - includes company name in meta
     const url = new URL(
-      `/v10/finance/quoteSummary/${encodeURIComponent(symbol)}`,
+      `/v8/finance/chart/${encodeURIComponent(symbol)}`,
       "https://query2.finance.yahoo.com"
     );
-    url.searchParams.set("modules", "price");
+    url.searchParams.set("range", "1d");
+    url.searchParams.set("interval", "1d");
 
     const res = await fetch(url.toString(), { 
       cache: "no-store",
@@ -41,78 +44,34 @@ export async function GET(
     });
 
     if (!res.ok) {
-      // Try alternative endpoint if quoteSummary fails
-      return await fetchFromQuoteEndpoint(symbol);
+      console.error(`Yahoo chart request failed: ${res.status}`);
+      return NextResponse.json(
+        { symbol, name: null, shortName: null, exchange: null },
+        { status: 200 }
+      );
     }
 
-    const data = (await res.json()) as YahooQuoteSummary;
+    const data = (await res.json()) as YahooChartResponse;
 
-    if (!data.quoteSummary || data.quoteSummary.error || !data.quoteSummary.result?.[0]) {
-      return await fetchFromQuoteEndpoint(symbol);
+    if (!data.chart || data.chart.error || !data.chart.result?.[0]) {
+      console.error("Yahoo chart response error:", data.chart?.error);
+      return NextResponse.json(
+        { symbol, name: null, shortName: null, exchange: null },
+        { status: 200 }
+      );
     }
 
-    const priceInfo = data.quoteSummary.result[0].price;
+    const meta = data.chart.result[0].meta;
     
     return NextResponse.json({
       symbol,
-      name: priceInfo?.longName || priceInfo?.shortName || null,
-      shortName: priceInfo?.shortName || null,
-      exchange: priceInfo?.exchangeName || priceInfo?.exchange || null,
+      name: meta.longName || meta.shortName || null,
+      shortName: meta.shortName || null,
+      exchange: meta.fullExchangeName || meta.exchangeName || null,
     });
 
   } catch (error) {
     console.error("Company info API error:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch company info" },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * Fallback: Use the v6/finance/quote endpoint
- */
-async function fetchFromQuoteEndpoint(symbol: string) {
-  try {
-    const url = new URL(
-      "/v6/finance/quote",
-      "https://query2.finance.yahoo.com"
-    );
-    url.searchParams.set("symbols", symbol);
-
-    const res = await fetch(url.toString(), { 
-      cache: "no-store",
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
-      }
-    });
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { symbol, name: null, shortName: null, exchange: null },
-        { status: 200 }
-      );
-    }
-
-    const data = await res.json();
-    const quote = data.quoteResponse?.result?.[0];
-
-    if (!quote) {
-      return NextResponse.json(
-        { symbol, name: null, shortName: null, exchange: null },
-        { status: 200 }
-      );
-    }
-
-    return NextResponse.json({
-      symbol,
-      name: quote.longName || quote.shortName || null,
-      shortName: quote.shortName || null,
-      exchange: quote.fullExchangeName || quote.exchange || null,
-    });
-
-  } catch (error) {
-    console.error("Quote endpoint fallback error:", error);
     return NextResponse.json(
       { symbol, name: null, shortName: null, exchange: null },
       { status: 200 }
