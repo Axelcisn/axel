@@ -53,6 +53,8 @@ export const loadCanonical = loadCanonicalDataWithMeta;
 export async function loadCanonicalDataWithYahooSupplement(symbol: string): Promise<CanonicalRow[]> {
   // Dynamic import to avoid circular dependencies
   const { fetchYahooOhlcv } = await import('@/lib/marketData/yahoo');
+  // Minimum depth needed for EWMA + reaction map defaults (~500 train obs + 252-day warmup)
+  const MIN_ROWS_FOR_EWMA = 760;
   
   let canonicalRows: CanonicalRow[] = [];
   
@@ -69,11 +71,14 @@ export async function loadCanonicalDataWithYahooSupplement(symbol: string): Prom
     ? canonicalRows[canonicalRows.length - 1].date 
     : null;
   const isStale = !lastCanonicalDate || lastCanonicalDate < today;
+  const needsDepth = canonicalRows.length < MIN_ROWS_FOR_EWMA;
   
-  // If stale or no canonical data, supplement with Yahoo data
-  if (isStale) {
+  // If stale or too shallow (not enough rows), supplement with Yahoo data
+  if (isStale || needsDepth) {
     try {
-      const yahooRows = await fetchYahooOhlcv(symbol, { range: "1mo", interval: "1d" });
+      // Fetch a deeper history when we don't have enough rows to satisfy EWMA defaults
+      const yahooRange = needsDepth ? "5y" : "1mo";
+      const yahooRows = await fetchYahooOhlcv(symbol, { range: yahooRange, interval: "1d" });
       if (yahooRows.length > 0) {
         // Merge: Yahoo takes precedence for overlapping dates
         const dateMap = new Map<string, CanonicalRow>();

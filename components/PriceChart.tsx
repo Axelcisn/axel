@@ -3970,7 +3970,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               stroke={lineColor}
               strokeWidth={2}
               dot={false}
-              activeDot={<AnimatedPriceDot />}
+              activeDot={<AnimatedPriceDot stroke={lineColor} />}
               connectNulls={true}
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -7061,14 +7061,14 @@ function VolumeTooltip({ active, payload, label }: any) {
 
 // Custom animated dot for price line (green for positive, red for negative)
 const AnimatedPriceDot = (props: any) => {
-  const { cx, cy, payload } = props;
+  const { cx, cy, payload, stroke } = props;
   
   // Don't render dot for future/null points
   if (!payload || payload.isFuture || payload.value == null) return null;
   if (cx === undefined || cy === undefined) return null;
   
-  // Determine color based on performance - if stroke is passed, use it, otherwise default to green
-  const dotColor = props.stroke || "#22c55e";
+  // Use the stroke color from the Line component (red or green based on performance)
+  const dotColor = stroke || "#22c55e";
   const isRed = dotColor.toLowerCase().includes("ef4444") || dotColor.toLowerCase().includes("f44");
   const glowColor = isRed ? "239, 68, 68" : "34, 197, 94"; // RGB values for glow
   
@@ -7076,12 +7076,12 @@ const AnimatedPriceDot = (props: any) => {
     <circle
       cx={cx}
       cy={cy}
-      r={4}
+      r={3.5}
       fill={dotColor}
-      stroke="#ffffff"
+      stroke="rgba(255, 255, 255, 0.9)"
       strokeWidth={1.5}
       style={{
-        filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6))`,
+        filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6)) drop-shadow(0 0 2px rgba(${glowColor}, 0.4))`,
         transition: 'all 0.12s ease-out',
       }}
     />
@@ -7100,12 +7100,12 @@ const AnimatedEwmaDot = (props: any) => {
     <circle
       cx={cx}
       cy={cy}
-      r={4}
+      r={3.5}
       fill="#A855F7"
-      stroke="#ffffff"
+      stroke="rgba(255, 255, 255, 0.9)"
       strokeWidth={1.5}
       style={{
-        filter: 'drop-shadow(0 0 4px rgba(168, 85, 247, 0.6))',
+        filter: 'drop-shadow(0 0 4px rgba(168, 85, 247, 0.6)) drop-shadow(0 0 2px rgba(168, 85, 247, 0.4))',
         transition: 'all 0.12s ease-out',
       }}
     />
@@ -7129,12 +7129,12 @@ const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: bo
       <circle
         cx={cx}
         cy={cy}
-        r={4}
+        r={3.5}
         fill={fillColor}
-        stroke="#ffffff"
+        stroke="rgba(255, 255, 255, 0.9)"
         strokeWidth={1.5}
         style={{
-          filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6))`,
+          filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6)) drop-shadow(0 0 2px rgba(${glowColor}, 0.4))`,
           transition: 'all 0.15s ease-out',
         }}
       />
@@ -7143,4 +7143,3 @@ const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: bo
   DotComponent.displayName = 'AnimatedEwmaBiasedDot';
   return DotComponent;
 };
-

@@ -6,7 +6,7 @@
  */
 
 import { runEwmaWalker, EwmaWalkerPoint } from "./ewmaWalker";
-import { loadCanonicalData } from "../storage/canonical";
+import { loadCanonicalDataWithYahooSupplement } from "../storage/canonical";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -218,7 +218,7 @@ export async function buildEwmaReactionMap(
   // ───────────────────────────────────────────────────────────────────────────
   // 4. Load canonical prices for multi-horizon forward returns
   // ───────────────────────────────────────────────────────────────────────────
-  const rows = await loadCanonicalData(symbol);
+  const rows = await loadCanonicalDataWithYahooSupplement(symbol);
 
   // Build date → price map
   const priceByDate = new Map<string, number>();

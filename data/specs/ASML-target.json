@@ -1,9 +1,9 @@
 {
-  "symbol": "AAPL",
+  "symbol": "ASML",
   "h": 1,
   "coverage": 0.95,
   "exchange_tz": "America/New_York",
   "variable": "NEXT_CLOSE_ADJ",
   "cutoff_note": "compute at t close; verify at t+1 close",
-  "updated_at": "2025-12-10T07:52:38.074Z"
+  "updated_at": "2025-12-10T07:27:52.225Z"
 }

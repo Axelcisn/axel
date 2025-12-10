@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { loadCanonicalData } from '@/lib/storage/canonical';
+import { loadCanonicalDataWithYahooSupplement } from '@/lib/storage/canonical';
 import { computeAdx } from '@/lib/indicators/adx';
 
 export async function GET(
@@ -13,15 +13,21 @@ export async function GET(
   const symbol = params.symbol.toUpperCase();
 
   try {
-    const rows = await loadCanonicalData(symbol);
+    const rows = await loadCanonicalDataWithYahooSupplement(symbol);
     
-    // Map rows to { date, high, low, close }
-    const series = rows.map(r => ({
-      date: r.date,
-      high: r.high,
-      low: r.low,
-      close: r.close,
-    }));
+    // Map rows to { date, high, low, close }, preferring adjusted close and filtering invalids
+    const series = rows
+      .map(r => ({
+        date: r.date,
+        high: r.high,
+        low: r.low,
+        close: r.adj_close ?? r.close,
+      }))
+      .filter(r =>
+        Number.isFinite(r.high) &&
+        Number.isFinite(r.low) &&
+        Number.isFinite(r.close)
+      );
 
     const result = computeAdx(series, period);
 

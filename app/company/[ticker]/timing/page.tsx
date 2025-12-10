@@ -504,6 +504,18 @@ const [simulationMode, setSimulationMode] = useState<SimulationMode>({
   baseMode: 'biased',
   withTrend: false,
 });
+const handleChangeSimulationMode = useCallback((mode: SimulationMode) => {
+  setSimulationMode((prev) => {
+    console.log("[SIM-CLICK] before", { prev, requested: mode });
+    if (prev.baseMode === mode.baseMode && prev.withTrend === mode.withTrend) {
+      console.log("[SIM-CLICK] after (unchanged)", prev);
+      return prev;
+    }
+    const nextMode = { ...mode };
+    console.log("[SIM-CLICK] after", nextMode);
+    return nextMode;
+  });
+}, []);
 const effectiveTrendWeight = useMemo(() => {
   if (trendWeight != null && Math.abs(trendWeight) >= 0.005) {
     return trendWeight;
@@ -626,21 +638,17 @@ const effectiveTrendWeight = useMemo(() => {
 
   // Get the account history for the currently visible T212 run (for equity chart)
   const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
+    console.log("[INIT-ACCOUNT] activeRunId=", activeT212RunId, "visibleSet=", Array.from(t212VisibleRunIds), "t212Runs ids=", t212Runs.map((r) => r.id));
     // Find the first visible run (we only show one at a time in solo mode)
     const visibleRun = activeT212RunId
       ? t212Runs.find((run) => run.id === activeT212RunId)
       : t212Runs.find((run) => t212VisibleRunIds.has(run.id));
-    console.log("[UI-SYNC] t212AccountHistory derive", {
-      simulationModeBase: simulationMode.baseMode,
-      visibleRunId: visibleRun?.id ?? null,
-      visibleRunIds: Array.from(t212VisibleRunIds),
-      runs: t212Runs.map((r) => ({ id: r.id, lambda: r.lambda, trainFraction: r.trainFraction, trend: r.trendTiltEnabled })),
-    });
     return visibleRun?.result.accountHistory ?? null;
   }, [t212Runs, activeT212RunId, t212VisibleRunIds, simulationMode.baseMode]);
 
   // Keep visible run in sync with SimulationMode and available runs
   useEffect(() => {
+    console.log("[INIT-VISIBLE] baseMode=", simulationMode.baseMode, "t212Runs ids=", t212Runs.map((r) => r.id));
     if (t212Runs.length === 0) return;
 
     let desiredBaseRunId: T212RunId;
@@ -672,6 +680,7 @@ const effectiveTrendWeight = useMemo(() => {
     }
 
     if (chosen != null) {
+      console.log("[INIT-VISIBLE] chosen=", chosen);
       console.log("[SYNC] simulationMode.baseMode", simulationMode.baseMode, "chosenVisibleRunId", chosen, "t212Runs", t212Runs.map((r) => ({
         id: r.id,
         lambda: r.lambda,
@@ -2377,7 +2386,6 @@ const effectiveTrendWeight = useMemo(() => {
       setT212Runs([]);
       setT212CurrentRunId(null);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     params?.ticker,
     h,
@@ -2391,7 +2399,7 @@ const effectiveTrendWeight = useMemo(() => {
     trendShortWindow,
     trendLongWindow,
     trendMomentumPeriod,
-    simulationMode,
+    simulationMode.withTrend,
   ]);
 
   // Auto-run T212 sims when CFD is enabled and data is ready
@@ -2442,6 +2450,13 @@ const effectiveTrendWeight = useMemo(() => {
         trainFractionOverride: maxConfig.trainFraction,
       }
     );
+    console.log("[INIT-SEED] t212Runs after seeding", t212Runs.map((r) => ({
+      id: r.id,
+      label: r.label,
+      lambda: r.lambda,
+      trainFraction: r.trainFraction,
+      trendTiltEnabled: r.trendTiltEnabled,
+    })));
   }, [
     t212Runs.length,
     ewmaPath,
@@ -2449,7 +2464,7 @@ const effectiveTrendWeight = useMemo(() => {
     reactionMapSummary,
     reactionOptimizationBest,
     runTrading212SimForSource,
-    simulationMode,
+    simulationMode.withTrend,
     effectiveTrendWeight,
     getMaxEwmaConfig,
   ]);
@@ -5202,7 +5217,7 @@ const effectiveTrendWeight = useMemo(() => {
           activeT212RunId={activeT212RunId}
           onToggleT212Run={toggleT212RunVisibility}
           simulationMode={simulationMode}
-          onChangeSimulationMode={setSimulationMode}
+          onChangeSimulationMode={handleChangeSimulationMode}
           hasMaxRun={hasMaxRun}
           trendWeight={trendWeight}
           trendWeightUpdatedAt={trendWeightUpdatedAt}

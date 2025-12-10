@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { loadCanonicalData } from '@/lib/storage/canonical';
+import { loadCanonicalDataWithYahooSupplement } from '@/lib/storage/canonical';
 import { computeMomentum } from '@/lib/indicators/momentum';
 
 export async function GET(
@@ -13,13 +13,15 @@ export async function GET(
   const symbol = params.symbol.toUpperCase();
 
   try {
-    const rows = await loadCanonicalData(symbol);
+    const rows = await loadCanonicalDataWithYahooSupplement(symbol);
     
-    // Map rows to { date, close }
-    const series = rows.map(r => ({
-      date: r.date,
-      close: r.close,
-    }));
+    // Map rows to { date, close }, preferring adjusted close and filtering invalids
+    const series = rows
+      .map(r => ({
+        date: r.date,
+        close: r.adj_close ?? r.close,
+      }))
+      .filter(r => Number.isFinite(r.close));
 
     const result = computeMomentum(series, period);
 
