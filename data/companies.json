@@ -74,6 +74,13 @@
     "name": "JPMorgan Chase & Co.",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T10:43:35.352Z",
-    "updatedAt": "2025-12-10T11:00:06.894Z"
+    "updatedAt": "2025-12-10T15:13:48.305Z"
+  },
+  "UBER": {
+    "ticker": "UBER",
+    "name": "Uber Technologies, Inc.",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-10T15:17:18.762Z",
+    "updatedAt": "2025-12-10T16:05:49.342Z"
   }
 }

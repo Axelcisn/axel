@@ -4,6 +4,44 @@ import { fetchYahooOhlcv } from "@/lib/marketData/yahoo";
 import type { CanonicalRow } from "@/lib/types/canonical";
 
 /**
+ * Check if US markets have closed for today.
+ * Returns true if it's past 4:00 PM Eastern Time.
+ * This is used to filter out incomplete intraday data from Yahoo.
+ */
+function isUsMarketClosed(now: Date = new Date()): boolean {
+  // Convert to US Eastern time
+  const formatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const parts = formatter.formatToParts(now);
+  const hour = Number(parts.find((p) => p.type === "hour")?.value ?? "0");
+  const minute = Number(parts.find((p) => p.type === "minute")?.value ?? "0");
+  const totalMinutes = hour * 60 + minute;
+  
+  // US regular trading ends at 16:00 ET (4:00 PM)
+  // Add a small buffer (5 minutes) to account for settlement
+  const marketCloseMinutes = 16 * 60 + 5; // 16:05 ET
+  
+  return totalMinutes >= marketCloseMinutes;
+}
+
+/**
+ * Get today's date in YYYY-MM-DD format in US Eastern timezone.
+ */
+function getTodayET(now: Date = new Date()): string {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(now); // Returns YYYY-MM-DD format
+}
+
+/**
  * Merge canonical rows with fresh Yahoo data.
  * Yahoo data takes precedence for overlapping dates, and fills in missing recent dates.
  */
@@ -42,14 +80,28 @@ export async function GET(
     let meta = canonicalData?.meta ?? {};
     
     // Check if canonical data is stale (last date is more than 1 day old)
-    const today = new Date().toISOString().split('T')[0];
+    const todayET = getTodayET();
     const lastCanonicalDate = rows.length > 0 ? rows[rows.length - 1].date : null;
-    const isStale = !lastCanonicalDate || lastCanonicalDate < today;
+    const isStale = !lastCanonicalDate || lastCanonicalDate < todayET;
     
     // If stale or no canonical data, try to supplement with Yahoo data
     if (isStale) {
       try {
-        const yahooRows = await fetchYahooOhlcv(symbol, { range: "1mo", interval: "1d" });
+        let yahooRows = await fetchYahooOhlcv(symbol, { range: "1mo", interval: "1d" });
+        
+        // IMPORTANT: If the US market has not closed yet, filter out today's incomplete bar.
+        // Yahoo returns intraday data as a daily bar with the current price as "close",
+        // which is misleading for forecasting. We only want confirmed closing prices.
+        if (!isUsMarketClosed()) {
+          const beforeFilterCount = yahooRows.length;
+          yahooRows = yahooRows.filter(row => row.date < todayET);
+          if (yahooRows.length < beforeFilterCount) {
+            console.log(`[history/${symbol}] Filtered out incomplete today's bar (market still open). todayET=${todayET}`);
+            (meta as any).marketOpen = true;
+            (meta as any).filteredTodayBar = true;
+          }
+        }
+        
         if (yahooRows.length > 0) {
           rows = mergeWithYahooData(rows, yahooRows);
           (meta as any).supplementedWithYahoo = true;
