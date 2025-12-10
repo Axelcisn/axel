@@ -1993,63 +1993,60 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const intervals =
       (af.intervals && typeof af.intervals === "object" ? af.intervals : null) ||
       (af.pi && typeof af.pi === "object" ? af.pi : null) ||
+      (typeof af === "object" ? af : null) ||
       {};
 
-    const topLevelL = typeof af.L_h === "number" ? af.L_h : undefined;
-    const topLevelU = typeof af.U_h === "number" ? af.U_h : undefined;
+    const L_conf = firstFinite(
+      (intervals as any).L_conf,
+      (intervals as any).L_conf_h,
+      (intervals as any).lower_conf
+    );
+    const U_conf = firstFinite(
+      (intervals as any).U_conf,
+      (intervals as any).U_conf_h,
+      (intervals as any).upper_conf
+    );
 
-    const L_conf =
-      typeof (intervals as any).L_conf === "number"
-        ? (intervals as any).L_conf
-        : undefined;
-    const U_conf =
-      typeof (intervals as any).U_conf === "number"
-        ? (intervals as any).U_conf
-        : undefined;
+    const L_base = firstFinite(
+      (intervals as any).L_base,
+      (af as any).L_base,
+      (af as any).L_h,
+      (intervals as any).L_h,
+      (intervals as any).L1,
+      (intervals as any).lower,
+      (af as any).lower
+    );
+    const U_base = firstFinite(
+      (intervals as any).U_base,
+      (af as any).U_base,
+      (af as any).U_h,
+      (intervals as any).U_h,
+      (intervals as any).U1,
+      (intervals as any).upper,
+      (af as any).upper
+    );
 
-    const L_base =
-      typeof (intervals as any).L_h === "number"
-        ? (intervals as any).L_h
-        : topLevelL;
-    const U_base =
-      typeof (intervals as any).U_h === "number"
-        ? (intervals as any).U_h
-        : topLevelU;
+    const L = firstFinite(L_conf, L_base);
+    const U = firstFinite(U_conf, U_base);
 
-    const L = L_conf ?? L_base;
-    const U = U_conf ?? U_base;
+    const centerRaw = firstFinite(
+      (af as any).y_hat,
+      (af as any).yHat,
+      (af as any).center,
+      (af as any).expected_price,
+      (af as any).predicted_price,
+      (intervals as any).center,
+      (af as any).S_t
+    );
 
-    const yHatRaw =
-      typeof (af as any).y_hat === "number"
-        ? (af as any).y_hat
-        : typeof (af as any).yHat === "number"
-        ? (af as any).yHat
-        : typeof (af as any).center === "number"
-        ? (af as any).center
-        : typeof (af as any).S_t === "number"
-        ? (af as any).S_t
-        : null;
-
-    // 3) Transform from log if needed
-    const expSafe = (v: number | null) =>
-      v != null && Number.isFinite(v) ? Math.exp(v) : null;
-
-    if (isLogDomain) {
-      overlayCenter = expSafe(yHatRaw);
-      overlayLower =
-        typeof L === "number" && Number.isFinite(L) ? Math.exp(L) : null;
-      overlayUpper =
-        typeof U === "number" && Number.isFinite(U) ? Math.exp(U) : null;
-    } else {
-      overlayCenter =
-        typeof yHatRaw === "number" && Number.isFinite(yHatRaw)
-          ? yHatRaw
+    overlayCenter =
+      centerRaw != null
+        ? maybeFromLog(centerRaw)
+        : L != null && U != null
+          ? maybeFromLog((L + U) / 2)
           : null;
-      overlayLower =
-        typeof L === "number" && Number.isFinite(L) ? L : null;
-      overlayUpper =
-        typeof U === "number" && Number.isFinite(U) ? U : null;
-    }
+    overlayLower = maybeFromLog(L);
+    overlayUpper = maybeFromLog(U);
 
     // Extract mu* and sigma from estimates (GBM)
     const estimates = af.estimates && typeof af.estimates === "object" ? af.estimates : null;
@@ -2076,6 +2073,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       }
     }
   }
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const af = forecastOverlay?.activeForecast;
+    console.log("[VOL_OVERLAY]", {
+      hasOverlay: !!af,
+      method: af?.method,
+      hasIntervals: !!af?.intervals,
+      overlayDate,
+      overlayCenter,
+      overlayLower,
+      overlayUpper,
+    });
+  }, [forecastOverlay, overlayDate, overlayCenter, overlayLower, overlayUpper]);
 
   const formatVolModelName = (
     method?: string | null,
@@ -2138,12 +2149,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       return data;
     }
 
-    const latestFullDate = fullData[fullData.length - 1]?.date;
+    const latestFullDate = fullData[fullData.length - 1]?.date
+      ? normalizeDateString(fullData[fullData.length - 1].date)
+      : null;
     // Find the last *historical* (non-future) point in the current window
-    const lastHistorical = [...data].reverse().find((pt) => !pt.isFuture && pt.date);
+    const lastHistorical = [...data]
+      .reverse()
+      .find((pt) => !pt.isFuture && pt.date);
 
     const atLatestBar =
-      lastHistorical?.date && latestFullDate && lastHistorical.date === latestFullDate;
+      lastHistorical?.date &&
+      latestFullDate &&
+      normalizeDateString(lastHistorical.date) === latestFullDate;
 
     // If we are not at the last bar of the full series, skip adding any band.
     // This removes the "floating" cone when you zoom/pan away from the right edge.

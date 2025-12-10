@@ -2908,10 +2908,28 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     const windowN = volModel === 'GBM' ? gbmWindow : volWindow;
     const requiredWindowN = windowN;
     const maxFeasibleWindowN = currentCanonicalCount > 0 ? Math.min(requiredWindowN, currentCanonicalCount - 1) : 0;
+    let selectedModel: string | undefined;
+    const emitVolResult = (result: VolForecastResult, context: string) => {
+      if (process.env.NODE_ENV === "development") {
+        console.info("[VOL][handler] result", {
+          context,
+          volModel,
+          model,
+          selectedModel,
+          effectiveWindowN,
+          canonicalCount: currentCanonicalCount,
+          rvAvailable: currentRvAvailable,
+          ok: result.ok,
+          reason: result.reason ?? null,
+        });
+      }
+      return result;
+    };
+
     if (maxFeasibleWindowN <= 0) {
       const message = 'Insufficient history: no observations available.';
       setVolatilityError(message);
-      return { ok: false, forecast: null, reason: 'NO_HISTORY' };
+      return emitVolResult({ ok: false, forecast: null, reason: 'NO_HISTORY' }, "no-history");
     }
     let effectiveWindowN = maxFeasibleWindowN;
 
@@ -2944,7 +2962,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         }
         setVolatilityError(`Insufficient history for GARCH: need at least ${garchMinWindow} observations, have ${currentCanonicalCount}.`);
         setModelAvailabilityMessage("GARCH needs roughly 600 clean daily returns; this ticker doesn't have enough data for this window. Showing GBM instead.");
-        return { ok: false, forecast: null, reason: "INSUFFICIENT_GARCH_DATA" };
+        return emitVolResult({ ok: false, forecast: null, reason: "INSUFFICIENT_GARCH_DATA" }, "garch-precheck");
       }
       effectiveWindowN = maxFeasibleGarchWindow;
     }
@@ -2964,7 +2982,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         }
         setVolatilityError(`Insufficient history for Range estimator: need at least ${rangeMinWindow + 1} observations, have ${currentCanonicalCount}.`);
         setModelAvailabilityMessage("Range estimator needs more clean OHLC data for this window; try a smaller window or a different model.");
-        return { ok: false, forecast: null, reason: "INSUFFICIENT_RANGE_DATA" };
+        return emitVolResult({ ok: false, forecast: null, reason: "INSUFFICIENT_RANGE_DATA" }, "range-precheck");
       }
       effectiveWindowN = maxFeasibleRangeWindow;
     }
@@ -2980,7 +2998,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           });
         }
         setVolatilityError(`Insufficient history for HAR-RV: need ${minRequiredHarObs} observations, have ${currentCanonicalCount}.`);
-        return { ok: false, forecast: null, reason: "INSUFFICIENT_HAR_DATA" };
+        return emitVolResult({ ok: false, forecast: null, reason: "INSUFFICIENT_HAR_DATA" }, "har-precheck");
       }
     }
 
@@ -2995,34 +3013,33 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       console.log("[VOL][handler] early-return", { reason: "insufficient-data" });
       const neededObs = requiredWindowN + 1;
       setVolatilityError(`Insufficient history: need ${neededObs} observations, have ${currentCanonicalCount}.`);
-      return { ok: false, forecast: null, reason: 'INSUFFICIENT_DATA' };
+      return emitVolResult({ ok: false, forecast: null, reason: 'INSUFFICIENT_DATA' }, "insufficient-data");
     }
     if (!covOK) { 
       console.log("[VOL][handler] early-return", { reason: "coverage-invalid" });
       setVolatilityError("Coverage must be between 50% and 99.9%.");
-      return { ok: false, forecast: null };
+      return emitVolResult({ ok: false, forecast: null }, "coverage-invalid");
     }
     if (!hasTZ) { 
       console.log("[VOL][handler] early-return", { reason: "no-timezone" });
       setVolatilityError("Exchange timezone missing.");
-      return { ok: false, forecast: null };
+      return emitVolResult({ ok: false, forecast: null }, "no-timezone");
     }
     if (!harAvailable) {
       console.log("[VOL][handler] early-return", { reason: "har-unavailable" });
       setVolatilityError("Realized-volatility inputs not found (daily/weekly/monthly). HAR-RV requires RV.");
-      return { ok: false, forecast: null };
+      return emitVolResult({ ok: false, forecast: null }, "har-unavailable");
     }
 
     if (!currentCanonicalCount || currentCanonicalCount <= 0) {
       console.log("[VOL][handler] early-return", { reason: "no-canonical-data" });
       setVolatilityError('No canonical data available. Please upload price history before generating forecasts.');
-      return { ok: false, forecast: null, reason: 'NO_HISTORY' };
+      return emitVolResult({ ok: false, forecast: null, reason: 'NO_HISTORY' }, "no-canonical-data");
     }
 
     setIsGeneratingVolatility(true);
 
     // Construct the model name for API (explicit, user-driven)
-    let selectedModel: string;
     switch (volModel) {
       case 'GBM':
         selectedModel = 'GBM-CC';
@@ -3202,7 +3219,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           default:
             setModelAvailabilityMessage(null);
         }
-        return { ok: false, forecast: null, reason };
+        return emitVolResult({ ok: false, forecast: null, reason }, "api-error");
       }
 
       const bodyText = await resp.text();
@@ -3236,10 +3253,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       });
 
       // Note: Don't call loadLatestForecast here - pipeline will handle state management
-      return { ok: true, forecast: data };
+      return emitVolResult({ ok: true, forecast: data }, "success");
     } catch (err) {
       setVolatilityError(err instanceof Error ? err.message : 'Unknown error');
-      return { ok: false, forecast: null, reason: 'ERROR' };
+      return emitVolResult({ ok: false, forecast: null, reason: 'ERROR' }, "exception");
     } finally {
       setIsGeneratingVolatility(false);
     }
