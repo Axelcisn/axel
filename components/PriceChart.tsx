@@ -2378,6 +2378,40 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [filteredEquityData]);
 
+  // Dedicated Simulation equity series, sourced directly from t212AccountHistory (decoupled from EWMA/price data)
+  const simulationEquityData = useMemo(() => {
+    if (!t212AccountHistory || t212AccountHistory.length === 0) return [];
+
+    const startDate = dateRangeSpan.raw.start ? normalizeDateString(dateRangeSpan.raw.start) : null;
+    const endDate = dateRangeSpan.raw.end ? normalizeDateString(dateRangeSpan.raw.end) : null;
+
+    const series = t212AccountHistory
+      .map((pt) => ({
+        date: normalizeDateString(pt.date ?? ""),
+        equity: typeof pt.equity === "number" && Number.isFinite(pt.equity) ? pt.equity : null,
+      }))
+      .filter((pt) => pt.date)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const filtered = series
+      .filter((pt) => (startDate ? pt.date >= startDate : true))
+      .filter((pt) => (endDate ? pt.date <= endDate : true));
+
+    if (filtered.length === 0) return [];
+
+    return filtered.map((pt, idx) => {
+      const prev = idx > 0 ? filtered[idx - 1].equity : pt.equity;
+      const equityDelta =
+        pt.equity != null && prev != null ? pt.equity - prev : null;
+
+      return {
+        date: pt.date,
+        equity: pt.equity,
+        equityDelta,
+      };
+    });
+  }, [t212AccountHistory, dateRangeSpan.raw.start, dateRangeSpan.raw.end]);
+
   useEffect(() => {
     console.log('[SIM-CHART] data source', {
       simulationMode,
@@ -2390,6 +2424,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       equityPanelSample: equityPanelData.slice(0, 3),
       filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
       priceChartSample: chartDataWithForecastBand.slice(0, 3),
+      simulationEquitySample: simulationEquityData.slice(0, 3),
     });
   }, [
     simulationMode,
@@ -2400,11 +2435,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     equityPanelData,
     filteredEquityPanelData,
     chartDataWithForecastBand,
+    simulationEquityData,
   ]);
 
   const equityYDomain = useMemo(() => {
-    // Use filtered data for the equity chart Y domain in Overview
-    const equities = filteredEquityData
+    // Use simulation equity data for the Overview Simulation chart
+    const equities = simulationEquityData
       .map((d) => d.equity)
       .filter((e): e is number => e !== null && e !== undefined);
 
@@ -2415,17 +2451,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const padding = (max - min) * 0.05 || max * 0.05;
 
     return [Math.max(0, min - padding), max + padding];
-  }, [filteredEquityData]);
+  }, [simulationEquityData]);
 
   const equityDeltaDomain = useMemo<[number, number]>(() => {
-    const deltas = equityPanelData
+    const deltas = simulationEquityData
       .map((d) => d.equityDelta)
       .filter((v): v is number => v != null && Number.isFinite(v));
     if (deltas.length === 0) return [-1, 1];
     const absMax = Math.max(...deltas.map((v) => Math.abs(v)));
     const pad = absMax * 0.2 || 1;
     return [-(absMax + pad), absMax + pad];
-  }, [equityPanelData]);
+  }, [simulationEquityData]);
 
   // Risk/return metrics from equity series
   const riskMetrics = useMemo(() => {
@@ -5725,7 +5761,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               <div className="w-full">
                 <ResponsiveContainer width="100%" height={220}>
                   <ComposedChart
-                    data={filteredEquityPanelData}
+                    data={simulationEquityData}
                     margin={{ top: 10, right: 0, left: 0, bottom: 10 }}
                     syncId="price-equity-sync"
                     onMouseMove={applyHoverFromRechartsState}
@@ -5764,7 +5800,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       animationDuration={0}
                       content={() => {
                         if (!hoveredDate) return null;
-                        const point = filteredEquityPanelData.find((p) => p.date === hoveredDate);
+                        const point = simulationEquityData.find((p) => p.date === hoveredDate);
                         if (!point || point.equity == null) return null;
 
                         const deltaStr =
@@ -5827,7 +5863,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       radius={[2, 2, 0, 0]}
                       isAnimationActive={false}
                     >
-                      {filteredEquityPanelData.map((entry, index) => {
+                      {simulationEquityData.map((entry, index) => {
                         const positive = (entry.equityDelta ?? 0) >= 0;
                         return (
                           <Cell

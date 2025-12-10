@@ -1,5 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadCanonicalDataWithMeta } from "@/lib/storage/canonical";
+import { fetchYahooOhlcv } from "@/lib/marketData/yahoo";
+import type { CanonicalRow } from "@/lib/types/canonical";
+
+/**
+ * Merge canonical rows with fresh Yahoo data.
+ * Yahoo data takes precedence for overlapping dates, and fills in missing recent dates.
+ */
+function mergeWithYahooData(canonicalRows: CanonicalRow[], yahooRows: CanonicalRow[]): CanonicalRow[] {
+  const dateMap = new Map<string, CanonicalRow>();
+  
+  // First add all canonical rows
+  for (const row of canonicalRows) {
+    dateMap.set(row.date, row);
+  }
+  
+  // Then overlay Yahoo data (more recent)
+  for (const row of yahooRows) {
+    dateMap.set(row.date, row);
+  }
+  
+  // Sort by date ascending
+  return Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+}
 
 export async function GET(
   request: NextRequest,
@@ -13,16 +36,40 @@ export async function GET(
     const requestedInterval = url.searchParams.get("interval"); // e.g., "1d", "1h", "1m"
 
     // Load canonical data using existing utility
-    const canonicalData = await loadCanonicalDataWithMeta(symbol);
+    let canonicalData = await loadCanonicalDataWithMeta(symbol).catch(() => null);
     
-    if (!canonicalData || !canonicalData.rows) {
+    let rows: CanonicalRow[] = canonicalData?.rows ?? [];
+    let meta = canonicalData?.meta ?? {};
+    
+    // Check if canonical data is stale (last date is more than 1 day old)
+    const today = new Date().toISOString().split('T')[0];
+    const lastCanonicalDate = rows.length > 0 ? rows[rows.length - 1].date : null;
+    const isStale = !lastCanonicalDate || lastCanonicalDate < today;
+    
+    // If stale or no canonical data, try to supplement with Yahoo data
+    if (isStale) {
+      try {
+        const yahooRows = await fetchYahooOhlcv(symbol, { range: "1mo", interval: "1d" });
+        if (yahooRows.length > 0) {
+          rows = mergeWithYahooData(rows, yahooRows);
+          (meta as any).supplementedWithYahoo = true;
+          (meta as any).yahooDataRange = {
+            first: yahooRows[0]?.date,
+            last: yahooRows[yahooRows.length - 1]?.date,
+          };
+        }
+      } catch (yahooErr) {
+        console.warn(`[history/${symbol}] Yahoo supplement failed:`, yahooErr);
+        // Continue with canonical data only
+      }
+    }
+
+    if (rows.length === 0) {
       return NextResponse.json(
         { error: `No historical data found for ${symbol}` },
         { status: 404 }
       );
     }
-
-    let { rows, meta } = canonicalData;
 
     // Log a warning if the requested interval doesn't match stored meta (debug helper)
     const storedInterval = (meta as any)?.interval;
