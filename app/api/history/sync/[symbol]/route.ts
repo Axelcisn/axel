@@ -45,7 +45,7 @@ export async function GET(
   
   // Sensible range defaults per interval
   const defaultRangeForInterval: Record<string, string> = {
-    "1d": "5y",
+    "1d": "max",
     "1h": "6mo",
     "1m": "5d",
   };

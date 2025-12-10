@@ -3334,6 +3334,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     if (!chartDataForRender || chartDataForRender.length === 0) return null;
 
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[PriceChart] fullData window", {
+        len: fullData.length,
+        firstDate: fullData[0]?.date,
+        lastDate: fullData[fullData.length - 1]?.date,
+      });
+    }
+
     console.log(
       "[PriceChart] data length:",
       chartDataForRender?.length,

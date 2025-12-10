@@ -78,16 +78,22 @@ export async function GET(
     
     let rows: CanonicalRow[] = canonicalData?.rows ?? [];
     let meta = canonicalData?.meta ?? {};
+
+    // Aim to serve at least ~5y of daily data (~1260 trading days)
+    const MIN_ROWS_FOR_CHART = 1260;
     
     // Check if canonical data is stale (last date is more than 1 day old)
     const todayET = getTodayET();
     const lastCanonicalDate = rows.length > 0 ? rows[rows.length - 1].date : null;
     const isStale = !lastCanonicalDate || lastCanonicalDate < todayET;
+    const needsDepth = rows.length < MIN_ROWS_FOR_CHART;
     
-    // If stale or no canonical data, try to supplement with Yahoo data
-    if (isStale) {
+    // If stale or too shallow, try to supplement with Yahoo data
+    if (isStale || needsDepth) {
       try {
-        let yahooRows = await fetchYahooOhlcv(symbol, { range: "1mo", interval: "1d" });
+        // Use a deep range when we lack enough history, otherwise top up with a shorter range.
+        const yahooRange = needsDepth ? "max" : "1mo";
+        let yahooRows = await fetchYahooOhlcv(symbol, { range: yahooRange, interval: "1d" });
         
         // IMPORTANT: If the US market has not closed yet, filter out today's incomplete bar.
         // Yahoo returns intraday data as a daily bar with the current price as "close",
@@ -148,6 +154,7 @@ export async function GET(
       rows, 
       meta: {
         ...meta,
+        interval: (meta as any)?.interval ?? requestedInterval ?? "1d",
         filteredRows: rows.length,
         start,
         end
