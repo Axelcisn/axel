@@ -331,6 +331,7 @@ interface PriceChartProps {
   symbol: string;
   className?: string;
   horizon?: number;  // Number of trading days to extend (1,2,3,5)
+  livePrice?: number | null;  // Current live price from quote (displayed as horizontal line with pill)
   forecastOverlay?: ForecastOverlayProps;
   ewmaPath?: EwmaWalkerPathPoint[] | null;
   ewmaSummary?: EwmaSummary | null;
@@ -386,6 +387,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   symbol,
   className,
   horizon,
+  livePrice,
   forecastOverlay,
   ewmaPath,
   ewmaSummary,
@@ -1185,6 +1187,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const handleRangeChange = (range: PriceRange) => {
     setSelectedRange(range);
     setZoomDays(null);
+    // Sync simulation date range to follow chart range
+    setDateRangePreset("chart");
 
     if (fullData.length > 0) {
       const [start, end] = computeDefaultWindowForRange(fullData, range);
@@ -3866,6 +3870,54 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               animationDuration={0}
               cursor={false}
             />
+            
+            {/* Live Price Reference Line - horizontal dotted line with price pill on right */}
+            {livePrice != null && (
+              <ReferenceLine
+                y={livePrice}
+                yAxisId="price"
+                stroke="#F87171"
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                ifOverflow="extendDomain"
+                label={{
+                  position: "right",
+                  content: ({ viewBox }: any) => {
+                    // viewBox for horizontal line: { x, y, width, height }
+                    const { x, y, width } = viewBox;
+                    const text = `$${livePrice.toFixed(2)}`;
+                    const pillWidth = 54;
+                    const pillHeight = 18;
+                    // Position pill inside the chart area, anchored to the right edge
+                    const pillX = (x || 0) + (width || 0) - pillWidth - 8;
+                    return (
+                      <g>
+                        <rect
+                          x={pillX}
+                          y={y - pillHeight / 2}
+                          width={pillWidth}
+                          height={pillHeight}
+                          rx={3}
+                          ry={3}
+                          fill="#F87171"
+                        />
+                        <text
+                          x={pillX + pillWidth / 2}
+                          y={y}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fill="#FFFFFF"
+                          fontSize={11}
+                          fontWeight={600}
+                        >
+                          {text}
+                        </text>
+                      </g>
+                    );
+                  },
+                }}
+              />
+            )}
             
             {/* TEMP: Test dot at last historical point */}
             {lastHistoricalPoint && lastHistoricalPoint.close != null && (

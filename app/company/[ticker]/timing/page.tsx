@@ -165,7 +165,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Dark mode hook
   const isDarkMode = useDarkMode();
   const { quote, isLoading: isQuoteLoading } = useLiveQuote(params.ticker, {
-    pollMs: 10000,
+    pollMs: 3000, // Poll every 3 seconds for near real-time updates
   });
   
   // Auto-cleanup hook for generated forecast files
@@ -1233,12 +1233,19 @@ const effectiveTrendWeight = useMemo(() => {
   }, [uploadResult]);
 
   // Pipeline prerequisites to avoid premature runs that show false errors
+  // Note: We use local state values (h, coverage) with defaults, NOT requiring saved target-spec
+  // This allows the pipeline to run for new tickers that don't have a saved target-spec yet
   const pipelineReady = useMemo(() => {
-    const hasCoverage = typeof resolvedTargetSpec?.spec?.coverage === "number";
-    const hasHorizon = typeof resolvedTargetSpec?.spec?.h === "number";
-    const hasTZ = Boolean(resolvedTargetSpec?.spec?.exchange_tz);
-    return isInitialized && hasCoverage && hasHorizon && hasTZ && canonicalCount > 0;
-  }, [canonicalCount, isInitialized, resolvedTargetSpec]);
+    // Local state h and coverage always have valid defaults (h=1, coverage=0.95)
+    const hasValidH = typeof h === "number" && h >= 1;
+    const hasValidCoverage = typeof coverage === "number" && coverage > 0 && coverage < 1;
+    // For TZ, prefer saved spec, fallback to canonical meta (uploadResult), or default to US market
+    const effectiveTZ = resolvedTargetSpec?.spec?.exchange_tz 
+      || uploadResult?.meta?.exchange_tz 
+      || 'America/New_York'; // Safe default for US stocks
+    const hasTZ = Boolean(effectiveTZ);
+    return isInitialized && hasValidH && hasValidCoverage && hasTZ && canonicalCount > 0;
+  }, [canonicalCount, isInitialized, h, coverage, resolvedTargetSpec, uploadResult]);
 
   const prevServerTargetSpecRef = useRef<any | null>(null);
   useEffect(() => {
@@ -2892,8 +2899,11 @@ const effectiveTrendWeight = useMemo(() => {
 
     // Read current values from state instead of depending on them
     const currentTargetSpec = targetSpecResult || serverTargetSpec;
-    const persistedCoverage = currentTargetSpec?.spec?.coverage;
-    const persistedTZ = currentTargetSpec?.spec?.exchange_tz;
+    // Use persisted values if available, otherwise fall back to local state/defaults
+    const effectiveCoverage = currentTargetSpec?.spec?.coverage ?? coverage;
+    const effectiveTZ = currentTargetSpec?.spec?.exchange_tz 
+      || uploadResult?.meta?.exchange_tz 
+      || 'America/New_York'; // Safe default for US stocks
     const currentCanonicalCount = canonicalCount;
     const currentRvAvailable = rvAvailable;
 
@@ -2905,13 +2915,13 @@ const effectiveTrendWeight = useMemo(() => {
       dist: garchEstimator === 'Normal' ? 'normal' : 'student-t',
       varianceTargeting: garchVarianceTargeting,
       tickerParam,
-      persistedCoverage,
-      persistedTZ,
+      effectiveCoverage,
+      effectiveTZ,
       canonicalCount: currentCanonicalCount,
     });
 
-    const hasTargetPersisted = !!persistedCoverage;
-    const covOK = hasTargetPersisted ? (persistedCoverage! > 0.50 && persistedCoverage! <= 0.999) : false;
+    // Coverage is valid if within acceptable range (using effective value from state or spec)
+    const covOK = typeof effectiveCoverage === 'number' && effectiveCoverage > 0.50 && effectiveCoverage <= 0.999;
 
     // Construct the model name for logic checks
     const model = volModel === 'GBM'
@@ -3001,20 +3011,12 @@ const effectiveTrendWeight = useMemo(() => {
     }
 
     const hasData = currentCanonicalCount >= effectiveWindowN + 1;
-    const hasTZ   = !!persistedTZ;
+    const hasTZ   = !!effectiveTZ;
     const wantsHar = volModel === "HAR-RV";
     const harAvailable = !wantsHar || currentRvAvailable;  // only true if RV exists
 
-    console.log("[VOL][handler] guard", { hasTargetPersisted, hasData, covOK, hasTZ, harAvailable, rvAvailable: currentRvAvailable });
+    console.log("[VOL][handler] guard", { hasData, covOK, hasTZ, harAvailable, rvAvailable: currentRvAvailable });
 
-    if (!hasTargetPersisted) { 
-      console.log("[VOL][handler] early-return", { reason: "no-target-persisted" });
-      const errorMessage = !isInitialized 
-        ? 'System is still initializing. Please wait a moment and try again.'
-        : 'Target specification not found. Save Forecast Target first by setting Horizon and Coverage values.'; 
-      setVolatilityError(errorMessage);
-      return { ok: false, forecast: null };
-    }
     if (!hasData) { 
       console.log("[VOL][handler] early-return", { reason: "insufficient-data" });
       const neededObs = requiredWindowN + 1;
@@ -3028,7 +3030,7 @@ const effectiveTrendWeight = useMemo(() => {
     }
     if (!hasTZ) { 
       console.log("[VOL][handler] early-return", { reason: "no-timezone" });
-      setVolatilityError("Exchange timezone missing in Target Spec.");
+      setVolatilityError("Exchange timezone missing.");
       return { ok: false, forecast: null };
     }
     if (!harAvailable) {
@@ -3080,8 +3082,8 @@ const effectiveTrendWeight = useMemo(() => {
       estimator: resolvedEstimator,
       varianceTargeting: garchVarianceTargeting,
       tickerParam, 
-      persistedCoverage, 
-      persistedTZ 
+      effectiveCoverage, 
+      effectiveTZ 
     });
 
     try {
@@ -3135,14 +3137,14 @@ const effectiveTrendWeight = useMemo(() => {
           params: modelParams,
           overwrite: true,
           horizon: h,
-          coverage: persistedCoverage,
-          tz: persistedTZ
+          coverage: effectiveCoverage,
+          tz: effectiveTZ
         }
       });
       console.debug("[VOL] POST payload (UI-driven)", {
         model: selectedModel,
         horizon: h,
-        coverage: persistedCoverage,
+        coverage: effectiveCoverage,
         windowForModel: effectiveWindowN,
         gbmWindow,
         volWindow
@@ -3165,10 +3167,10 @@ const effectiveTrendWeight = useMemo(() => {
           model: selectedModel,
           params: modelParams,
           overwrite: true,
-          // Pass horizon and coverage from UI state
+          // Pass horizon and coverage from effective values (state or spec fallback)
           horizon: h,
-          coverage: persistedCoverage,
-          tz: persistedTZ
+          coverage: effectiveCoverage,
+          tz: effectiveTZ
         })
       });
 
@@ -3285,6 +3287,8 @@ const effectiveTrendWeight = useMemo(() => {
     serverTargetSpec,
     targetSpecResult,
     h, // Add horizon as dependency
+    coverage, // Add coverage as dependency for effectiveCoverage fallback
+    uploadResult, // Add uploadResult as dependency for effectiveTZ fallback
     recommendedModel,
   ]);
 
@@ -3574,10 +3578,8 @@ const effectiveTrendWeight = useMemo(() => {
       console.log('[ForecastPipeline] Skipping pipeline - prerequisites not ready', {
         pipelineReady,
         isInitialized,
-        hasTargetSpec: Boolean(resolvedTargetSpec?.spec),
-        hasCoverage: typeof resolvedTargetSpec?.spec?.coverage === 'number',
-        hasHorizon: typeof resolvedTargetSpec?.spec?.h === 'number',
-        hasTZ: Boolean(resolvedTargetSpec?.spec?.exchange_tz),
+        h,
+        coverage,
         canonicalCount,
       });
       return;
@@ -3800,10 +3802,8 @@ const effectiveTrendWeight = useMemo(() => {
       pipelineReady,
       forecastStatus,
       hasBaseForecast: !!baseForecast,
-      hasTargetSpec: !!resolvedTargetSpec?.spec,
-      targetSpecCoverage: resolvedTargetSpec?.spec?.coverage,
-      targetSpecHorizon: resolvedTargetSpec?.spec?.h,
-      targetSpecTZ: resolvedTargetSpec?.spec?.exchange_tz,
+      h,
+      coverage,
       canonicalCount,
       isInitialized
     });
@@ -3811,13 +3811,11 @@ const effectiveTrendWeight = useMemo(() => {
     if (!pipelineReady) {
       console.log("[Generate] Pipeline not ready:", {
         isInitialized,
-        hasTargetSpec: Boolean(resolvedTargetSpec?.spec),
-        hasCoverage: typeof resolvedTargetSpec?.spec?.coverage === "number",
-        hasHorizon: typeof resolvedTargetSpec?.spec?.h === "number",
-        hasTZ: Boolean(resolvedTargetSpec?.spec?.exchange_tz),
+        hasValidH: typeof h === "number" && h >= 1,
+        hasValidCoverage: typeof coverage === "number" && coverage > 0 && coverage < 1,
         canonicalCount,
       });
-      setForecastError("Please save a valid horizon/coverage first.");
+      setForecastError("Pipeline not ready - ensure historical data is loaded.");
       return;
     }
 
@@ -5323,6 +5321,7 @@ const effectiveTrendWeight = useMemo(() => {
           symbol={params.ticker} 
           className="w-full"
           horizon={h}
+          livePrice={livePrice}
           forecastOverlay={forecastOverlayProps}
           ewmaPath={ewmaPath}
           ewmaSummary={ewmaSummary}
