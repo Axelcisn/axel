@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint, TrendOverlayState, DateRangePreset } from '@/components/PriceChart';
+import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint, TrendOverlayState } from '@/components/PriceChart';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
   Trading212CfdConfig,
@@ -498,44 +498,21 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     withTrend: boolean;
   }
 
-  interface T212DateRange {
-    start: string | null;
-    end: string | null;
-    preset: DateRangePreset;
-  }
-
-const [trendWeight, setTrendWeight] = useState<number | null>(null);
-const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
-const [simulationMode, setSimulationMode] = useState<SimulationMode>({
-  baseMode: 'biased',
-  withTrend: false,
-});
-const effectiveTrendWeight = useMemo(() => {
-  if (trendWeight != null && Math.abs(trendWeight) >= 0.005) {
-    return trendWeight;
-  }
-  return 0.05;
-}, [trendWeight]);
+  const [trendWeight, setTrendWeight] = useState<number | null>(null);
+  const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
+  const [simulationMode, setSimulationMode] = useState<SimulationMode>({
+    baseMode: 'biased',
+    withTrend: false,
+  });
+  const effectiveTrendWeight = useMemo(() => {
+    if (trendWeight != null && Math.abs(trendWeight) >= 0.005) {
+      return trendWeight;
+    }
+    return 0.05;
+  }, [trendWeight]);
 
   // Trading212 CFD Simulation state
   const [isCfdEnabled, setIsCfdEnabled] = useState(true);  // CFD simulation toggle
-  const [t212DateRange, setT212DateRange] = useState<T212DateRange>({ start: null, end: null, preset: "chart" });  // Date range filter for simulation
-  
-  // Memoized callback for date range changes to avoid infinite loops
-  const handleDateRangeChange = useCallback((start: string | null, end: string | null, preset: DateRangePreset) => {
-    setT212DateRange(prev => {
-      // Only update if values actually changed
-      if (prev.start === start && prev.end === end && prev.preset === preset) return prev;
-      return { start, end, preset };
-    });
-  }, []);
-
-  // Reset T212 range/visibility when ticker changes to avoid stale selections
-  useEffect(() => {
-    setT212DateRange({ start: null, end: null, preset: "chart" });
-    setT212VisibleRunIds(new Set<T212RunId>());
-    setT212CurrentRunId(null);
-  }, [params.ticker]);
   
   const [t212InitialEquity, setT212InitialEquity] = useState(5000);
   const [t212Leverage, setT212Leverage] = useState(5);
@@ -841,42 +818,44 @@ const effectiveTrendWeight = useMemo(() => {
   type T212RunFiltered = Trading212SimRun & { filteredHistory: Trading212AccountSnapshot[]; filteredStats: FilteredStats | null };
   
   const t212RunsFiltered: T212RunFiltered[] = useMemo(() => {
-    if (!t212DateRange.start || !t212DateRange.end) {
-      // No filter - return runs with null filteredStats (will use original values)
-      return t212Runs.map((run) => ({ ...run, filteredHistory: run.result.accountHistory, filteredStats: null }));
-    }
-    const startDate = t212DateRange.start;
-    const endDate = t212DateRange.end;
     return t212Runs.map((run) => {
-      const filtered = run.result.accountHistory.filter(
-        (snap) => snap.date >= startDate && snap.date <= endDate
-      );
-      if (filtered.length === 0) {
-        return { ...run, filteredHistory: [] as Trading212AccountSnapshot[], filteredStats: null };
+      const history = run.result.accountHistory;
+      if (!history || history.length === 0) {
+        return {
+          ...run,
+          filteredHistory: [] as Trading212AccountSnapshot[],
+          filteredStats: null,
+        };
       }
-      // Recalculate stats for filtered range
-      const first = filtered[0];
-      const last = filtered[filtered.length - 1];
+
+      const first = history[0];
+      const last = history[history.length - 1];
+
+      // Full-period return based on equity
       const filteredReturn = (last.equity - first.equity) / first.equity;
-      // Max drawdown within filtered range
-      let peak = first.equity;
+
+      // Max drawdown over full history
+      let peak = history[0].equity;
       let maxDd = 0;
-      for (const snap of filtered) {
-        if (snap.equity > peak) peak = snap.equity;
+      for (const snap of history) {
+        if (snap.equity > peak) {
+          peak = snap.equity;
+        }
         const dd = (peak - snap.equity) / peak;
-        if (dd > maxDd) maxDd = dd;
+        if (dd > maxDd) {
+          maxDd = dd;
+        }
       }
-      // Count trades within date range
-      const filteredTrades = run.result.trades.filter(
-        (t) => t.entryDate >= startDate && t.entryDate <= endDate
-      );
-      // Stop-outs can't be tracked per-trade; use 0 for filtered view
-      const filteredStopOuts = 0;
+
+      // Use all trades for the full period
+      const filteredTrades = run.result.trades;
+      const filteredStopOuts = 0; // keep 0 for now
+
       return {
         ...run,
-        filteredHistory: filtered,
+        filteredHistory: history,
         filteredStats: {
-          days: filtered.length,
+          days: history.length,
           firstDate: first.date,
           lastDate: last.date,
           returnPct: filteredReturn,
@@ -886,7 +865,7 @@ const effectiveTrendWeight = useMemo(() => {
         },
       };
     });
-  }, [t212Runs, t212DateRange]);
+  }, [t212Runs]);
 
   const simulationWindow = useMemo(() => {
     const withStats = t212RunsFiltered.find((run) => run.filteredStats);
@@ -930,7 +909,7 @@ const effectiveTrendWeight = useMemo(() => {
       })),
     });
 
-    const displayLastDate = t212DateRange.preset === "custom" ? simulationWindow.lastDate : "—";
+    const displayLastDate = simulationWindow.lastDate;
 
     const findFilteredRun = (id: T212RunId, expectTilt: boolean | null) => {
       const base = t212RunsFiltered.find((run) => run.id === id);
@@ -1019,7 +998,7 @@ const effectiveTrendWeight = useMemo(() => {
     );
 
     return rows;
-  }, [simulationMode, simulationWindow, t212DateRange.preset, t212Runs, t212RunsFiltered]);
+  }, [simulationMode, simulationWindow, t212Runs, t212RunsFiltered]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -2336,17 +2315,14 @@ const effectiveTrendWeight = useMemo(() => {
         }
 
         // Filter canonical rows to start at Reaction Map Test start (if available)
-        const userStart = t212DateRange.start;
-        const userEnd = t212DateRange.end;
         const simStartDate = (() => {
           const candidates = [
-            userStart,
             reactionMapSummary?.testStart,
             rows[0]?.date ?? null,
           ].filter(Boolean) as string[];
           return candidates.length ? candidates.reduce((a, b) => (a > b ? a : b)) : null;
         })();
-        const simEndDate = userEnd ?? rows[rows.length - 1]?.date ?? null;
+        const simEndDate = rows[rows.length - 1]?.date ?? null;
 
         let rowsForSim = rows;
         if (simStartDate || simEndDate) {
@@ -2503,7 +2479,6 @@ const effectiveTrendWeight = useMemo(() => {
       reactionTrainFraction,
       reactionOptimizationBest,
       buildTrading212SimBarsFromEwmaPath,
-      t212DateRange,
       h,
       trendShortWindow,
       trendLongWindow,
@@ -5396,7 +5371,6 @@ const effectiveTrendWeight = useMemo(() => {
           hasMaxRun={hasMaxRun}
           trendWeight={trendWeight}
           trendWeightUpdatedAt={trendWeightUpdatedAt}
-          onDateRangeChange={handleDateRangeChange}
           simulationRuns={simulationRunsSummary}
         />
       </div>
