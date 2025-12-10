@@ -3913,7 +3913,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           rx={5}
                           ry={5}
                           fill="#3B82F6"
-                          fillOpacity={0.15}
+                          fillOpacity={0.25}
                         />
                         <rect
                           x={pillX}
@@ -3923,17 +3923,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           rx={3}
                           ry={3}
                           fill="#3B82F6"
-                          fillOpacity={0.2}
+                          fillOpacity={0.75}
                           stroke="#3B82F6"
                           strokeWidth={1}
-                          strokeOpacity={0.6}
+                          strokeOpacity={0.8}
                         />
                         <text
                           x={pillX + pillWidth / 2}
                           y={pillY + pillHeight / 2}
                           textAnchor="middle"
                           dominantBaseline="central"
-                          fill="#3B82F6"
+                          fill="#FFFFFF"
                           fontSize={10}
                           fontWeight={600}
                         >
@@ -3975,7 +3975,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           rx={5}
                           ry={5}
                           fill="#EF4444"
-                          fillOpacity={0.15}
+                          fillOpacity={0.25}
                         />
                         <rect
                           x={pillX}
@@ -3985,17 +3985,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           rx={3}
                           ry={3}
                           fill="#EF4444"
-                          fillOpacity={0.2}
+                          fillOpacity={0.75}
                           stroke="#EF4444"
                           strokeWidth={1}
-                          strokeOpacity={0.6}
+                          strokeOpacity={0.8}
                         />
                         <text
                           x={pillX + pillWidth / 2}
                           y={pillY + pillHeight / 2}
                           textAnchor="middle"
                           dominantBaseline="central"
-                          fill="#EF4444"
+                          fill="#FFFFFF"
                           fontSize={10}
                           fontWeight={600}
                         >
