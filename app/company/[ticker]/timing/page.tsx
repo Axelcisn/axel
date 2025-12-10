@@ -1282,6 +1282,21 @@ const effectiveTrendWeight = useMemo(() => {
         if (yahooData.name) {
           setCompanyName(yahooData.name);
           setCompanyTicker(params.ticker);
+          
+          // Save to local company registry for future search suggestions
+          try {
+            await fetch('/api/companies', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ticker: params.ticker.toUpperCase(),
+                name: yahooData.name,
+                exchange: yahooData.exchange || null
+              })
+            });
+          } catch (saveErr) {
+            console.warn('Failed to save company to registry:', saveErr);
+          }
           return;
         }
       }

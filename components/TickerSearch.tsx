@@ -163,9 +163,13 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
                         <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
                         </svg>
-                        <span className="font-semibold">{item.symbol}</span>
-                        <span className="text-slate-400 truncate">
-                          {item.name}
+                        <span className="inline-flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-full bg-slate-700/80 text-xs font-semibold text-slate-200">
+                            {item.symbol}
+                          </span>
+                          <span className="text-slate-300">
+                            {item.name}
+                          </span>
                         </span>
                         {item.exchange && (
                           <span className="ml-auto text-xs font-medium text-slate-500">
@@ -241,11 +245,13 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
                 type="button"
                 key={r.key}
                 onClick={r.onClick}
-                className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-slate-800"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-800"
               >
-                <span className="font-semibold text-slate-100">{r.symbol}</span>
-                <span className="flex-1 truncate px-2 text-slate-300">{r.name || '—'}</span>
-                <span className="text-slate-500">{r.exchange ?? "—"}</span>
+                <span className="px-2 py-0.5 rounded-full bg-slate-700/80 text-xs font-semibold text-slate-200">
+                  {r.symbol}
+                </span>
+                <span className="flex-1 truncate text-slate-300">{r.name || '—'}</span>
+                <span className="text-xs text-slate-500">{r.exchange ?? "—"}</span>
               </button>
             ))}
           </div>

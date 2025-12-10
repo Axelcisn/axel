@@ -2378,6 +2378,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [filteredEquityData]);
 
+  useEffect(() => {
+    console.log('[SIM-CHART] data source', {
+      simulationMode,
+      activeT212RunId,
+      dataSample: equityPanelData.slice(0, 3),
+      chartSample: chartDataWithEquity.slice(0, 3),
+    });
+  }, [simulationMode, activeT212RunId, equityPanelData, chartDataWithEquity]);
+
   const equityYDomain = useMemo(() => {
     // Use filtered data for the equity chart Y domain in Overview
     const equities = filteredEquityData
