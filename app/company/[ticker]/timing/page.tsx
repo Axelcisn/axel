@@ -1282,6 +1282,7 @@ const effectiveTrendWeight = useMemo(() => {
         if (yahooData.name) {
           setCompanyName(yahooData.name);
           setCompanyTicker(params.ticker);
+          setCompanyExchange(yahooData.exchange || null);
           
           // Save to local company registry for future search suggestions
           try {
@@ -1310,6 +1311,7 @@ const effectiveTrendWeight = useMemo(() => {
       if (response.ok) {
         const company = await response.json();
         setCompanyName(company.name || '');
+        setCompanyExchange(company.exchange || null);
         // Keep ticker in sync with URL param
         setCompanyTicker(params.ticker);
       } else {
