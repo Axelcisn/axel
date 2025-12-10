@@ -1838,8 +1838,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Handler to toggle Long/Short position
   const handlePositionClick = useCallback((type: 'long' | 'short') => {
     if (activePosition === type) {
-      // Clicking same button again - deactivate
-      setActivePosition(null);
+      // Clicking same button again - just keep it active (line stays visible)
+      // Do nothing - line persists
+      return;
     } else {
       // Switching to new position type
       setActivePosition(type);
@@ -3873,12 +3874,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               />
             )}
             
-            {/* Long Position Reference Line - light blue glow */}
+            {/* Long Position Reference Line - Blue */}
             {longPrice != null && (
               <ReferenceLine
                 y={longPrice}
                 yAxisId="price"
-                stroke="#22D3EE"
+                stroke="#3B82F6"
                 strokeDasharray="3 3"
                 strokeWidth={1}
                 ifOverflow="extendDomain"
@@ -3901,7 +3902,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           height={pillHeight + 4}
                           rx={5}
                           ry={5}
-                          fill="#22D3EE"
+                          fill="#3B82F6"
                           fillOpacity={0.15}
                         />
                         <rect
@@ -3911,9 +3912,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           height={pillHeight}
                           rx={3}
                           ry={3}
-                          fill="#22D3EE"
+                          fill="#3B82F6"
                           fillOpacity={0.2}
-                          stroke="#22D3EE"
+                          stroke="#3B82F6"
                           strokeWidth={1}
                           strokeOpacity={0.6}
                         />
@@ -3922,7 +3923,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           y={pillY + pillHeight / 2}
                           textAnchor="middle"
                           dominantBaseline="central"
-                          fill="#22D3EE"
+                          fill="#3B82F6"
                           fontSize={10}
                           fontWeight={600}
                         >
@@ -3935,12 +3936,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               />
             )}
             
-            {/* Short Position Reference Line - light blue glow */}
+            {/* Short Position Reference Line - Red */}
             {shortPrice != null && (
               <ReferenceLine
                 y={shortPrice}
                 yAxisId="price"
-                stroke="#22D3EE"
+                stroke="#EF4444"
                 strokeDasharray="3 3"
                 strokeWidth={1}
                 ifOverflow="extendDomain"
@@ -3963,7 +3964,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           height={pillHeight + 4}
                           rx={5}
                           ry={5}
-                          fill="#22D3EE"
+                          fill="#EF4444"
                           fillOpacity={0.15}
                         />
                         <rect
@@ -3973,9 +3974,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           height={pillHeight}
                           rx={3}
                           ry={3}
-                          fill="#22D3EE"
+                          fill="#EF4444"
                           fillOpacity={0.2}
-                          stroke="#22D3EE"
+                          stroke="#EF4444"
                           strokeWidth={1}
                           strokeOpacity={0.6}
                         />
@@ -3984,7 +3985,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           y={pillY + pillHeight / 2}
                           textAnchor="middle"
                           dominantBaseline="central"
-                          fill="#22D3EE"
+                          fill="#EF4444"
                           fontSize={10}
                           fontWeight={600}
                         >
@@ -5143,17 +5144,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           
           {/* Long/Short Position Controls */}
           <div className="flex items-center gap-2">
-            {/* Long Button */}
+            {/* Long Button - Blue */}
             <button
               type="button"
               onClick={() => handlePositionClick('long')}
               className={`
                 px-3 py-0.5 text-xs font-medium transition-all rounded-full border
                 ${activePosition === 'long'
-                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400/50 shadow-[0_0_8px_rgba(34,211,238,0.4)]'
+                  ? 'bg-blue-500/20 text-blue-400 border-blue-400/50 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
                   : isDarkMode
-                    ? 'text-gray-500 hover:text-cyan-400 hover:bg-cyan-500/10 border-transparent hover:border-cyan-400/30'
-                    : 'text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 border-transparent hover:border-cyan-300'
+                    ? 'text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 border-gray-600 hover:border-blue-400/50'
+                    : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50 border-gray-300 hover:border-blue-400'
                 }
               `}
             >
@@ -5170,27 +5171,31 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               className={`
                 w-20 px-2 py-0.5 text-xs font-medium text-center rounded-md border transition-all
                 ${activePosition
-                  ? isDarkMode
-                    ? 'bg-gray-800 text-cyan-400 border-cyan-400/40 placeholder-gray-600 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/30 shadow-[0_0_6px_rgba(34,211,238,0.2)]'
-                    : 'bg-white text-cyan-700 border-cyan-300 placeholder-gray-400 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200'
+                  ? activePosition === 'long'
+                    ? isDarkMode
+                      ? 'bg-gray-800 text-blue-400 border-blue-400/40 placeholder-gray-600 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 shadow-[0_0_6px_rgba(59,130,246,0.2)]'
+                      : 'bg-white text-blue-700 border-blue-300 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-200'
+                    : isDarkMode
+                      ? 'bg-gray-800 text-red-400 border-red-400/40 placeholder-gray-600 focus:border-red-400 focus:ring-1 focus:ring-red-400/30 shadow-[0_0_6px_rgba(239,68,68,0.2)]'
+                      : 'bg-white text-red-700 border-red-300 placeholder-gray-400 focus:border-red-500 focus:ring-1 focus:ring-red-200'
                   : isDarkMode
                     ? 'bg-gray-800/50 text-gray-600 border-gray-700 cursor-not-allowed'
-                    : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                    : 'bg-gray-100 text-gray-400 border-gray-300 cursor-not-allowed'
                 }
               `}
             />
             
-            {/* Short Button */}
+            {/* Short Button - Red */}
             <button
               type="button"
               onClick={() => handlePositionClick('short')}
               className={`
                 px-3 py-0.5 text-xs font-medium transition-all rounded-full border
                 ${activePosition === 'short'
-                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400/50 shadow-[0_0_8px_rgba(34,211,238,0.4)]'
+                  ? 'bg-red-500/20 text-red-400 border-red-400/50 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
                   : isDarkMode
-                    ? 'text-gray-500 hover:text-cyan-400 hover:bg-cyan-500/10 border-transparent hover:border-cyan-400/30'
-                    : 'text-gray-500 hover:text-cyan-600 hover:bg-cyan-50 border-transparent hover:border-cyan-300'
+                    ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10 border-gray-600 hover:border-red-400/50'
+                    : 'text-gray-500 hover:text-red-600 hover:bg-red-50 border-gray-300 hover:border-red-400'
                 }
               `}
             >
