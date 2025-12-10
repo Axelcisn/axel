@@ -199,6 +199,7 @@ export interface EwmaWalkerPathPoint {
 type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
 type GarchEstimator = 'Normal' | 'Student-t';
 type RangeEstimator = 'P' | 'GK' | 'RS' | 'YZ';
+export type DateRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
 
 interface RecommendedModelInfo {
   volModel: VolModel;
@@ -287,10 +288,10 @@ export interface Trading212TradeOverlay {
 
 /** Simulation run summary for comparison table */
 export interface SimulationRunSummary {
-  id: string;
+  id: string; // StrategyKey
   label: string;
-  lambda?: number | null;
-  trainFraction?: number | null;
+  lambda?: number;
+  trainFraction?: number;
   returnPct: number;
   maxDrawdown: number;
   tradeCount: number;
@@ -362,7 +363,11 @@ interface PriceChartProps {
   hasMaxRun?: boolean;
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
-  onDateRangeChange?: (startDate: string | null, endDate: string | null) => void;  // Callback when date range changes
+  onDateRangeChange?: (
+    startDate: string | null,
+    endDate: string | null,
+    preset: DateRangePreset
+  ) => void;  // Callback when date range changes
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
 }
 
@@ -561,9 +566,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const hoverRafRef = useRef<number | null>(null);
 
   // Date range dropdown state (TradingView-style)
-  type DateRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>("chart");
   const [showDateRangeDropdown, setShowDateRangeDropdown] = useState(false);
+
+  // Reset view + range state when ticker changes
+  useEffect(() => {
+    setSelectedRange("1M");
+    setZoomDays(null);
+    setViewStartIdx(null);
+    setViewEndIdx(null);
+    setDateRangePreset("chart");
+  }, [symbol]);
 
   // Insights tab state (TradingView-style)
   type InsightTab =
@@ -580,6 +593,22 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     () => fullData.map((p) => p.date),
     [fullData]
   );
+
+  // Current price-chart window in date space (for syncing axes)
+  const priceViewWindow = useMemo(() => {
+    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
+    if (!win || fullData.length === 0) {
+      return { start: null, end: null };
+    }
+    const startIdx = Math.max(0, Math.min(win.start, fullData.length - 1));
+    const endIdx = Math.max(0, Math.min(win.end, fullData.length - 1));
+    const start = fullData[startIdx]?.date ?? null;
+    const end = fullData[endIdx]?.date ?? null;
+    return {
+      start: start ? normalizeDateString(start) : null,
+      end: end ? normalizeDateString(end) : null,
+    };
+  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Compute date range label for dropdown
   const dateRangeSpan = useMemo(() => {
@@ -600,13 +629,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       return { start: allDates[startIdx], end: latestDate };
     };
 
-    const currentWindow = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
     const chartSpan =
-      currentWindow && fullData.length
-        ? {
-            start: fullData[currentWindow.start]?.date ?? null,
-            end: fullData[currentWindow.end]?.date ?? null,
-          }
+      priceViewWindow.start || priceViewWindow.end
+        ? { start: priceViewWindow.start, end: priceViewWindow.end }
         : { start: allDates[0] ?? null, end: latestDate };
 
     const presetSpan: Record<DateRangePreset, { start: string | null; end: string | null }> = {
@@ -627,7 +652,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           ? `${format(span.start) ?? span.start} — ${format(span.end) ?? span.end}`
           : "No trades",
     };
-  }, [allDates, dateRangePreset, fullData, selectedRange, viewStartIdx, viewEndIdx]);
+  }, [allDates, dateRangePreset, priceViewWindow]);
+
+  useEffect(() => {
+    if (!onDateRangeChange) return;
+    const startDate = dateRangeSpan.raw.start;
+    const endDate = dateRangeSpan.raw.end;
+    onDateRangeChange(startDate, endDate, dateRangePreset);
+  }, [dateRangePreset, dateRangeSpan.raw.end, dateRangeSpan.raw.start, onDateRangeChange]);
 
   // Helper to parse rows into PricePoint[]
   const parseRowsToPoints = (rows: any[]): PricePoint[] => {
@@ -2386,8 +2418,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const simulationEquityData = useMemo(() => {
     if (!t212AccountHistory || t212AccountHistory.length === 0) return [];
 
-    const startDate = dateRangeSpan.raw.start ? normalizeDateString(dateRangeSpan.raw.start) : null;
-    const endDate = dateRangeSpan.raw.end ? normalizeDateString(dateRangeSpan.raw.end) : null;
+    const startDate = priceViewWindow.start ? normalizeDateString(priceViewWindow.start) : null;
+    const endDate = priceViewWindow.end ? normalizeDateString(priceViewWindow.end) : null;
 
     const series = t212AccountHistory
       .map((pt) => ({
@@ -2414,7 +2446,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         equityDelta,
       };
     });
-  }, [t212AccountHistory, dateRangeSpan.raw.start, dateRangeSpan.raw.end]);
+  }, [t212AccountHistory, priceViewWindow.end, priceViewWindow.start]);
 
   useEffect(() => {
     console.log('[SIM-CHART] data source', {

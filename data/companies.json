@@ -46,14 +46,14 @@
     "name": "The Coca-Cola Company",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T06:24:36.971Z",
-    "updatedAt": "2025-12-10T08:06:15.560Z"
+    "updatedAt": "2025-12-10T10:43:13.540Z"
   },
   "META": {
     "ticker": "META",
     "name": "Meta Platforms, Inc.",
     "exchange": "NasdaqGS",
     "createdAt": "2025-12-10T06:25:40.474Z",
-    "updatedAt": "2025-12-10T07:59:17.258Z"
+    "updatedAt": "2025-12-10T10:43:18.979Z"
   },
   "ASML": {
     "ticker": "ASML",
@@ -61,5 +61,19 @@
     "exchange": "NasdaqGS",
     "createdAt": "2025-12-10T07:26:18.905Z",
     "updatedAt": "2025-12-10T07:27:52.257Z"
+  },
+  "ORCL": {
+    "ticker": "ORCL",
+    "name": "Oracle Corporation",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-10T10:36:20.094Z",
+    "updatedAt": "2025-12-10T10:36:20.738Z"
+  },
+  "JPM": {
+    "ticker": "JPM",
+    "name": "JPMorgan Chase & Co.",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-10T10:43:35.352Z",
+    "updatedAt": "2025-12-10T11:00:06.894Z"
   }
 }

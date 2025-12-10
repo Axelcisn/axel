@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint, TrendOverlayState } from '@/components/PriceChart';
+import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint, TrendOverlayState, DateRangePreset } from '@/components/PriceChart';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
   Trading212CfdConfig,
@@ -498,24 +498,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     withTrend: boolean;
   }
 
+  interface T212DateRange {
+    start: string | null;
+    end: string | null;
+    preset: DateRangePreset;
+  }
+
 const [trendWeight, setTrendWeight] = useState<number | null>(null);
 const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
 const [simulationMode, setSimulationMode] = useState<SimulationMode>({
   baseMode: 'biased',
   withTrend: false,
 });
-const handleChangeSimulationMode = useCallback((mode: SimulationMode) => {
-  setSimulationMode((prev) => {
-    console.log("[SIM-CLICK] before", { prev, requested: mode });
-    if (prev.baseMode === mode.baseMode && prev.withTrend === mode.withTrend) {
-      console.log("[SIM-CLICK] after (unchanged)", prev);
-      return prev;
-    }
-    const nextMode = { ...mode };
-    console.log("[SIM-CLICK] after", nextMode);
-    return nextMode;
-  });
-}, []);
 const effectiveTrendWeight = useMemo(() => {
   if (trendWeight != null && Math.abs(trendWeight) >= 0.005) {
     return trendWeight;
@@ -525,16 +519,23 @@ const effectiveTrendWeight = useMemo(() => {
 
   // Trading212 CFD Simulation state
   const [isCfdEnabled, setIsCfdEnabled] = useState(true);  // CFD simulation toggle
-  const [t212DateRange, setT212DateRange] = useState<{ start: string | null; end: string | null }>({ start: null, end: null });  // Date range filter for simulation
+  const [t212DateRange, setT212DateRange] = useState<T212DateRange>({ start: null, end: null, preset: "chart" });  // Date range filter for simulation
   
   // Memoized callback for date range changes to avoid infinite loops
-  const handleDateRangeChange = useCallback((start: string | null, end: string | null) => {
+  const handleDateRangeChange = useCallback((start: string | null, end: string | null, preset: DateRangePreset) => {
     setT212DateRange(prev => {
       // Only update if values actually changed
-      if (prev.start === start && prev.end === end) return prev;
-      return { start, end };
+      if (prev.start === start && prev.end === end && prev.preset === preset) return prev;
+      return { start, end, preset };
     });
   }, []);
+
+  // Reset T212 range/visibility when ticker changes to avoid stale selections
+  useEffect(() => {
+    setT212DateRange({ start: null, end: null, preset: "chart" });
+    setT212VisibleRunIds(new Set<T212RunId>());
+    setT212CurrentRunId(null);
+  }, [params.ticker]);
   
   const [t212InitialEquity, setT212InitialEquity] = useState(5000);
   const [t212Leverage, setT212Leverage] = useState(5);
@@ -549,14 +550,35 @@ const effectiveTrendWeight = useMemo(() => {
   type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
 
   type Trading212SimRun = {
-  id: T212RunId;
-  label: string;
-  signalSource: "unbiased" | "biased";
-  result: Trading212SimulationResult;
-  lambda?: number;
-  trainFraction?: number;
-  trendTiltEnabled?: boolean;
-};
+    id: T212RunId;
+    label: string;
+    signalSource: "unbiased" | "biased";
+    result: Trading212SimulationResult;
+    lambda?: number;
+    trainFraction?: number;
+    trendTiltEnabled?: boolean;
+  };
+
+  type StrategyKey =
+    | "unbiased"
+    | "biased"
+    | "biased-max"
+    | "biased-trend"
+    | "biased-max-trend";
+
+  interface SimulationStrategySummary {
+    id: StrategyKey;
+    label: string;
+    lambda?: number;
+    trainFraction?: number;
+    returnPct: number;
+    maxDrawdown: number;
+    tradeCount: number;
+    stopOutEvents: number;
+    days: number;
+    firstDate: string;
+    lastDate: string;
+  }
 
   // Type for trade overlays passed to PriceChart
   type Trading212TradeOverlay = {
@@ -573,6 +595,66 @@ const effectiveTrendWeight = useMemo(() => {
   const activeT212RunId = useMemo(
     () => (t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null),
     [t212VisibleRunIds]
+  );
+
+  const handleChangeSimulationMode = useCallback(
+    (mode: SimulationMode) => {
+      // Update simulationMode immutably
+      setSimulationMode((prev) => {
+        console.log("[SIM-CLICK] before", { prev, requested: mode });
+        if (prev.baseMode === mode.baseMode && prev.withTrend === mode.withTrend) {
+          console.log("[SIM-CLICK] after (unchanged)", prev);
+          return prev;
+        }
+        const nextMode = { ...mode };
+        console.log("[SIM-CLICK] after", nextMode);
+        return nextMode;
+      });
+
+      // If runs already exist, immediately switch visible run
+      setT212VisibleRunIds((prevVisible) => {
+        if (t212Runs.length === 0) {
+          // No runs yet; let the sync effect handle initial selection
+          return prevVisible;
+        }
+
+        let desired: T212RunId;
+        switch (mode.baseMode) {
+          case "unbiased":
+            desired = "ewma-unbiased";
+            break;
+          case "max":
+            desired = "ewma-biased-max";
+            break;
+          case "biased":
+          default:
+            desired = "ewma-biased";
+            break;
+        }
+
+        const runIds = new Set(t212Runs.map((r) => r.id));
+        let chosen: T212RunId | null = null;
+
+        if (runIds.has(desired)) {
+          chosen = desired;
+        } else if (runIds.has("ewma-biased")) {
+          chosen = "ewma-biased";
+        } else if (runIds.has("ewma-unbiased")) {
+          chosen = "ewma-unbiased";
+        } else if (t212Runs.length > 0) {
+          chosen = t212Runs[0].id;
+        }
+
+        if (!chosen) {
+          return prevVisible;
+        }
+
+        const next = new Set<T212RunId>([chosen]);
+        console.log("[SIM-CLICK] set visible run to", chosen, "for baseMode", mode.baseMode);
+        return next;
+      });
+    },
+    [t212Runs]
   );
 
   // State for real Trading212 trades (from actual account history)
@@ -650,6 +732,7 @@ const effectiveTrendWeight = useMemo(() => {
   useEffect(() => {
     console.log("[INIT-VISIBLE] baseMode=", simulationMode.baseMode, "t212Runs ids=", t212Runs.map((r) => r.id));
     if (t212Runs.length === 0) return;
+    if (t212VisibleRunIds.size > 0) return; // already have a visible selection
 
     let desiredBaseRunId: T212RunId;
     switch (simulationMode.baseMode) {
@@ -680,16 +763,10 @@ const effectiveTrendWeight = useMemo(() => {
     }
 
     if (chosen != null) {
-      console.log("[INIT-VISIBLE] chosen=", chosen);
-      console.log("[SYNC] simulationMode.baseMode", simulationMode.baseMode, "chosenVisibleRunId", chosen, "t212Runs", t212Runs.map((r) => ({
-        id: r.id,
-        lambda: r.lambda,
-        trainFraction: r.trainFraction,
-        trendTiltEnabled: r.trendTiltEnabled,
-      })));
+      console.log("[INIT-VISIBLE] initial chosen=", chosen);
       setT212VisibleRunIds(new Set<T212RunId>([chosen]));
     }
-  }, [t212Runs, simulationMode.baseMode]);
+  }, [t212Runs, simulationMode.baseMode, t212VisibleRunIds.size]);
 
   // Prepare table rows for real T212 paired trades (with holding period)
   const realT212TradeRows = useMemo(() => {
@@ -811,40 +888,138 @@ const effectiveTrendWeight = useMemo(() => {
     });
   }, [t212Runs, t212DateRange]);
 
+  const simulationWindow = useMemo(() => {
+    const withStats = t212RunsFiltered.find((run) => run.filteredStats);
+
+    if (withStats && withStats.filteredStats) {
+      const { days, firstDate, lastDate } = withStats.filteredStats;
+      return {
+        days,
+        firstDate,
+        lastDate,
+      };
+    }
+
+    const anyRun = t212RunsFiltered[0]?.result;
+    if (anyRun && anyRun.accountHistory.length > 0) {
+      const first = anyRun.accountHistory[0];
+      const last = anyRun.accountHistory[anyRun.accountHistory.length - 1];
+      return {
+        days: anyRun.accountHistory.length,
+        firstDate: first.date,
+        lastDate: last.date,
+      };
+    }
+
+    return {
+      days: 0,
+      firstDate: "—",
+      lastDate: "—",
+    };
+  }, [t212RunsFiltered]);
+
   // Create simulation runs summary for PriceChart Overview tab
-  const simulationRunsSummary = useMemo(() => {
-    console.log('[SIM-TABLE] building summary', {
+  const simulationRunsSummary: SimulationStrategySummary[] = useMemo(() => {
+    console.log("[SIM-TABLE] building summary", {
       simulationMode,
       t212Runs: t212Runs.map((r) => ({
         id: r.id,
-        label: r.label,
         lambda: r.lambda,
         trainFraction: r.trainFraction,
         trendTiltEnabled: r.trendTiltEnabled,
-        returnPct: r.result ? ((r.result.finalEquity - r.result.initialEquity) / r.result.initialEquity) * 100 : null,
-        trades: r.result?.trades.length ?? null,
       })),
     });
-    return t212RunsFiltered.map((run) => {
-      const r = run.result;
-      const stats = run.filteredStats;
-      const baseFirstDate = (r as any).firstDate ?? (r.accountHistory.length > 0 ? r.accountHistory[0].date : "—");
-      const baseLastDate = (r as any).lastDate ?? (r.accountHistory.length > 0 ? r.accountHistory[r.accountHistory.length - 1].date : "—");
-      return {
-        id: run.id,
-        label: run.label,
-        lambda: run.lambda,
-        trainFraction: run.trainFraction,
-        returnPct: stats ? stats.returnPct : (r.finalEquity - r.initialEquity) / r.initialEquity,
-        maxDrawdown: stats ? stats.maxDrawdown : r.maxDrawdown,
-        tradeCount: stats ? stats.tradeCount : r.trades.length,
-        stopOutEvents: stats ? stats.stopOutEvents : r.stopOutEvents,
-        days: stats ? stats.days : r.accountHistory.length,
-        firstDate: baseFirstDate,
-        lastDate: baseLastDate,
-      };
-    });
-  }, [t212RunsFiltered]);
+
+    const displayLastDate = t212DateRange.preset === "custom" ? simulationWindow.lastDate : "—";
+
+    const findFilteredRun = (id: T212RunId, expectTilt: boolean | null) => {
+      const base = t212RunsFiltered.find((run) => run.id === id);
+      if (!base) return null;
+      if (expectTilt === null) return base;
+
+      const original = t212Runs.find((r) => r.id === id);
+      if (!original) return base;
+
+      const isTilt = !!original.trendTiltEnabled;
+      if (isTilt === expectTilt) {
+        return base;
+      }
+
+      return base;
+    };
+
+    const rowSpecs: { key: StrategyKey; label: string; id: T212RunId; expectTilt: boolean | null }[] = [
+      { key: "unbiased",         label: "EWMA Unbiased",             id: "ewma-unbiased",   expectTilt: null },
+      { key: "biased",           label: "EWMA Biased",               id: "ewma-biased",     expectTilt: false },
+      { key: "biased-max",       label: "EWMA Biased (Max)",         id: "ewma-biased-max", expectTilt: false },
+      { key: "biased-trend",     label: "EWMA Biased + Trend",       id: "ewma-biased",     expectTilt: true },
+      { key: "biased-max-trend", label: "EWMA Biased (Max) + Trend", id: "ewma-biased-max", expectTilt: true },
+    ];
+
+    const rows: SimulationStrategySummary[] = [];
+
+    for (const spec of rowSpecs) {
+      const filtered = findFilteredRun(spec.id, spec.expectTilt);
+      const baseRun = t212Runs.find((run) => run.id === spec.id);
+      const r = filtered?.result ?? baseRun?.result ?? null;
+      const stats = filtered?.filteredStats ?? null;
+
+      if (!r) {
+        rows.push({
+          id: spec.key,
+          label: spec.label,
+          lambda: undefined,
+          trainFraction: undefined,
+          returnPct: 0,
+          maxDrawdown: 0,
+          tradeCount: 0,
+          stopOutEvents: 0,
+          days: simulationWindow.days,
+          firstDate: simulationWindow.firstDate,
+          lastDate: displayLastDate,
+        });
+        continue;
+      }
+
+      const lambda = filtered?.lambda ?? baseRun?.lambda;
+      const trainFraction = filtered?.trainFraction ?? baseRun?.trainFraction;
+      const returnPct = stats ? stats.returnPct : (r.finalEquity - r.initialEquity) / r.initialEquity;
+      const maxDrawdown = stats ? stats.maxDrawdown : r.maxDrawdown;
+      const tradeCount = stats ? stats.tradeCount : r.trades.length;
+      const stopOutEvents = stats ? stats.stopOutEvents : r.stopOutEvents ?? 0;
+
+      rows.push({
+        id: spec.key,
+        label: spec.label,
+        lambda,
+        trainFraction,
+        returnPct,
+        maxDrawdown,
+        tradeCount,
+        stopOutEvents,
+        days: simulationWindow.days,
+        firstDate: simulationWindow.firstDate,
+        lastDate: displayLastDate,
+      });
+    }
+
+    console.log("[SIM-TABLE] window", simulationWindow);
+    console.log(
+      "[SIM-TABLE] rows",
+      rows.map((r) => ({
+        id: r.id,
+        label: r.label,
+        days: r.days,
+        firstDate: r.firstDate,
+        lastDate: r.lastDate,
+        returnPct: r.returnPct,
+        maxDrawdown: r.maxDrawdown,
+        tradeCount: r.tradeCount,
+      }))
+    );
+
+    return rows;
+  }, [simulationMode, simulationWindow, t212DateRange.preset, t212Runs, t212RunsFiltered]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -2385,6 +2560,7 @@ const effectiveTrendWeight = useMemo(() => {
     if (t212Runs.length > 0) {
       setT212Runs([]);
       setT212CurrentRunId(null);
+      setT212VisibleRunIds(new Set<T212RunId>()); // Ensure visible selection is cleared when runs are wiped
     }
   }, [
     params?.ticker,
