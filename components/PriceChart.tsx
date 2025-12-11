@@ -800,19 +800,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [symbol]);
 
-  // Initialize view window when fullData is first populated or selectedRange changes
+  // Initialize or reset the view window whenever fullData or the selected range changes.
+  // This ensures that after a ticker change (new fullData), the chart always shows the
+  // correct base window for the current range (e.g. last 1M / 6M / YTD), instead of
+  // inheriting indices from the previous symbol.
   useEffect(() => {
     if (fullData.length === 0) {
       setViewStartIdx(null);
       setViewEndIdx(null);
       return;
     }
-    // If we don't have a window yet, initialize it from the current range
-    if (viewStartIdx === null || viewEndIdx === null) {
-      const [start, end] = computeDefaultWindowForRange(fullData, selectedRange);
-      setViewStartIdx(start);
-      setViewEndIdx(end);
-    }
+
+    const [start, end] = computeDefaultWindowForRange(fullData, selectedRange);
+    setViewStartIdx(start);
+    setViewEndIdx(end);
   }, [fullData, selectedRange]);
 
   // Minimum number of bars we allow in the window when zoomed in
@@ -832,12 +833,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const currentStart = startIdx ?? baseStart;
     const currentEnd = endIdx ?? baseEnd;
 
-    return {
-      baseStart,
-      baseEnd,
-      start: Math.max(baseStart, Math.min(currentStart, baseEnd)),
-      end: Math.max(baseStart, Math.min(currentEnd, baseEnd)),
-    };
+    let start = Math.max(baseStart, Math.min(currentStart, baseEnd));
+    let end = Math.max(baseStart, Math.min(currentEnd, baseEnd));
+
+    if (end < start) {
+      end = start;
+    }
+
+    return { baseStart, baseEnd, start, end };
   }
 
   // Helper: apply a bar offset to pan the window (used by drag panning)
@@ -1192,8 +1195,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [fullData, selectedRange, zoomDays, viewStartIdx, viewEndIdx]);
 
   // Derive last date and future dates
-  const lastPoint = rangeData[rangeData.length - 1];
-  const lastDateStr = lastPoint?.date;
+  const lastPoint = rangeData.length > 0 ? rangeData[rangeData.length - 1] : undefined;
+  const lastDateStr = lastPoint?.date ?? null;
 
   const futureDates = React.useMemo(() => {
     if (!lastDateStr || h <= 0) return [];

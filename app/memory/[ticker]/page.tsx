@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CompanyInfo } from '@/lib/types/company';
+import { useDarkMode } from '@/lib/hooks/useDarkMode';
 
 interface FileInfo {
   name: string;
@@ -23,6 +24,7 @@ export default function CompanyFolderPage() {
   const params = useParams();
   const router = useRouter();
   const ticker = params.ticker as string;
+  const isDarkMode = useDarkMode();
   
   const [data, setData] = useState<CompanyFolderData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -211,7 +213,18 @@ export default function CompanyFolderPage() {
     }
   };
 
-  const getFileTypeColor = (type: string) => {
+  const getFileTypeColor = (type: string, darkMode: boolean) => {
+    if (darkMode) {
+      switch (type) {
+        case 'canonical': return 'bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30';
+        case 'upload': return 'bg-blue-500/15 text-blue-200 ring-1 ring-blue-500/30';
+        case 'forecast': return 'bg-purple-500/20 text-purple-200 ring-1 ring-purple-500/30';
+        case 'spec': return 'bg-amber-400/20 text-amber-200 ring-1 ring-amber-400/30';
+        case 'audit': return 'bg-red-500/20 text-red-200 ring-1 ring-red-500/30';
+        default: return 'bg-slate-500/20 text-slate-200 ring-1 ring-slate-500/30';
+      }
+    }
+
     switch (type) {
       case 'canonical': return 'bg-green-100 text-green-800';
       case 'upload': return 'bg-blue-100 text-blue-800';

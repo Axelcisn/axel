@@ -49,7 +49,18 @@ export async function fetchYahooOhlcv(
     `/v8/finance/chart/${encodeURIComponent(symbol)}`,
     "https://query2.finance.yahoo.com"
   );
-  url.searchParams.set("range", range);
+  const useFullPeriodForDailyMax = interval === "1d" && range === "max";
+
+  // When requesting max daily history, Yahoo auto-downsamples to 3mo bars.
+  // Using explicit period1/period2 forces full-resolution daily candles.
+  if (useFullPeriodForDailyMax) {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    url.searchParams.set("period1", "0");
+    url.searchParams.set("period2", nowSeconds.toString());
+  } else {
+    url.searchParams.set("range", range);
+  }
+
   url.searchParams.set("interval", interval);
   url.searchParams.set("includePrePost", "false");
   // Include dividends & splits info even if we don't fully use it yet

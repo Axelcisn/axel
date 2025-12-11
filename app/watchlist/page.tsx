@@ -1,14 +1,147 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import WatchlistTable from '@/components/WatchlistTable';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { AlertFire, WatchlistRow, WatchlistSummary } from '@/lib/watchlist/types';
-import { useDarkMode } from '@/lib/hooks/useDarkMode';
+import type { Quote } from '@/lib/types/quotes';
 
-type FocusFilter = 'all' | 'up' | 'down' | 'incomplete';
+type CompanyMap = Record<string, { name?: string; exchange?: string }>;
+type QuoteMap = Record<string, Quote | null>;
 
-function classNames(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(' ');
+type TableRow = {
+  symbol: string;
+  name: string;
+  bidSize: number | null;
+  bid: number | null;
+  ask: number | null;
+  askSize: number | null;
+  last: number | null;
+  change: number | null;
+  changePct: number | null;
+  trendPoints: number[];
+  source: WatchlistRow;
+};
+
+const defaultTrend = [0.4, 0.48, 0.45, 0.5, 0.46, 0.52, 0.5, 0.56, 0.53];
+
+function formatNumber(value: number | null, decimals = 2) {
+  if (value === null || Number.isNaN(value)) return '—';
+  return value.toFixed(decimals);
+}
+
+function formatChange(value: number | null) {
+  if (value === null || Number.isNaN(value)) return '—';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${value.toFixed(2)}`;
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return '—';
+  const safe = Number(value);
+  if (!Number.isFinite(safe)) return '—';
+  const sign = safe > 0 ? '+' : '';
+  return `${sign}${safe.toFixed(2)}%`;
+}
+
+function buildTableRow(row: WatchlistRow, company: CompanyMap[string], quote?: Quote | null): TableRow {
+  const bid = row.bands.L_1 ?? null;
+  const ask = row.bands.U_1 ?? null;
+  const last = quote?.price ?? ask ?? bid ?? row.forecast.T_hat_median ?? null;
+  const change = quote?.change ?? row.deviation.z_B ?? null;
+  const changePct = quote?.changePct ?? (row.deviation.pct_outside_B != null ? row.deviation.pct_outside_B * 100 : null);
+  const bidSize = row.deviation.vol_regime_pct != null ? Math.round(row.deviation.vol_regime_pct * 100) : null;
+  const askSize = row.forecast.I60 ? Math.round(row.forecast.I60[1]) : null;
+  const trendPoints = Object.values(row.forecast.P_ge_k || {}).length
+    ? Object.values(row.forecast.P_ge_k || {}).slice(0, 12).map((v) => (typeof v === 'number' ? v : 0.5))
+    : defaultTrend;
+
+  return {
+    symbol: row.symbol,
+    name: company?.name || row.symbol,
+    bidSize,
+    bid,
+    ask,
+    askSize,
+    last,
+    change,
+    changePct,
+    trendPoints,
+    source: row,
+  };
+}
+
+function TrendArrow({ positive }: { positive: boolean }) {
+  return (
+    <div
+      className={`flex h-8 w-8 items-center justify-center rounded-md ${
+        positive ? 'bg-emerald-900/30 text-emerald-400' : 'bg-rose-900/25 text-rose-400'
+      }`}
+    >
+      <span className="text-lg">{positive ? '↑' : '↓'}</span>
+    </div>
+  );
+}
+
+function DetailPanel({ row, company }: { row: TableRow | null; company?: CompanyMap[string] }) {
+  if (!row) {
+    return (
+      <div className="rounded-xl bg-[#0d1019] p-4 text-slate-300 shadow-inner shadow-black/30">
+        <p className="text-sm">Select a symbol to view details.</p>
+      </div>
+    );
+  }
+
+  const metrics = [
+    { label: 'Opening Price', value: formatNumber(row.source.bands.L_1) },
+    { label: 'High', value: formatNumber(row.source.bands.U_1) },
+    { label: 'T̂ (days)', value: formatNumber(row.source.forecast.T_hat_median) },
+    { label: 'Next Review', value: row.source.forecast.next_review_date || '—' },
+    { label: 'Coverage', value: formatPercent(row.source.quality.pi_coverage_250d) },
+    { label: 'Regime', value: row.source.quality.regime?.id ?? '—' },
+  ];
+
+  return (
+    <div className="rounded-xl border border-slate-800/70 bg-transparent p-4 shadow-inner shadow-black/30">
+      <div className="flex items-start justify-between border-b border-slate-800/70 px-4 py-3">
+        <div>
+          <p className="text-[11px] uppercase tracking-wide text-slate-400">{company?.name || row.symbol}</p>
+          <h2 className="text-3xl font-semibold text-slate-100">{row.symbol}</h2>
+          <p className="text-xs text-slate-500">Realtime price: non-consolidated</p>
+        </div>
+        <div className="text-right">
+          <div className="text-4xl font-semibold text-emerald-400">{formatNumber(row.last)}</div>
+          <div className="text-sm text-slate-400">
+            {formatChange(row.change)} ({formatPercent(row.changePct)})
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 border-b border-slate-800/70 px-4 py-3">
+        <button className="flex-1 rounded-md bg-[#0f62fe] px-3 py-2 text-sm font-semibold text-white shadow hover:bg-[#0d55d8]">
+          Buy Order
+        </button>
+        <button className="flex-1 rounded-md bg-[#d32f2f] px-3 py-2 text-sm font-semibold text-white shadow hover:bg-[#b92626]">
+          Sell Order
+        </button>
+        <button className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800">
+          ⚡
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-4 border-b border-slate-800/70 px-4 py-4 text-sm">
+        {metrics.map((metric) => (
+          <div key={metric.label} className="flex justify-between py-1">
+            <span className="text-slate-400">{metric.label}</span>
+            <span className="font-medium text-slate-100">{metric.value}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="px-4 py-4">
+        <p className="mb-2 text-sm font-semibold text-slate-100">Trend</p>
+        <TrendArrow positive={(row.change || 0) >= 0} />
+      </div>
+    </div>
+  );
 }
 
 export default function WatchlistPage() {
@@ -18,17 +151,53 @@ export default function WatchlistPage() {
   const [watchlistError, setWatchlistError] = useState<string | null>(null);
   const [firedAlerts, setFiredAlerts] = useState<AlertFire[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [focusFilter, setFocusFilter] = useState<FocusFilter>('all');
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
-  const isDarkMode = useDarkMode();
+  const [companyMap, setCompanyMap] = useState<CompanyMap>({});
+  const [quotes, setQuotes] = useState<QuoteMap>({});
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadWatchlist();
-    loadAlerts();
+  const loadCompanies = useCallback(async () => {
+    try {
+      const response = await fetch('/api/companies');
+      if (!response.ok) return;
+      const companies = await response.json();
+      const map: CompanyMap = {};
+      companies.forEach((c: any) => {
+        map[c.ticker] = { name: c.name, exchange: c.exchange };
+      });
+      setCompanyMap(map);
+    } catch (error) {
+      console.warn('Failed to load companies', error);
+    }
   }, []);
 
-  const loadWatchlist = async () => {
+  const loadQuotesForRows = useCallback(async (rows: WatchlistRow[]) => {
+    const symbols = Array.from(new Set(rows.map((r) => r.symbol))).filter(Boolean);
+    if (!symbols.length) return;
+
+    const entries = await Promise.all(
+      symbols.map(async (symbol) => {
+        try {
+          const res = await fetch(`/api/quotes/${encodeURIComponent(symbol)}`, { cache: 'no-store' });
+          if (!res.ok) throw new Error('Quote fetch failed');
+          const quote = (await res.json()) as Quote;
+          return [symbol, quote] as const;
+        } catch (err) {
+          console.warn('Failed to load quote for', symbol, err);
+          return [symbol, null] as const;
+        }
+      })
+    );
+
+    setQuotes((prev) => {
+      const next = { ...prev };
+      entries.forEach(([symbol, quote]) => {
+        next[symbol] = quote;
+      });
+      return next;
+    });
+  }, []);
+
+  const loadWatchlist = useCallback(async () => {
     setIsLoadingWatchlist(true);
     setWatchlistError(null);
 
@@ -45,7 +214,8 @@ export default function WatchlistPage() {
 
       setWatchlistRows(rows);
       setWatchlistSummary(summary);
-      setLastRefreshedAt(new Date().toISOString());
+      setSelectedSymbol((prev) => prev || (rows.length ? rows[0].symbol : null));
+      loadQuotesForRows(rows);
     } catch (error) {
       setWatchlistRows([]);
       setWatchlistSummary(null);
@@ -53,17 +223,17 @@ export default function WatchlistPage() {
     } finally {
       setIsLoadingWatchlist(false);
     }
-  };
+  }, [loadQuotesForRows]);
 
-  const loadAlerts = async () => {
+  const loadAlerts = useCallback(async () => {
     setAlertsLoading(true);
-    
+
     try {
       const response = await fetch('/api/alerts/fires?days=7');
       if (!response.ok) {
         throw new Error(`Failed to load alerts: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
       setFiredAlerts(data.fires || []);
     } catch (error) {
@@ -71,435 +241,160 @@ export default function WatchlistPage() {
     } finally {
       setAlertsLoading(false);
     }
-  };
+  }, []);
 
-  const daysUntil = (dateStr: string | null | undefined) => {
-    if (!dateStr) return null;
-    const now = new Date();
-    const target = new Date(dateStr);
-    const diff = target.getTime() - now.setHours(0, 0, 0, 0);
-    return Math.round(diff / (1000 * 60 * 60 * 24));
-  };
+  useEffect(() => {
+    loadWatchlist();
+    loadAlerts();
+    loadCompanies();
+  }, [loadWatchlist, loadAlerts, loadCompanies]);
 
-  const stats = useMemo(() => {
-    const total = watchlistRows.length;
-    const modeled = watchlistRows.filter(row => 
-      row.forecast.source !== 'none' && 
-      row.bands.L_1 !== null && 
-      row.bands.U_1 !== null
-    ).length;
-    const momentumUp = watchlistRows.filter(row => row.deviation.direction === 'up').length;
-    const nearReview = watchlistRows.filter(row => {
-      const days = daysUntil(row.forecast.next_review_date);
-      return typeof days === 'number' && days >= 0 && days <= 7;
-    }).length;
+  const tableRows: TableRow[] = useMemo(
+    () => watchlistRows.map((row) => buildTableRow(row, companyMap[row.symbol], quotes[row.symbol])),
+    [watchlistRows, companyMap, quotes]
+  );
 
-    return { total, modeled, momentumUp, nearReview };
-  }, [watchlistRows]);
-
-  const visibleRows = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-
-    let filtered = watchlistRows;
-
-    if (focusFilter !== 'all') {
-      if (focusFilter === 'incomplete') {
-        filtered = filtered.filter(row => 
-          row.forecast.source === 'none' ||
-          row.bands.L_1 === null ||
-          row.bands.U_1 === null
-        );
-      } else {
-        filtered = filtered.filter(row => row.deviation.direction === focusFilter);
-      }
-    }
-
-    if (query) {
-      filtered = filtered.filter(row => row.symbol.toLowerCase().includes(query));
-    }
-
-    return filtered;
-  }, [watchlistRows, focusFilter, searchTerm]);
-
-  const focusOptions: Array<{ value: FocusFilter; label: string; hint: string }> = [
-    { value: 'all', label: 'All', hint: 'Full coverage' },
-    { value: 'up', label: 'Momentum ↑', hint: 'Positive deviation' },
-    { value: 'down', label: 'Pullback ↓', hint: 'Negative deviation' },
-    { value: 'incomplete', label: 'Needs data', hint: 'Missing bands' },
-  ];
-
-  const heroSurface = isDarkMode
-    ? 'bg-gradient-to-br from-[#0c1424] via-[#0b1020] to-[#0e1c2e] border border-slate-800/60'
-    : 'bg-gradient-to-br from-white via-slate-50 to-emerald-50 border border-emerald-100/60';
-
-  const cardSurface = isDarkMode
-    ? 'bg-[#0d1525] border border-slate-800/80 shadow-[0_12px_50px_-28px_rgba(0,0,0,0.6)]'
-    : 'bg-white border border-slate-200 shadow-[0_22px_70px_-40px_rgba(15,23,42,0.3)]';
-
-  const mutedSurface = isDarkMode
-    ? 'bg-[#0f1a2c] border border-white/5'
-    : 'bg-slate-50 border border-slate-200';
+  const selectedRow = useMemo(
+    () => tableRows.find((row) => row.symbol === selectedSymbol) || null,
+    [tableRows, selectedSymbol]
+  );
 
   const asOfDisplay = watchlistSummary?.as_of
     ? new Date(watchlistSummary.as_of).toLocaleDateString()
     : '—';
 
-  const refreshedDisplay = lastRefreshedAt
-    ? new Date(lastRefreshedAt).toLocaleTimeString()
-    : '—';
-
-  const hasData = !watchlistError && watchlistRows.length > 0;
-
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-10 space-y-8">
-        
-        {/* Hero */}
-        <section className={classNames('relative overflow-hidden rounded-3xl p-8 md:p-10', heroSurface)}>
-          <div className="absolute -left-10 -top-10 h-48 w-48 rounded-full bg-emerald-400/20 blur-3xl" />
-          <div className="absolute -right-8 top-0 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl" />
-          <div className="relative z-10 space-y-8">
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-              <div className="space-y-3">
-                <p className={classNames('text-xs uppercase tracking-[0.28em] font-semibold', isDarkMode ? 'text-emerald-200/80' : 'text-emerald-700')}>
-                  Signal Board
-                </p>
-                <div className="space-y-1">
-                  <h1 className={classNames('text-4xl font-semibold tracking-tight', isDarkMode ? 'text-white' : 'text-slate-900')}>
-                    Watchlist
-                  </h1>
-                  <p className={classNames('text-sm max-w-2xl', isDarkMode ? 'text-slate-200/80' : 'text-slate-600')}>
-                    Track the securities you have modeled, monitor deviations, and keep upcoming review dates in one place.
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-3 text-xs">
-                  <span className={classNames(
-                    'inline-flex items-center gap-2 rounded-full px-3 py-1 font-medium',
-                    isDarkMode ? 'bg-white/10 text-emerald-100 ring-1 ring-white/10' : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
-                  )}>
-                    <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                    As of {asOfDisplay}
-                  </span>
-                  <span className={classNames(
-                    'inline-flex items-center gap-2 rounded-full px-3 py-1 font-medium',
-                    isDarkMode ? 'bg-white/5 text-slate-200 ring-1 ring-white/10' : 'bg-white text-slate-700 ring-1 ring-slate-200'
-                  )}>
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Refreshed {refreshedDisplay}
-                  </span>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  onClick={loadWatchlist}
-                  disabled={isLoadingWatchlist}
-                  className={classNames(
-                    'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition',
-                    isDarkMode
-                      ? 'bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:opacity-60'
-                      : 'bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-60'
-                  )}
-                >
-                  {isLoadingWatchlist ? (
-                    <>
-                      <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                        <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Refreshing
-                    </>
-                  ) : (
-                    <>
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.428 15.341A8 8 0 118.659 4.572M16 7v5h-5" />
-                      </svg>
-                      Refresh data
-                    </>
-                  )}
-                </button>
-                <a
-                  href="/analysis"
-                  className={classNames(
-                    'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition',
-                    isDarkMode
-                      ? 'bg-white/10 text-white ring-1 ring-white/20 hover:bg-white/20'
-                      : 'bg-white text-slate-900 ring-1 ring-slate-200 hover:ring-slate-300'
-                  )}
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-                  </svg>
-                  Add coverage
-                </a>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-              <StatCard
-                label="Tracked symbols"
-                value={stats.total}
-                helper="Symbols on file"
-                tone="emerald"
-                isDarkMode={isDarkMode}
-              />
-              <StatCard
-                label="Fully modeled"
-                value={stats.modeled}
-                helper="Ready with bands"
-                tone="cyan"
-                isDarkMode={isDarkMode}
-              />
-              <StatCard
-                label="Momentum up"
-                value={stats.momentumUp}
-                helper="Positive deviation"
-                tone="amber"
-                isDarkMode={isDarkMode}
-              />
-              <StatCard
-                label="Reviews next 7d"
-                value={stats.nearReview}
-                helper="Upcoming checks"
-                tone="slate"
-                isDarkMode={isDarkMode}
-              />
-            </div>
+    <main className="min-h-screen bg-transparent text-foreground">
+      <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-4 space-y-3">
+        {/* Top controls */}
+        <div className="flex items-center justify-between text-sm font-semibold text-slate-200">
+          <div className="flex items-center gap-6">
+            <button className="pb-2 text-slate-400 hover:text-white">Tech Leaders</button>
+            <button className="pb-2 text-slate-400 hover:text-white">Traded</button>
+            <button className="border-b-2 border-[#2e7df6] pb-2 text-white">Stocks</button>
+            <button className="text-lg leading-none text-slate-200 hover:text-white" title="Add category">
+              +
+            </button>
           </div>
-        </section>
+          <div className="flex items-center gap-3 text-slate-200">
+            <button className="flex items-center gap-2 rounded-full border border-slate-700 px-3 py-2 text-sm font-semibold hover:border-slate-500 hover:bg-slate-800/40">
+              <span>Watchlist View</span>
+              <svg className="h-4 w-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 0 1 1.08 1.04l-4.25 4.25a.75.75 0 0 1-1.06 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" />
+              </svg>
+            </button>
+            <button
+              className="group relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-700/80 text-slate-200 transition hover:border-slate-400/80 hover:bg-slate-900/40 focus:outline-none focus:ring-2 focus:ring-slate-500/60"
+              title="Settings"
+            >
+              <span className="pointer-events-none absolute inset-0 rounded-full border border-slate-800/60 group-hover:border-slate-500/60" />
+              <span className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-slate-900/70 to-slate-800/30 group-hover:from-slate-800/70 group-hover:to-slate-700/30" />
+              <svg
+                className="pointer-events-none relative h-5 w-5 text-slate-100 drop-shadow-[0_2px_6px_rgba(0,0,0,0.4)]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="2.6" />
+                <path d="M19.2 12.8c.05-.26.08-.53.08-.8s-.03-.54-.08-.8l1.44-1.12a.5.5 0 0 0 .12-.64l-1.36-2.35a.5.5 0 0 0-.6-.22l-1.7.68a6.2 6.2 0 0 0-1.38-.8l-.26-1.8a.5.5 0 0 0-.5-.43h-2.72a.5.5 0 0 0-.5.43l-.26 1.8a6.2 6.2 0 0 0-1.38.8l-1.7-.68a.5.5 0 0 0-.6.22L3.24 9.44a.5.5 0 0 0 .12.64L4.8 11.2c-.05.26-.08.53-.08.8s.03.54.08.8l-1.44 1.12a.5.5 0 0 0-.12.64l1.36 2.35c.13.23.4.33.64.22l1.7-.68c.42.33.89.6 1.38.8l.26 1.8c.04.25.25.43.5.43h2.72c.25 0 .46-.18.5-.43l.26-1.8c.49-.2.96-.47 1.38-.8l1.7.68c.24.1.51 0 .64-.22l1.36-2.35a.5.5 0 0 0-.12-.64L19.2 12.8Z" />
+              </svg>
+            </button>
+            <button
+              className="group relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-700/80 text-slate-200 transition hover:border-slate-400/80 hover:bg-slate-900/40 focus:outline-none focus:ring-2 focus:ring-slate-500/60"
+              title="Refresh"
+              onClick={loadWatchlist}
+            >
+              <span className="pointer-events-none absolute inset-0 rounded-full border border-slate-800/60 group-hover:border-slate-500/60" />
+              <span className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-slate-900/70 to-slate-800/30 group-hover:from-slate-800/70 group-hover:to-slate-700/30" />
+              <svg
+                className="pointer-events-none relative h-5 w-5 text-slate-100 drop-shadow-[0_2px_6px_rgba(0,0,0,0.4)]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+                <path d="M20 5v5h-5" />
+              </svg>
+            </button>
+          </div>
+        </div>
 
-        {/* Main layout */}
-        <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-          {/* Watchlist */}
-          <div className="space-y-6 xl:col-span-2">
-            <div className={classNames('rounded-2xl overflow-hidden', cardSurface)}>
-              <div className={classNames(
-                'flex flex-col gap-4 border-b px-6 py-5',
-                isDarkMode ? 'border-slate-800/80' : 'border-slate-100'
-              )}>
-                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                  <div>
-                    <h2 className={classNames('text-lg font-semibold', isDarkMode ? 'text-white' : 'text-slate-900')}>
-                      Coverage overview
-                    </h2>
-                    <p className={classNames('text-sm', isDarkMode ? 'text-slate-300' : 'text-slate-600')}>
-                      Filter by direction, search by ticker, and drill into the modeling details.
-                    </p>
-                  </div>
-                  <div className="text-xs font-medium">
-                    <span className={classNames(
-                      'rounded-full px-3 py-1',
-                      isDarkMode ? 'bg-white/5 text-slate-200 ring-1 ring-white/10' : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200'
-                    )}>
-                      {watchlistRows.length} total rows
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div className="relative w-full lg:max-w-sm">
-                    <svg className={classNames('absolute left-3 top-2.5 h-4 w-4', isDarkMode ? 'text-slate-400' : 'text-slate-500')} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 18a7 7 0 100-14 7 7 0 000 14z" />
-                    </svg>
-                    <input
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      placeholder="Search tickers..."
-                      className={classNames(
-                        'w-full rounded-xl border pl-10 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400',
-                        isDarkMode
-                          ? 'bg-slate-900 border-slate-800 text-white placeholder:text-slate-500'
-                          : 'bg-white border-slate-200 text-slate-900 placeholder:text-slate-400'
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+          {/* Table */}
+          <div className="overflow-hidden rounded-xl bg-transparent">
+            {watchlistError ? (
+              <div className="px-4 py-6 text-sm text-red-400">{watchlistError}</div>
+            ) : (
+              <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="min-w-[980px]">
+                  <table className="w-full divide-y divide-slate-800 text-sm text-slate-200">
+                    <thead className="bg-transparent">
+                      <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 whitespace-nowrap">
+                        <th className="px-3 py-3">Financial Instrument</th>
+                        <th className="px-3 py-3">Company Name</th>
+                        <th className="px-3 py-3 text-center">Bid Size</th>
+                        <th className="px-3 py-3">Bid</th>
+                        <th className="px-3 py-3">Ask</th>
+                        <th className="px-3 py-3 text-center">Ask Size</th>
+                        <th className="px-3 py-3">Last</th>
+                        <th className="px-3 py-3">Change</th>
+                        <th className="px-3 py-3">Change %</th>
+                        <th className="px-3 py-3">Trend</th>
+                      </tr>
+                    </thead>
+                    <tbody className="whitespace-nowrap">
+                      {tableRows.map((row) => {
+                        const isSelected = row.symbol === selectedSymbol;
+                        const hasDelta = row.change !== null && !Number.isNaN(row.change);
+                        const positive = hasDelta ? (row.change as number) >= 0 : false;
+                        const colorClass = hasDelta ? (positive ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400';
+                        return (
+                          <tr
+                            key={row.symbol}
+                            className={`cursor-pointer ${isSelected ? 'bg-slate-800/20' : ''} hover:bg-slate-800/20`}
+                            onClick={() => setSelectedSymbol(row.symbol)}
+                          >
+                            <td className="px-3 py-3 font-semibold text-slate-100">{row.symbol}</td>
+                            <td className="px-3 py-3 text-slate-200">{row.name}</td>
+                            <td className="px-3 py-3 text-center text-slate-200">{row.bidSize ?? '—'}</td>
+                            <td className="px-3 py-3 text-slate-200">{formatNumber(row.bid)}</td>
+                            <td className="px-3 py-3 text-slate-200">{formatNumber(row.ask)}</td>
+                            <td className="px-3 py-3 text-center text-slate-200">{row.askSize ?? '—'}</td>
+                            <td className={`px-3 py-3 font-semibold ${colorClass}`}>{formatNumber(row.last)}</td>
+                            <td className={`px-3 py-3 ${colorClass}`}>{formatChange(row.change)}</td>
+                            <td className={`px-3 py-3 ${colorClass}`}>{formatPercent(row.changePct)}</td>
+                            <td className="px-3 py-3">
+                              <TrendArrow positive={hasDelta ? positive : true} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!tableRows.length && !isLoadingWatchlist && (
+                        <tr>
+                          <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
+                            No watchlist rows. Use the (+) action on a company page to add one.
+                          </td>
+                        </tr>
                       )}
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    {focusOptions.map(option => (
-                      <button
-                        key={option.value}
-                        onClick={() => setFocusFilter(option.value)}
-                        className={classNames(
-                          'rounded-full px-3 py-1.5 text-sm font-medium transition border',
-                          focusFilter === option.value
-                            ? isDarkMode
-                              ? 'bg-emerald-500 text-emerald-950 border-emerald-400'
-                              : 'bg-emerald-600 text-white border-emerald-500'
-                            : isDarkMode
-                              ? 'bg-slate-900 text-slate-200 border-slate-700 hover:border-slate-500'
-                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
-                        )}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </div>
+                    </tbody>
+                  </table>
                 </div>
               </div>
-
-              <div className="p-6">
-                {watchlistError ? (
-                  <div className={classNames(
-                    'flex flex-col items-start gap-3 rounded-xl border px-4 py-3',
-                    isDarkMode ? 'border-red-700/50 bg-red-950/40 text-red-200' : 'border-red-200 bg-red-50 text-red-800'
-                  )}>
-                    <div className="flex items-center gap-2 text-sm font-semibold">
-                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M5.1 19h13.8c1.3 0 2.1-1.4 1.5-2.5L13.5 5.5c-.6-1.1-2.4-1.1-3 0L3.6 16.5c-.6 1.1.2 2.5 1.5 2.5z" />
-                      </svg>
-                      Unable to load watchlist
-                    </div>
-                    <p className={classNames('text-sm', isDarkMode ? 'text-red-100/80' : 'text-red-700')}>{watchlistError}</p>
-                    <button
-                      onClick={loadWatchlist}
-                      className={classNames(
-                        'rounded-md px-3 py-1.5 text-sm font-medium',
-                        isDarkMode ? 'bg-red-500 text-red-950 hover:bg-red-400' : 'bg-red-600 text-white hover:bg-red-500'
-                      )}
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ) : isLoadingWatchlist ? (
-                  <div className={classNames(
-                    'flex items-center gap-3 rounded-xl border px-4 py-3 text-sm',
-                    isDarkMode ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700'
-                  )}>
-                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                      <path className="opacity-80" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Loading watchlist...
-                  </div>
-                ) : hasData ? (
-                  <WatchlistTable rows={visibleRows} />
-                ) : (
-                  <div className={classNames(
-                    'flex flex-col items-start gap-3 rounded-xl border px-4 py-3 text-sm',
-                    isDarkMode ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700'
-                  )}>
-                    <div className="flex items-center gap-2 font-semibold">
-                      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2" />
-                        <circle cx="12" cy="12" r="9" />
-                      </svg>
-                      No watchlist rows yet
-                    </div>
-                    <p>Use the (+) action on a company page after running analysis to populate this view.</p>
-                  </div>
-                )}
-              </div>
-            </div>
+            )}
           </div>
 
-          {/* Sidebar */}
-          <div className="space-y-6">
-            <div className={classNames('rounded-2xl p-5', cardSurface)}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className={classNames('text-xs uppercase tracking-wide', isDarkMode ? 'text-slate-400' : 'text-slate-500')}>Alerts</p>
-                  <h3 className={classNames('text-lg font-semibold', isDarkMode ? 'text-white' : 'text-slate-900')}>Recent fires</h3>
-                </div>
-                <button
-                  onClick={loadAlerts}
-                  disabled={alertsLoading}
-                  className={classNames(
-                    'rounded-full px-3 py-1.5 text-xs font-semibold transition',
-                    isDarkMode
-                      ? 'bg-white/10 text-white hover:bg-white/20 disabled:opacity-50'
-                      : 'bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-50'
-                  )}
-                >
-                  {alertsLoading ? 'Refreshing' : 'Refresh'}
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                {firedAlerts.length === 0 ? (
-                  <div className={classNames(
-                    'rounded-xl border px-3 py-3 text-sm',
-                    isDarkMode ? 'border-slate-800 bg-slate-900 text-slate-200' : 'border-slate-200 bg-slate-50 text-slate-700'
-                  )}>
-                    {alertsLoading ? 'Loading alerts...' : 'No alerts fired in the past 7 days.'}
-                  </div>
-                ) : (
-                  firedAlerts.slice(0, 5).map((alert) => (
-                    <div
-                      key={`${alert.symbol}-${alert.fired_at}`}
-                      className={classNames(
-                        'rounded-xl border px-3 py-3',
-                        isDarkMode ? 'border-amber-500/30 bg-amber-500/5' : 'border-amber-200 bg-amber-50'
-                      )}
-                    >
-                      <div className="flex items-center justify-between text-sm font-semibold">
-                        <span className={isDarkMode ? 'text-amber-100' : 'text-amber-800'}>{alert.symbol}</span>
-                        <span className={classNames('text-xs', isDarkMode ? 'text-amber-200/70' : 'text-amber-700')}>
-                          {new Date(alert.fired_at).toLocaleString()}
-                        </span>
-                      </div>
-                      <p className={classNames('mt-1 text-xs', isDarkMode ? 'text-amber-50/90' : 'text-amber-700')}>
-                        {alert.reason === 'threshold' ? 'Threshold exceeded' : 'Review date reached'}
-                      </p>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            <div className={classNames('rounded-2xl p-5', mutedSurface)}>
-              <p className={classNames('text-xs uppercase tracking-wide font-semibold', isDarkMode ? 'text-slate-300' : 'text-slate-600')}>
-                Playbook
-              </p>
-              <h3 className={classNames('mt-1 text-lg font-semibold', isDarkMode ? 'text-white' : 'text-slate-900')}>
-                Keep the list fresh
-              </h3>
-              <ul className={classNames('mt-3 space-y-2 text-sm', isDarkMode ? 'text-slate-200' : 'text-slate-700')}>
-                <li>• Run a full analysis, then use the (+) action on the company header to save it here.</li>
-                <li>• Re-run refresh daily to rebuild the watchlist with the latest forecasts.</li>
-                <li>• Use the focus filters to triage momentum moves and incomplete coverage.</li>
-              </ul>
-            </div>
+          {/* Detail panel and alerts */}
+          <div className="flex flex-col gap-4">
+            <DetailPanel row={selectedRow} company={selectedRow ? companyMap[selectedRow.symbol] : undefined} />
           </div>
-        </section>
+        </div>
       </div>
     </main>
-  );
-}
-
-function StatCard({ label, value, helper, tone, isDarkMode }: { label: string; value: number; helper: string; tone: 'emerald' | 'cyan' | 'amber' | 'slate'; isDarkMode: boolean; }) {
-  const toneMap = {
-    emerald: {
-      text: isDarkMode ? 'text-emerald-200' : 'text-emerald-700',
-      badge: isDarkMode ? 'bg-emerald-500/10 text-emerald-100 ring-1 ring-emerald-400/40' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100'
-    },
-    cyan: {
-      text: isDarkMode ? 'text-cyan-200' : 'text-cyan-700',
-      badge: isDarkMode ? 'bg-cyan-500/10 text-cyan-100 ring-1 ring-cyan-400/40' : 'bg-cyan-50 text-cyan-700 ring-1 ring-cyan-100'
-    },
-    amber: {
-      text: isDarkMode ? 'text-amber-200' : 'text-amber-700',
-      badge: isDarkMode ? 'bg-amber-500/10 text-amber-100 ring-1 ring-amber-400/40' : 'bg-amber-50 text-amber-700 ring-1 ring-amber-100'
-    },
-    slate: {
-      text: isDarkMode ? 'text-slate-200' : 'text-slate-700',
-      badge: isDarkMode ? 'bg-slate-500/10 text-slate-100 ring-1 ring-slate-400/40' : 'bg-slate-50 text-slate-700 ring-1 ring-slate-200'
-    },
-  } as const;
-
-  const toneClasses = toneMap[tone];
-
-  return (
-    <div className={classNames(
-      'rounded-2xl p-4 ring-1',
-      isDarkMode ? 'bg-white/5 ring-white/10' : 'bg-white ring-slate-200 shadow-sm'
-    )}>
-      <p className={classNames('text-xs uppercase tracking-wide font-semibold', isDarkMode ? 'text-slate-400' : 'text-slate-500')}>{label}</p>
-      <div className="mt-2 flex items-baseline gap-2">
-        <span className={classNames('text-3xl font-semibold', isDarkMode ? 'text-white' : 'text-slate-900')}>{value}</span>
-        <span className={classNames('text-xs rounded-full px-2 py-0.5 font-medium', toneClasses.badge)}>{helper}</span>
-      </div>
-      <div className={classNames('mt-1 text-xs', toneClasses.text)}>Live</div>
-    </div>
   );
 }
