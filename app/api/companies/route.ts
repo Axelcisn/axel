@@ -4,6 +4,12 @@ import path from 'path';
 import { saveCompany, getCompany, getAllCompanies } from '@/lib/storage/companyStore';
 import { CompanyInfo } from '@/lib/types/company';
 
+const normalizeExchange = (exchange?: string | null) => {
+  if (!exchange) return exchange || '';
+  if (exchange === 'NasdaqGS') return 'Nasdaq';
+  return exchange;
+};
+
 /**
  * Check if canonical data exists for a ticker
  */
@@ -53,6 +59,7 @@ export async function GET(request: NextRequest) {
       
       return NextResponse.json({
         ...company,
+        exchange: normalizeExchange(company.exchange),
         hasCanonical,
         hasUploads
       });
@@ -69,6 +76,7 @@ export async function GET(request: NextRequest) {
           ]);
           return {
             ...company,
+            exchange: normalizeExchange(company.exchange),
             hasCanonical,
             hasUploads
           };
@@ -101,7 +109,7 @@ export async function POST(request: NextRequest) {
     const companyInfo: CompanyInfo = {
       ticker: ticker.toUpperCase(),
       name,
-      exchange,
+      exchange: normalizeExchange(exchange),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };

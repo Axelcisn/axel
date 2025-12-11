@@ -4,8 +4,7 @@ import { fitAndForecastHar } from '../../../../lib/volatility/har';
 import { computeRangeSigma } from '../../../../lib/volatility/range';
 import { composePi } from '../../../../lib/volatility/piComposer';
 import { SigmaSource, VolParams, SigmaForecast, PiComposeInput } from '../../../../lib/volatility/types';
-import { getTargetSpec } from '../../../../lib/storage/targetSpecStore';
-import { loadCanonicalData } from '../../../../lib/storage/canonical';
+import { ensureCanonicalOrHistory } from '../../../../lib/storage/canonical';
 import { ForecastRecord, GbmEstimates } from '../../../../lib/forecast/types';
 import { saveForecast, setActiveForecast } from '../../../../lib/forecast/store';
 import { specFileFor } from '../../../../lib/paths';
@@ -18,6 +17,7 @@ import {
   type GbmInputs
 } from '../../../../lib/gbm/engine';
 import { getNthTradingCloseAfter } from '../../../../lib/calendar/service';
+import { ensureDefaultTargetSpec } from '@/lib/targets/defaultSpec';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -211,25 +211,13 @@ export async function POST(
     // Debug logging for target spec path
     console.log("TARGET_SPEC_PATH", specFileFor(symbol));
 
-    // Load target specification
-    const specRes = await getTargetSpec(symbol);
-    if (!specRes) {
-      return new Response(JSON.stringify({ error: "Target specification not found" }), { status: 400 });
-    }
-    const { h, coverage, exchange_tz } = specRes;
-
-    // Effective horizon/coverage: request override > stored target spec > defaults
-    const DEFAULT_H = 1;
-    const effectiveH = (bodyH ?? h ?? DEFAULT_H) as number;
-    const effectiveCoverage = (bodyCoverage ?? coverage ?? 0.95) as number;
-
-    // Load canonical data to get latest price and determine date_t
-    let canonicalData;
+    // Load canonical (or Yahoo fallback) data to get latest price and determine date_t
+    let canonicalDataResult;
     try {
-      canonicalData = await loadCanonicalData(symbol);
+      canonicalDataResult = await ensureCanonicalOrHistory(symbol, { minRows: 0 });
     } catch (error: any) {
       const message = error?.message || '';
-      if (message.includes('No canonical data')) {
+      if (message.includes('No canonical data') || message.includes('No data')) {
         return NextResponse.json(
           { error: `No canonical data found for ${symbol}` },
           { status: 404 }
@@ -237,6 +225,22 @@ export async function POST(
       }
       throw error;
     }
+
+    const canonicalData = canonicalDataResult.rows;
+    const canonicalMeta = canonicalDataResult.meta;
+
+    // Load or create target specification
+    const specRes = await ensureDefaultTargetSpec(symbol, {
+      h: bodyH ?? undefined,
+      coverage: bodyCoverage ?? undefined,
+      exchangeTz: canonicalMeta?.exchange_tz ?? 'America/New_York',
+    });
+    const { h, coverage, exchange_tz } = specRes;
+
+    // Effective horizon/coverage: request override > stored target spec > defaults
+    const DEFAULT_H = 1;
+    const effectiveH = (bodyH ?? h ?? DEFAULT_H) as number;
+    const effectiveCoverage = (bodyCoverage ?? coverage ?? 0.95) as number;
 
     if (!canonicalData || canonicalData.length === 0) {
       return NextResponse.json(

@@ -7,14 +7,18 @@ export interface CanonicalData {
   meta: CanonicalTableMeta;
 }
 
+function getDataRoot(): string {
+  return process.env.NODE_ENV === 'production'
+    ? '/tmp/data'
+    : path.join(process.cwd(), 'data');
+}
+
 /**
  * Load canonical data for a symbol
  */
 export async function loadCanonicalData(symbol: string): Promise<CanonicalRow[]> {
   // Use /tmp in production (Vercel), data/ in development
-  const dataRoot = process.env.NODE_ENV === 'production' 
-    ? '/tmp/data' 
-    : path.join(process.cwd(), 'data');
+  const dataRoot = getDataRoot();
   const canonicalPath = path.join(dataRoot, 'canonical', `${symbol}.json`);
   
   try {
@@ -30,7 +34,7 @@ export async function loadCanonicalData(symbol: string): Promise<CanonicalRow[]>
  * Load canonical data with metadata for a symbol
  */
 export async function loadCanonicalDataWithMeta(symbol: string): Promise<CanonicalData> {
-  const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
+  const canonicalPath = path.join(getDataRoot(), 'canonical', `${symbol}.json`);
   
   try {
     const canonicalContent = await fs.promises.readFile(canonicalPath, 'utf-8');
@@ -135,4 +139,120 @@ export async function loadCanonicalDataWithYahooSupplement(symbol: string): Prom
   }
   
   return canonicalRows;
+}
+
+/**
+ * Ensure we have a canonical-like history for a symbol by falling back to Yahoo
+ * when the canonical file is missing or too shallow. Optionally persists the
+ * merged dataset to the canonical store for reuse.
+ */
+export async function ensureCanonicalOrHistory(
+  symbol: string,
+  opts?: { minRows?: number; interval?: '1d'; persist?: boolean }
+): Promise<CanonicalData> {
+  const minRows = opts?.minRows ?? 252;
+  const interval = opts?.interval ?? '1d';
+  const persist = opts?.persist !== false;
+
+  let existing: CanonicalData | null = null;
+  try {
+    existing = await loadCanonicalDataWithMeta(symbol);
+    if (existing.rows.length >= minRows) {
+      return existing;
+    }
+  } catch {
+    existing = null;
+  }
+
+  // Helper: Check if US markets have closed (past 4:05 PM ET)
+  function isUsMarketClosed(): boolean {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const parts = formatter.formatToParts(now);
+    const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+    const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+    const totalMinutes = hour * 60 + minute;
+    return totalMinutes >= 16 * 60 + 5; // 16:05 ET
+  }
+
+  // Helper: Get today's date in YYYY-MM-DD format in US Eastern timezone
+  function getTodayET(): string {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(new Date());
+  }
+
+  // Fetch Yahoo history and merge with any existing canonical rows
+  const { fetchYahooOhlcv } = await import('@/lib/marketData/yahoo');
+  let yahooRows = await fetchYahooOhlcv(symbol, { range: 'max', interval });
+
+  // Filter out today's incomplete bar if the market hasn't closed
+  const todayET = getTodayET();
+  if (!isUsMarketClosed()) {
+    yahooRows = yahooRows.filter((row) => row.date < todayET);
+  }
+
+  // Merge existing canonical rows (if any) with Yahoo rows; Yahoo takes precedence
+  let mergedRows: CanonicalRow[] = [];
+  const dateMap = new Map<string, CanonicalRow>();
+  if (existing?.rows?.length) {
+    for (const row of existing.rows) {
+      dateMap.set(row.date, row);
+    }
+  }
+  for (const row of yahooRows) {
+    dateMap.set(row.date, row);
+  }
+  mergedRows = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Compute log returns so downstream models have them available
+  for (let i = 1; i < mergedRows.length; i++) {
+    const prev = mergedRows[i - 1];
+    const curr = mergedRows[i];
+    const prevPrice = prev.adj_close ?? prev.close;
+    const currPrice = curr.adj_close ?? curr.close;
+    if (typeof prevPrice === 'number' && typeof currPrice === 'number' && prevPrice > 0 && currPrice > 0) {
+      curr.r = Math.log(currPrice / prevPrice);
+    } else {
+      curr.r = null;
+    }
+  }
+  if (mergedRows.length > 0) {
+    mergedRows[0].r = null;
+  }
+
+  const meta: CanonicalTableMeta = {
+    symbol,
+    exchange: existing?.meta?.exchange,
+    exchange_tz: existing?.meta?.exchange_tz ?? 'America/New_York',
+    calendar_span: {
+      start: mergedRows[0]?.date ?? '',
+      end: mergedRows[mergedRows.length - 1]?.date ?? '',
+    },
+    rows: mergedRows.length,
+    missing_trading_days: existing?.meta?.missing_trading_days ?? [],
+    invalid_rows: existing?.meta?.invalid_rows ?? 0,
+    generated_at: new Date().toISOString(),
+  };
+
+  if (mergedRows.length === 0) {
+    throw new Error(`No data found for ${symbol}`);
+  }
+
+  if (persist) {
+    // Persist using the same canonical writer as uploads
+    const { saveCanonical } = await import('./fsStore');
+    await saveCanonical(symbol, { rows: mergedRows, meta });
+  }
+
+  return { rows: mergedRows, meta };
 }

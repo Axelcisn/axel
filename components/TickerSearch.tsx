@@ -11,9 +11,20 @@ interface TickerSearchProps {
   compact?: boolean;
   autoFocus?: boolean;
   variant?: 'panel' | 'default';
+  showBorder?: boolean;
+  showRecentWhenEmpty?: boolean;
 }
 
-export function TickerSearch({ initialSymbol, className, isDarkMode = true, compact = false, autoFocus = false, variant = 'default' }: TickerSearchProps) {
+export function TickerSearch({
+  initialSymbol,
+  className,
+  isDarkMode = true,
+  compact = false,
+  autoFocus = false,
+  variant = 'default',
+  showBorder = false,
+  showRecentWhenEmpty = true,
+}: TickerSearchProps) {
   const router = useRouter();
   const [value, setValue] = useState(initialSymbol ?? "");
   const [localError, setLocalError] = useState<string | null>(null);
@@ -117,13 +128,21 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
         onClick: () => submit(symbol)
       }));
 
+  const shouldShowList = showSuggestions || (showRecentWhenEmpty && visibleRecent.length > 0);
+
   if (variant === 'panel') {
+    const borderClasses = showBorder
+      ? isDarkMode
+        ? 'rounded-full border border-slate-800 bg-transparent px-4 py-3'
+        : 'rounded-full border border-gray-300 bg-transparent px-4 py-3'
+      : '';
+
     return (
       <div className="w-full">
         <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 pt-20 pb-16">
           <div className="max-w-5xl">
             <form onSubmit={handleSubmit} className="w-full">
-              <div className="flex items-center gap-3">
+              <div className={`flex items-center gap-3 ${borderClasses}`}>
                 <button
                   type="submit"
                   className="flex h-6 w-6 items-center justify-center text-slate-500 hover:text-slate-300"
@@ -146,53 +165,55 @@ export function TickerSearch({ initialSymbol, className, isDarkMode = true, comp
               )}
             </form>
 
-            <section className="mt-10">
-              <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">
-                {label}
-              </p>
+            {shouldShowList && (
+              <section className="mt-10">
+                <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">
+                  {label}
+                </p>
 
-              <div className="mt-3 space-y-1.5">
-                {showSuggestions
-                  ? listItems.map((item) => (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={item.onClick}
-                        className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
-                      >
-                        <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-                        </svg>
-                        <span className="inline-flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-full bg-slate-700/80 text-xs font-semibold text-slate-200">
-                            {item.symbol}
+                <div className="mt-3 space-y-1.5">
+                  {showSuggestions
+                    ? listItems.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={item.onClick}
+                          className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
+                        >
+                          <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+                          </svg>
+                          <span className="inline-flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded-full bg-slate-700/80 text-xs font-semibold text-slate-200">
+                              {item.symbol}
+                            </span>
+                            <span className="text-slate-300">
+                              {item.name}
+                            </span>
                           </span>
-                          <span className="text-slate-300">
-                            {item.name}
-                          </span>
-                        </span>
-                        {item.exchange && (
-                          <span className="ml-auto text-xs font-medium text-slate-500">
-                            {item.exchange}
-                          </span>
-                        )}
-                      </button>
-                    ))
-                  : visibleRecent.map((symbol) => (
-                      <button
-                        key={symbol}
-                        type="button"
-                        onClick={() => submit(symbol)}
-                        className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
-                      >
-                        <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-                        </svg>
-                        <span className="font-semibold">{symbol}</span>
-                      </button>
-                    ))}
-              </div>
-            </section>
+                          {item.exchange && (
+                            <span className="ml-auto text-xs font-medium text-slate-500">
+                              {item.exchange}
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    : visibleRecent.map((symbol) => (
+                        <button
+                          key={symbol}
+                          type="button"
+                          onClick={() => submit(symbol)}
+                          className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
+                        >
+                          <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
+                          </svg>
+                          <span className="font-semibold">{symbol}</span>
+                        </button>
+                      ))}
+                </div>
+              </section>
+            )}
           </div>
         </div>
       </div>

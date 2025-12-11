@@ -1,32 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as fs from 'fs';
-import * as path from 'path';
+import { ensureCanonicalOrHistory } from '@/lib/storage/canonical';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { symbol: string } }
 ) {
   try {
-    const symbol = params.symbol;
-    const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
-    
+    const symbol = params.symbol.toUpperCase();
+    const url = new URL(request.url);
+    const fields = url.searchParams.get('fields');
+
+    // Use ensureCanonicalOrHistory so Yahoo-only tickers still return meta
     try {
-      const content = await fs.promises.readFile(canonicalPath, 'utf-8');
-      const data = JSON.parse(content);
-      
-      // Include row count in the response
-      const meta = data.meta || {};
-      const rowCount = data.rows ? data.rows.length : 0;
-      
-      return NextResponse.json({ 
+      const canonical = await ensureCanonicalOrHistory(symbol, { minRows: 0 });
+      const meta = canonical.meta || {};
+      const rowCount = canonical.rows ? canonical.rows.length : 0;
+
+      return NextResponse.json({
         meta: {
           ...meta,
-          rows: rowCount
-        }
+          rows: rowCount,
+        },
+        ...(fields?.includes('rv_head') ? { rv_head: [] } : {}),
       });
     } catch (error) {
-      // File doesn't exist or is invalid
-      return NextResponse.json({ meta: null });
+      // File doesn't exist or no data could be fetched
+      return NextResponse.json({ meta: null, ...(fields?.includes('rv_head') ? { rv_head: [] } : {}) });
     }
   } catch (error) {
     console.error('Error reading canonical data:', error);

@@ -1204,7 +1204,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   const resolvedTargetSpec = useMemo(() => targetSpecResult || serverTargetSpec, [targetSpecResult, serverTargetSpec]);
   const persistedCoverage = typeof resolvedTargetSpec?.spec?.coverage === "number" ? resolvedTargetSpec.spec.coverage : null;
   const persistedTZ = resolvedTargetSpec?.spec?.exchange_tz ?? null;
-  const canonicalCount = useMemo(() => {
+  const historyCount = useMemo(() => {
     if (uploadResult?.counts?.canonical) return uploadResult.counts.canonical;
     if (uploadResult?.meta?.rows) return uploadResult.meta.rows;
     return 0;
@@ -1222,8 +1222,8 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       || uploadResult?.meta?.exchange_tz 
       || 'America/New_York'; // Safe default for US stocks
     const hasTZ = Boolean(effectiveTZ);
-    return isInitialized && hasValidH && hasValidCoverage && hasTZ && canonicalCount > 0;
-  }, [canonicalCount, isInitialized, h, coverage, resolvedTargetSpec, uploadResult]);
+    return isInitialized && hasValidH && hasValidCoverage && hasTZ && historyCount > 0;
+  }, [historyCount, isInitialized, h, coverage, resolvedTargetSpec, uploadResult]);
 
   const prevServerTargetSpecRef = useRef<any | null>(null);
   useEffect(() => {
@@ -2878,7 +2878,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     const effectiveTZ = currentTargetSpec?.spec?.exchange_tz 
       || uploadResult?.meta?.exchange_tz 
       || 'America/New_York'; // Safe default for US stocks
-    const currentCanonicalCount = canonicalCount;
+    const currentHistoryCount = historyCount;
     const currentRvAvailable = rvAvailable;
 
     console.log("[VOL][handler] inputs", {
@@ -2891,7 +2891,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       tickerParam,
       effectiveCoverage,
       effectiveTZ,
-      canonicalCount: currentCanonicalCount,
+      historyCount: currentHistoryCount,
     });
 
     // Coverage is valid if within acceptable range (using effective value from state or spec)
@@ -2907,7 +2907,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       : `Range-${rangeEstimator}`;
     const windowN = volModel === 'GBM' ? gbmWindow : volWindow;
     const requiredWindowN = windowN;
-    const maxFeasibleWindowN = currentCanonicalCount > 0 ? Math.min(requiredWindowN, currentCanonicalCount - 1) : 0;
+    const maxFeasibleWindowN = currentHistoryCount > 0 ? Math.min(requiredWindowN, currentHistoryCount - 1) : 0;
     let selectedModel: string | undefined;
     const emitVolResult = (result: VolForecastResult, context: string) => {
       if (process.env.NODE_ENV === "development") {
@@ -2917,7 +2917,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           model,
           selectedModel,
           effectiveWindowN,
-          canonicalCount: currentCanonicalCount,
+          historyCount: currentHistoryCount,
           rvAvailable: currentRvAvailable,
           ok: result.ok,
           reason: result.reason ?? null,
@@ -2939,7 +2939,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         volModel,
         gbmWindow,
         volWindow,
-        canonicalCount: currentCanonicalCount,
+        historyCount: currentHistoryCount,
         requiredWindowN,
         effectiveWindowN,
         model,
@@ -2949,18 +2949,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     if (volModel === 'GARCH') {
       const configWindow = requiredWindowN;
       const garchMinWindow = 500;
-      const maxFeasibleGarchWindow = Math.min(configWindow, currentCanonicalCount - 1);
+      const maxFeasibleGarchWindow = Math.min(configWindow, currentHistoryCount - 1);
       if (maxFeasibleGarchWindow < garchMinWindow) {
         if (process.env.NODE_ENV === 'development') {
           console.info("[VOL][client] garch-precheck insufficient", {
             ticker: params.ticker,
-            canonicalCount: currentCanonicalCount,
+            historyCount: currentHistoryCount,
             configWindow,
             maxFeasibleGarchWindow,
             garchMinWindow,
           });
         }
-        setVolatilityError(`Insufficient history for GARCH: need at least ${garchMinWindow} observations, have ${currentCanonicalCount}.`);
+        setVolatilityError(`Insufficient history for GARCH: need at least ${garchMinWindow} observations, have ${currentHistoryCount}.`);
         setModelAvailabilityMessage("GARCH needs roughly 600 clean daily returns; this ticker doesn't have enough data for this window. Showing GBM instead.");
         return emitVolResult({ ok: false, forecast: null, reason: "INSUFFICIENT_GARCH_DATA" }, "garch-precheck");
       }
@@ -2969,18 +2969,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     if (volModel === 'Range') {
       const configWindow = requiredWindowN;
       const rangeMinWindow = 252;
-      const maxFeasibleRangeWindow = Math.min(configWindow, currentCanonicalCount - 1);
+      const maxFeasibleRangeWindow = Math.min(configWindow, currentHistoryCount - 1);
       if (maxFeasibleRangeWindow < rangeMinWindow) {
         if (process.env.NODE_ENV === 'development') {
           console.info("[VOL][client] range-precheck insufficient", {
             ticker: params.ticker,
-            canonicalCount: currentCanonicalCount,
+            historyCount: currentHistoryCount,
             window: maxFeasibleRangeWindow,
             rangeMinWindow,
             configWindow,
           });
         }
-        setVolatilityError(`Insufficient history for Range estimator: need at least ${rangeMinWindow + 1} observations, have ${currentCanonicalCount}.`);
+        setVolatilityError(`Insufficient history for Range estimator: need at least ${rangeMinWindow + 1} observations, have ${currentHistoryCount}.`);
         setModelAvailabilityMessage("Range estimator needs more clean OHLC data for this window; try a smaller window or a different model.");
         return emitVolResult({ ok: false, forecast: null, reason: "INSUFFICIENT_RANGE_DATA" }, "range-precheck");
       }
@@ -2988,21 +2988,21 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     }
     if (volModel === 'HAR-RV') {
       const minRequiredHarObs = Math.max(effectiveWindowN + 1, 50); // need window plus one, and a modest floor for RV proxies
-      if (currentCanonicalCount < minRequiredHarObs) {
+      if (currentHistoryCount < minRequiredHarObs) {
         if (process.env.NODE_ENV === 'development') {
           console.info("[VOL][client] har-precheck insufficient", {
             ticker: params.ticker,
-            canonicalCount: currentCanonicalCount,
+            historyCount: currentHistoryCount,
             window: effectiveWindowN,
             minRequiredHarObs,
           });
         }
-        setVolatilityError(`Insufficient history for HAR-RV: need ${minRequiredHarObs} observations, have ${currentCanonicalCount}.`);
+        setVolatilityError(`Insufficient history for HAR-RV: need ${minRequiredHarObs} observations, have ${currentHistoryCount}.`);
         return emitVolResult({ ok: false, forecast: null, reason: "INSUFFICIENT_HAR_DATA" }, "har-precheck");
       }
     }
 
-    const hasData = currentCanonicalCount >= effectiveWindowN + 1;
+    const hasData = currentHistoryCount >= effectiveWindowN + 1;
     const hasTZ   = !!effectiveTZ;
     const wantsHar = volModel === "HAR-RV";
     const harAvailable = !wantsHar || currentRvAvailable;  // only true if RV exists
@@ -3012,7 +3012,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     if (!hasData) { 
       console.log("[VOL][handler] early-return", { reason: "insufficient-data" });
       const neededObs = requiredWindowN + 1;
-      setVolatilityError(`Insufficient history: need ${neededObs} observations, have ${currentCanonicalCount}.`);
+      setVolatilityError(`Insufficient history: need ${neededObs} observations, have ${currentHistoryCount}.`);
       return emitVolResult({ ok: false, forecast: null, reason: 'INSUFFICIENT_DATA' }, "insufficient-data");
     }
     if (!covOK) { 
@@ -3031,7 +3031,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       return emitVolResult({ ok: false, forecast: null }, "har-unavailable");
     }
 
-    if (!currentCanonicalCount || currentCanonicalCount <= 0) {
+    if (!currentHistoryCount || currentHistoryCount <= 0) {
       console.log("[VOL][handler] early-return", { reason: "no-canonical-data" });
       setVolatilityError('No canonical data available. Please upload price history before generating forecasts.');
       return emitVolResult({ ok: false, forecast: null, reason: 'NO_HISTORY' }, "no-canonical-data");
@@ -3272,7 +3272,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     rangeEwmaLambda,
     gbmWindow,
     gbmLambda,
-    canonicalCount,
+    historyCount,
     isInitialized,
     rvAvailable,
     serverTargetSpec,
@@ -3571,7 +3571,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         isInitialized,
         h,
         coverage,
-        canonicalCount,
+        historyCount,
       });
       return;
     }
@@ -3705,7 +3705,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     pipelineReady,
     isInitialized,
     resolvedTargetSpec,
-    canonicalCount,
+    historyCount,
     baseForecast,
     conformalState,
     // Note: activeForecast intentionally omitted - only used for debug logging, not logic
@@ -3795,7 +3795,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       hasBaseForecast: !!baseForecast,
       h,
       coverage,
-      canonicalCount,
+      historyCount,
       isInitialized
     });
 
@@ -3804,7 +3804,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         isInitialized,
         hasValidH: typeof h === "number" && h >= 1,
         hasValidCoverage: typeof coverage === "number" && coverage > 0 && coverage < 1,
-        canonicalCount,
+        historyCount,
       });
       setForecastError("Pipeline not ready - ensure historical data is loaded.");
       return;
@@ -3821,7 +3821,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     pipelineReady,
     isInitialized,
     resolvedTargetSpec,
-    canonicalCount,
+    historyCount,
     forecastStatus,
     runForecastPipeline,
     baseForecast
@@ -3958,7 +3958,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       return;
     }
 
-    const availableObs = canonicalCount;
+    const availableObs = historyCount;
     const requiredWindowForAuto = volModel === 'GBM' ? gbmWindow : volWindow;
     const maxFeasibleAutoWindow = availableObs > 0 ? Math.min(requiredWindowForAuto, availableObs - 1) : 0;
     let effectiveAutoWindowN = maxFeasibleAutoWindow;
@@ -4073,7 +4073,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     garchDf,
     rangeEwmaLambda,
     gbmWindow,
-    canonicalCount,
+    historyCount,
     params.ticker,
     // Guard dependencies
     pipelineReady,
@@ -5199,9 +5199,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         disabled={isAddingToWatchlist || isInWatchlist}
         className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
           isInWatchlist
-            ? isDarkMode
-              ? 'text-emerald-400 border border-emerald-500/40 cursor-default'
-              : 'text-emerald-600 border border-emerald-200 cursor-default'
+            ? 'bg-emerald-500 text-white border border-emerald-500 cursor-default'
             : isDarkMode
               ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed'
               : 'text-slate-600 border border-slate-200 hover:text-slate-800 disabled:opacity-40 disabled:cursor-not-allowed'

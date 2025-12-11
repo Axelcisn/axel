@@ -43,13 +43,13 @@ function formatPercent(value: number | null | undefined) {
 }
 
 function buildTableRow(row: WatchlistRow, company: CompanyMap[string], quote?: Quote | null): TableRow {
-  const bid = row.bands.L_1 ?? null;
-  const ask = row.bands.U_1 ?? null;
-  const last = quote?.price ?? ask ?? bid ?? row.forecast.T_hat_median ?? null;
-  const change = quote?.change ?? row.deviation.z_B ?? null;
-  const changePct = quote?.changePct ?? (row.deviation.pct_outside_B != null ? row.deviation.pct_outside_B * 100 : null);
-  const bidSize = row.deviation.vol_regime_pct != null ? Math.round(row.deviation.vol_regime_pct * 100) : null;
-  const askSize = row.forecast.I60 ? Math.round(row.forecast.I60[1]) : null;
+  const bid = null;
+  const ask = null;
+  const last = quote?.price ?? row.forecast.T_hat_median ?? null;
+  const change = quote?.change ?? null;
+  const changePct = quote?.changePct ?? null;
+  const bidSize = null;
+  const askSize = null;
   const trendPoints = Object.values(row.forecast.P_ge_k || {}).length
     ? Object.values(row.forecast.P_ge_k || {}).slice(0, 12).map((v) => (typeof v === 'number' ? v : 0.5))
     : defaultTrend;
@@ -154,6 +154,64 @@ export default function WatchlistPage() {
   const [companyMap, setCompanyMap] = useState<CompanyMap>({});
   const [quotes, setQuotes] = useState<QuoteMap>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const STORAGE_KEY = 'watchlist:columns';
+
+  const allColumns = [
+    { id: 'symbol', label: 'Financial Instrument' },
+    { id: 'name', label: 'Company Name' },
+    { id: 'bidSize', label: 'Bid Size' },
+    { id: 'bid', label: 'Bid' },
+    { id: 'ask', label: 'Ask' },
+    { id: 'askSize', label: 'Ask Size' },
+    { id: 'last', label: 'Last' },
+    { id: 'spread', label: 'Spread' },
+    { id: 'change', label: 'Change' },
+    { id: 'changePct', label: 'Change %' },
+    { id: 'trend', label: 'Trend' },
+  ];
+  const totalColumns = allColumns.length;
+
+  const [selectedColumns, setSelectedColumns] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return allColumns.map((c) => c.id);
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as string[];
+        if (Array.isArray(parsed) && parsed.length) return parsed;
+      }
+    } catch {
+      /* ignore */
+    }
+    return allColumns.map((c) => c.id);
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(selectedColumns));
+  }, [selectedColumns]);
+
+  const availableColumns = allColumns.filter((c) => !selectedColumns.includes(c.id));
+
+  const moveColumn = (id: string, direction: 'up' | 'down') => {
+    setSelectedColumns((prev) => {
+      const index = prev.indexOf(id);
+      if (index === -1) return prev;
+      const next = [...prev];
+      const swapWith = direction === 'up' ? index - 1 : index + 1;
+      if (swapWith < 0 || swapWith >= next.length) return prev;
+      [next[index], next[swapWith]] = [next[swapWith], next[index]];
+      return next;
+    });
+  };
+
+  const removeColumn = (id: string) => {
+    setSelectedColumns((prev) => prev.filter((c) => c !== id));
+  };
+
+  const addColumn = (id: string) => {
+    setSelectedColumns((prev) => [...prev, id]);
+  };
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -263,6 +321,40 @@ export default function WatchlistPage() {
     ? new Date(watchlistSummary.as_of).toLocaleDateString()
     : '—';
 
+  const renderCell = (row: TableRow, columnId: string) => {
+    const hasDelta = row.change !== null && !Number.isNaN(row.change);
+    const positive = hasDelta ? (row.change as number) >= 0 : false;
+    const colorClass = hasDelta ? (positive ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400';
+    const spread = row.ask != null && row.bid != null ? row.ask - row.bid : null;
+
+    switch (columnId) {
+      case 'symbol':
+        return <span className="font-semibold text-slate-100">{row.symbol}</span>;
+      case 'name':
+        return <span className="text-slate-200">{row.name}</span>;
+      case 'bidSize':
+        return <span className="text-slate-200">{row.bidSize ?? '—'}</span>;
+      case 'bid':
+        return <span className="text-slate-200">{formatNumber(row.bid)}</span>;
+      case 'ask':
+        return <span className="text-slate-200">{formatNumber(row.ask)}</span>;
+      case 'askSize':
+        return <span className="text-slate-200">{row.askSize ?? '—'}</span>;
+      case 'spread':
+        return <span className="text-slate-200">{formatNumber(spread)}</span>;
+      case 'last':
+        return <span className={`font-semibold ${colorClass}`}>{formatNumber(row.last)}</span>;
+      case 'change':
+        return <span className={colorClass}>{formatChange(row.change)}</span>;
+      case 'changePct':
+        return <span className={colorClass}>{formatPercent(row.changePct)}</span>;
+      case 'trend':
+        return <TrendArrow positive={hasDelta ? positive : true} />;
+      default:
+        return null;
+    }
+  };
+
   return (
     <main className="min-h-screen bg-transparent text-foreground">
       <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-4 space-y-3">
@@ -286,6 +378,7 @@ export default function WatchlistPage() {
             <button
               className="group relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-700/80 text-slate-200 transition hover:border-slate-400/80 hover:bg-slate-900/40 focus:outline-none focus:ring-2 focus:ring-slate-500/60"
               title="Settings"
+              onClick={() => setShowSettings(true)}
             >
               <span className="pointer-events-none absolute inset-0 rounded-full border border-slate-800/60 group-hover:border-slate-500/60" />
               <span className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-slate-900/70 to-slate-800/30 group-hover:from-slate-800/70 group-hover:to-slate-700/30" />
@@ -336,48 +429,40 @@ export default function WatchlistPage() {
                   <table className="w-full divide-y divide-slate-800 text-sm text-slate-200">
                     <thead className="bg-transparent">
                       <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 whitespace-nowrap">
-                        <th className="px-3 py-3">Financial Instrument</th>
-                        <th className="px-3 py-3">Company Name</th>
-                        <th className="px-3 py-3 text-center">Bid Size</th>
-                        <th className="px-3 py-3">Bid</th>
-                        <th className="px-3 py-3">Ask</th>
-                        <th className="px-3 py-3 text-center">Ask Size</th>
-                        <th className="px-3 py-3">Last</th>
-                        <th className="px-3 py-3">Change</th>
-                        <th className="px-3 py-3">Change %</th>
-                        <th className="px-3 py-3">Trend</th>
+                        {selectedColumns.map((colId) => {
+                          const label = allColumns.find((c) => c.id === colId)?.label ?? colId;
+                          const isCenter = colId === 'bidSize' || colId === 'askSize';
+                          return (
+                            <th key={colId} className={`px-3 py-3 ${isCenter ? 'text-center' : ''}`}>
+                              {label}
+                            </th>
+                          );
+                        })}
                       </tr>
                     </thead>
                     <tbody className="whitespace-nowrap">
                       {tableRows.map((row) => {
                         const isSelected = row.symbol === selectedSymbol;
-                        const hasDelta = row.change !== null && !Number.isNaN(row.change);
-                        const positive = hasDelta ? (row.change as number) >= 0 : false;
-                        const colorClass = hasDelta ? (positive ? 'text-emerald-400' : 'text-rose-400') : 'text-slate-400';
                         return (
                           <tr
                             key={row.symbol}
                             className={`cursor-pointer ${isSelected ? 'bg-slate-800/20' : ''} hover:bg-slate-800/20`}
                             onClick={() => setSelectedSymbol(row.symbol)}
                           >
-                            <td className="px-3 py-3 font-semibold text-slate-100">{row.symbol}</td>
-                            <td className="px-3 py-3 text-slate-200">{row.name}</td>
-                            <td className="px-3 py-3 text-center text-slate-200">{row.bidSize ?? '—'}</td>
-                            <td className="px-3 py-3 text-slate-200">{formatNumber(row.bid)}</td>
-                            <td className="px-3 py-3 text-slate-200">{formatNumber(row.ask)}</td>
-                            <td className="px-3 py-3 text-center text-slate-200">{row.askSize ?? '—'}</td>
-                            <td className={`px-3 py-3 font-semibold ${colorClass}`}>{formatNumber(row.last)}</td>
-                            <td className={`px-3 py-3 ${colorClass}`}>{formatChange(row.change)}</td>
-                            <td className={`px-3 py-3 ${colorClass}`}>{formatPercent(row.changePct)}</td>
-                            <td className="px-3 py-3">
-                              <TrendArrow positive={hasDelta ? positive : true} />
-                            </td>
+                            {selectedColumns.map((colId) => (
+                              <td
+                                key={colId}
+                                className={`px-3 py-3 ${colId === 'bidSize' || colId === 'askSize' ? 'text-center' : ''}`}
+                              >
+                                {renderCell(row, colId)}
+                              </td>
+                            ))}
                           </tr>
                         );
                       })}
                       {!tableRows.length && !isLoadingWatchlist && (
                         <tr>
-                          <td colSpan={10} className="px-4 py-6 text-center text-slate-500">
+                          <td colSpan={selectedColumns.length} className="px-4 py-6 text-center text-slate-500">
                             No watchlist rows. Use the (+) action on a company page to add one.
                           </td>
                         </tr>
@@ -395,6 +480,103 @@ export default function WatchlistPage() {
           </div>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4">
+          <div className="w-full max-w-5xl h-[640px] max-h-[85vh] overflow-hidden rounded-3xl border-2 border-slate-700/80 bg-[color:var(--background)] p-6 text-slate-100 shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between mb-4 flex-shrink-0">
+              <h2 className="text-xl font-semibold">Watchlist View Columns</h2>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="h-9 w-9 rounded-full border-2 border-slate-700/90 text-sm text-slate-200 hover:border-slate-500 hover:bg-slate-900/60"
+                aria-label="Close"
+              >
+                X
+              </button>
+            </div>
+            <div className="mb-4 space-y-2 flex-shrink-0">
+              <div className="flex items-center justify-between text-xs text-slate-300">
+                <span>Selected order</span>
+                <span className="text-slate-400">Available {availableColumns.length}</span>
+              </div>
+              <div className="w-full overflow-x-auto whitespace-nowrap rounded-lg border border-slate-800/70 bg-[#101623]/80 px-3 py-2 text-xs text-slate-200">
+                {selectedColumns.length
+                  ? selectedColumns
+                      .map((colId) => allColumns.find((c) => c.id === colId)?.label ?? colId)
+                      .join(' | ')
+                  : 'No columns selected.'}
+              </div>
+            </div>
+            <div className="grid flex-1 min-h-0 grid-cols-1 gap-4 md:grid-cols-2 overflow-hidden">
+              <div className="flex h-full min-h-0 flex-col rounded-2xl border-2 border-slate-800/80 bg-[color:var(--background-secondary)]/90 overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+                  <h3 className="text-sm font-semibold">Selected Columns</h3>
+                  <span className="text-xs text-slate-400">{selectedColumns.length} columns</span>
+                </div>
+                <div className="flex-1 divide-y divide-slate-800 overflow-y-auto px-1 pr-2">
+                  {selectedColumns.map((colId) => {
+                    const label = allColumns.find((c) => c.id === colId)?.label ?? colId;
+                    return (
+                      <div key={colId} className="flex items-center justify-between px-4 py-3 gap-2">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => removeColumn(colId)}
+                            className="h-8 w-8 rounded-full border-2 border-slate-700/90 text-base text-slate-200 hover:border-slate-500 hover:bg-slate-900/60"
+                            aria-label={`Remove ${label}`}
+                          >
+                            −
+                          </button>
+                          <span className="text-sm">{label}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => moveColumn(colId, 'up')}
+                            className="h-8 w-8 rounded-full border-2 border-slate-700/90 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-900/60"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            onClick={() => moveColumn(colId, 'down')}
+                            className="h-8 w-8 rounded-full border-2 border-slate-700/90 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-900/60"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!selectedColumns.length && (
+                    <div className="px-4 py-3 text-sm text-slate-400">No columns selected.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex h-full min-h-0 flex-col rounded-2xl border-2 border-slate-800/80 bg-[color:var(--background-secondary)]/90 overflow-hidden">
+                <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+                  <h3 className="text-sm font-semibold">Available Columns</h3>
+                  <span className="text-xs text-slate-400">{availableColumns.length} available</span>
+                </div>
+                <div className="flex-1 divide-y divide-slate-800 overflow-y-auto px-1 pr-2">
+                  {availableColumns.map((col) => (
+                    <div key={col.id} className="flex items-center justify-between px-4 py-3">
+                      <span className="text-sm text-slate-200">{col.label}</span>
+                      <button
+                        onClick={() => addColumn(col.id)}
+                        className="rounded-full border-2 border-slate-700/90 px-3 py-2 text-xs text-slate-200 hover:border-slate-500 hover:bg-slate-900/60"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ))}
+                  {!availableColumns.length && (
+                    <div className="px-4 py-3 text-sm text-slate-400">All columns are selected.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

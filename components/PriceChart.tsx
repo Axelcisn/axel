@@ -33,6 +33,10 @@ import type { AdxPoint } from "@/lib/indicators/adx";
 // Professional cool palette for EWMA overlays
 const SHORT_EWMA_COLOR = '#F22973'; // pink (updated)
 const LONG_EWMA_COLOR  = '#6366F1'; // indigo
+const EWMA_BIASED_COLOR = '#06B6D4'; // cyan for biased EWMA
+const EWMA_BIASED_MAX_COLOR = '#FACC15'; // yellow for biased max
+const EWMA_BIASED_COLOR_RGB = '6, 182, 212';
+const EWMA_BIASED_MAX_COLOR_RGB = '250, 204, 21';
 
 const makeEwmaDot = (color: string) => (props: any) => {
   const dot = AnimatedPriceDot(props);
@@ -3062,6 +3066,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Stable reference for ewma maximized state
   const ewmaIsMaximized = isMaxBaseMode || ewmaIsMaximizedFlag;
+  const ewmaBiasedBandFillId = ewmaIsMaximized ? "url(#ewmaBiasedBandFillMax)" : "url(#ewmaBiasedBandFill)";
+  const ewmaBiasedStrokeColor = ewmaIsMaximized
+    ? `rgba(${EWMA_BIASED_MAX_COLOR_RGB}, 0.4)`
+    : `rgba(${EWMA_BIASED_COLOR_RGB}, 0.3)`;
+  const ewmaBiasedLineColor = ewmaIsMaximized ? EWMA_BIASED_MAX_COLOR : EWMA_BIASED_COLOR;
+  const ewmaBiasedGlowFilter = ewmaIsMaximized ? "url(#ewmaBiasedGlowMax)" : "url(#ewmaBiasedGlow)";
 
   // === Trade Marker Types and Data ===
   type TradeMarkerType = 'entry' | 'exit' | 'pair';
@@ -3764,7 +3774,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   stopOpacity={0.25}
                 />
               </linearGradient>
-              {/* EWMA Biased band gradient fill - amber/orange for contrast */}
+              {/* EWMA Biased band gradient fill - cyan for contrast */}
               <linearGradient
                 id="ewmaBiasedBandFill"
                 x1="0"
@@ -3774,24 +3784,58 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               >
                 <stop
                   offset="0%"
-                  stopColor="#F59E0B"
+                  stopColor={EWMA_BIASED_COLOR}
                   stopOpacity={0.25}
                 />
                 <stop
                   offset="50%"
-                  stopColor="#F59E0B"
+                  stopColor={EWMA_BIASED_COLOR}
                   stopOpacity={0.15}
                 />
                 <stop
                   offset="100%"
-                  stopColor="#F59E0B"
+                  stopColor={EWMA_BIASED_COLOR}
+                  stopOpacity={0.25}
+                />
+              </linearGradient>
+              {/* EWMA Biased Max band gradient fill - fuchsia for contrast */}
+              <linearGradient
+                id="ewmaBiasedBandFillMax"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stopColor={EWMA_BIASED_MAX_COLOR}
+                  stopOpacity={0.25}
+                />
+                <stop
+                  offset="50%"
+                  stopColor={EWMA_BIASED_MAX_COLOR}
+                  stopOpacity={0.15}
+                />
+                <stop
+                  offset="100%"
+                  stopColor={EWMA_BIASED_MAX_COLOR}
                   stopOpacity={0.25}
                 />
               </linearGradient>
               {/* Glow filter for biased EWMA line */}
               <filter id="ewmaBiasedGlow" x="-50%" y="-50%" width="200%" height="200%">
                 <feGaussianBlur stdDeviation="3" result="blur"/>
-                <feFlood floodColor="#F59E0B" floodOpacity="0.4" result="color"/>
+                <feFlood floodColor={EWMA_BIASED_COLOR} floodOpacity="0.4" result="color"/>
+                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+                <feMerge>
+                  <feMergeNode in="shadow"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+              {/* Glow filter for biased EWMA line (max run) */}
+              <filter id="ewmaBiasedGlowMax" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="3" result="blur"/>
+                <feFlood floodColor={EWMA_BIASED_MAX_COLOR} floodOpacity="0.4" result="color"/>
                 <feComposite in="color" in2="blur" operator="in" result="shadow"/>
                 <feMerge>
                   <feMergeNode in="shadow"/>
@@ -4340,9 +4384,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 yAxisId="price"
                 type="monotone"
                 dataKey="ewma_biased_upper"
-                stroke={ewmaIsMaximized ? "rgba(249, 115, 22, 0.4)" : "rgba(245, 158, 11, 0.3)"}
+                stroke={ewmaBiasedStrokeColor}
                 strokeWidth={1}
-                fill="url(#ewmaBiasedBandFill)"
+                fill={ewmaBiasedBandFillId}
                 fillOpacity={1}
                 dot={false}
                 activeDot={false}
@@ -4357,7 +4401,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 yAxisId="price"
                 type="monotone"
                 dataKey="ewma_biased_lower"
-                stroke={ewmaIsMaximized ? "rgba(249, 115, 22, 0.4)" : "rgba(245, 158, 11, 0.3)"}
+                stroke={ewmaBiasedStrokeColor}
                 strokeWidth={1}
                 fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
                 fillOpacity={1}
@@ -4374,13 +4418,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 yAxisId="price"
                 type="monotone"
                 dataKey="ewma_biased_forecast"
-                stroke={ewmaIsMaximized ? "#F97316" : "#F59E0B"}
+                stroke={ewmaBiasedLineColor}
                 strokeWidth={2.5}
                 dot={false}
                 activeDot={createAnimatedEwmaBiasedDot({ isMaximized: ewmaIsMaximized })}
                 connectNulls={true}
                 isAnimationActive={false}
-                filter="url(#ewmaBiasedGlow)"
+                filter={ewmaBiasedGlowFilter}
               />
             )}
             
@@ -5227,7 +5271,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               className={`
                 px-3 py-0.5 text-xs font-medium transition-all rounded-full border
                 ${activePosition === 'long'
-                  ? 'bg-blue-500/20 text-blue-400 border-blue-400/50 shadow-[0_0_8px_rgba(59,130,246,0.4)]'
+                  ? 'bg-blue-500/20 text-blue-400 border-blue-400/50'
                   : isDarkMode
                     ? 'text-gray-400 hover:text-blue-400 hover:bg-blue-500/10 border-gray-600 hover:border-blue-400/50'
                     : 'text-gray-500 hover:text-blue-600 hover:bg-blue-50 border-gray-300 hover:border-blue-400'
@@ -5251,10 +5295,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 ${activePosition
                   ? activePosition === 'long'
                     ? isDarkMode
-                      ? 'bg-gray-800 text-blue-400 border-blue-400/40 placeholder-gray-600 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30 shadow-[0_0_6px_rgba(59,130,246,0.2)]'
+                      ? 'bg-gray-800 text-blue-400 border-blue-400/40 placeholder-gray-600 focus:border-blue-400 focus:ring-1 focus:ring-blue-400/30'
                       : 'bg-white text-blue-700 border-blue-300 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-200'
                     : isDarkMode
-                      ? 'bg-gray-800 text-red-400 border-red-400/40 placeholder-gray-600 focus:border-red-400 focus:ring-1 focus:ring-red-400/30 shadow-[0_0_6px_rgba(239,68,68,0.2)]'
+                      ? 'bg-gray-800 text-red-400 border-red-400/40 placeholder-gray-600 focus:border-red-400 focus:ring-1 focus:ring-red-400/30'
                       : 'bg-white text-red-700 border-red-300 placeholder-gray-400 focus:border-red-500 focus:ring-1 focus:ring-red-200'
                   : isDarkMode
                     ? 'bg-gray-800/50 text-gray-600 border-gray-700 cursor-not-allowed'
@@ -5270,7 +5314,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               className={`
                 px-3 py-0.5 text-xs font-medium transition-all rounded-full border
                 ${activePosition === 'short'
-                  ? 'bg-red-500/20 text-red-400 border-red-400/50 shadow-[0_0_8px_rgba(239,68,68,0.4)]'
+                  ? 'bg-red-500/20 text-red-400 border-red-400/50'
                   : isDarkMode
                     ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10 border-gray-600 hover:border-red-400/50'
                     : 'text-gray-500 hover:text-red-600 hover:bg-red-50 border-gray-300 hover:border-red-400'
@@ -6982,7 +7026,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
             {/* Section Header - no dot */}
             <div className="mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                isDarkMode ? 'text-amber-400' : 'text-amber-600'
+                isDarkMode ? 'text-cyan-300' : 'text-cyan-700'
               }`}>
                 EWMA Biased
               </span>
@@ -6993,7 +7037,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               {/* E[Price] - the forecasted price for current date (from past forecast) */}
               <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>E[Price]</span>
-                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-cyan-300' : 'text-cyan-700'}`}>
                   {data.ewma_biased_past_forecast != null ? `$${data.ewma_biased_past_forecast.toFixed(2)}` : '—'}
                 </span>
               </div>
@@ -7029,7 +7073,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               {/* Forecast - the price forecasted for Horizon (future forecast) */}
               <div className="flex justify-between gap-4">
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Forecast</span>
-                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
+                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-cyan-300' : 'text-cyan-700'}`}>
                   {data.ewma_biased_future_forecast != null ? `$${data.ewma_biased_future_forecast.toFixed(2)}` : '—'}
                 </span>
               </div>
@@ -7320,7 +7364,7 @@ const AnimatedEwmaDot = (props: any) => {
   );
 };
 
-// Custom animated dot for EWMA Biased line (amber) - smaller, refined style
+// Custom animated dot for EWMA Biased line (cyan/fuchsia) - smaller, refined style
 const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: boolean }) => {
   const DotComponent = (props: any) => {
     const { cx, cy, payload } = props;
@@ -7329,9 +7373,9 @@ const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: bo
     if (!payload || payload.ewma_biased_forecast == null) return null;
     if (cx === undefined || cy === undefined) return null;
     
-    // Orange when maximized, amber when not
-    const fillColor = isMaximized ? "#F97316" : "#F59E0B";
-    const glowColor = isMaximized ? "249, 115, 22" : "245, 158, 11";
+    // Fuchsia when maximized, cyan when not
+    const fillColor = isMaximized ? EWMA_BIASED_MAX_COLOR : EWMA_BIASED_COLOR;
+    const glowColor = isMaximized ? EWMA_BIASED_MAX_COLOR_RGB : EWMA_BIASED_COLOR_RGB;
     
     return (
       <circle

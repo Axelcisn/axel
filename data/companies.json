@@ -1,10 +1,10 @@
 {
   "AMD": {
     "ticker": "AMD",
-    "name": "Advanced Micro Devices, Inc. ",
-    "exchange": "NASDAQ",
+    "name": "Advanced Micro Devices, Inc.",
+    "exchange": "NasdaqGS",
     "createdAt": "2025-11-09T23:54:23.789Z",
-    "updatedAt": "2025-11-09T23:54:23.789Z"
+    "updatedAt": "2025-12-11T04:12:56.438Z"
   },
   "PLTR": {
     "ticker": "PLTR",
@@ -16,9 +16,9 @@
   "AAPL": {
     "ticker": "AAPL",
     "name": "Apple Inc.",
-    "exchange": "NasdaqGS",
+    "exchange": "Nasdaq",
     "createdAt": "2025-11-14T04:52:55.852Z",
-    "updatedAt": "2025-12-11T04:07:10.236Z"
+    "updatedAt": "2025-12-11T10:31:32.388Z"
   },
   "MCD": {
     "ticker": "MCD",
@@ -46,7 +46,7 @@
     "name": "The Coca-Cola Company",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T06:24:36.971Z",
-    "updatedAt": "2025-12-11T04:01:39.748Z"
+    "updatedAt": "2025-12-11T07:26:45.439Z"
   },
   "META": {
     "ticker": "META",
@@ -74,14 +74,14 @@
     "name": "JPMorgan Chase & Co.",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T10:43:35.352Z",
-    "updatedAt": "2025-12-10T18:11:35.258Z"
+    "updatedAt": "2025-12-11T04:34:08.122Z"
   },
   "UBER": {
     "ticker": "UBER",
     "name": "Uber Technologies, Inc.",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T15:17:18.762Z",
-    "updatedAt": "2025-12-10T18:01:00.302Z"
+    "updatedAt": "2025-12-11T04:53:09.134Z"
   },
   "WMT": {
     "ticker": "WMT",
@@ -100,8 +100,29 @@
   "ADBE": {
     "ticker": "ADBE",
     "name": "Adobe Inc.",
-    "exchange": "NasdaqGS",
+    "exchange": "Nasdaq",
     "createdAt": "2025-12-11T02:59:18.487Z",
-    "updatedAt": "2025-12-11T04:04:59.779Z"
+    "updatedAt": "2025-12-11T04:52:39.993Z"
+  },
+  "MA": {
+    "ticker": "MA",
+    "name": "Mastercard Incorporated",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-11T07:14:16.700Z",
+    "updatedAt": "2025-12-11T07:14:16.968Z"
+  },
+  "HD": {
+    "ticker": "HD",
+    "name": "The Home Depot, Inc.",
+    "exchange": "NYSE",
+    "createdAt": "2025-12-11T07:14:26.674Z",
+    "updatedAt": "2025-12-11T07:14:26.998Z"
+  },
+  "AMZN": {
+    "ticker": "AMZN",
+    "name": "Amazon.com, Inc.",
+    "exchange": "Nasdaq",
+    "createdAt": "2025-12-11T14:58:22.171Z",
+    "updatedAt": "2025-12-11T14:58:22.651Z"
   }
 }

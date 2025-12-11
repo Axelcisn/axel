@@ -34,6 +34,37 @@ export default function CompanyFolderPage() {
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [fileToDelete, setFileToDelete] = useState<FileInfo | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const headingColor = isDarkMode ? 'text-white' : 'text-gray-900';
+  const mutedText = isDarkMode ? 'text-slate-300' : 'text-gray-600';
+  const labelColor = isDarkMode ? 'text-slate-200' : 'text-gray-700';
+  const cardSurface = isDarkMode ? 'bg-slate-900/60 border border-slate-800' : 'bg-white border border-gray-200';
+  const gridCardSurface = isDarkMode ? 'bg-slate-900/60 border border-slate-800/80' : 'bg-white border border-gray-200';
+  const STORAGE_KEY = 'axel:memory:deleted';
+
+  const getDeletedFilesForTicker = () => {
+    if (typeof window === 'undefined') return new Set<string>();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+      return new Set(parsed[ticker] || []);
+    } catch {
+      return new Set<string>();
+    }
+  };
+
+  const persistDeletedFile = (name: string) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+      const existing = new Set(parsed[ticker] || []);
+      existing.add(name);
+      parsed[ticker] = Array.from(existing);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    } catch {
+      /* ignore */
+    }
+  };
 
   useEffect(() => {
     if (ticker) {
@@ -61,6 +92,7 @@ export default function CompanyFolderPage() {
         fetch(`/api/forecast/gbm/${ticker}`)
       ]);
 
+      const deleted = getDeletedFilesForTicker();
       const files: FileInfo[] = [];
 
       // Process canonical data
@@ -123,7 +155,8 @@ export default function CompanyFolderPage() {
         });
       }
 
-      setData({ company, files });
+      const filtered = files.filter((file) => !deleted.has(file.name));
+      setData({ company, files: filtered });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -383,13 +416,9 @@ export default function CompanyFolderPage() {
       // Simulate API call delay
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Update the file to show as deleted
-      const updatedFiles = data.files.map(file => 
-        file.name === fileToDelete.name 
-          ? { ...file, deleted: true, size: 'Deleted' }
-          : file
-      );
-      
+      // Remove the file immediately from the list after confirmation
+      const updatedFiles = data.files.filter(file => file.name !== fileToDelete.name);
+      persistDeletedFile(fileToDelete.name);
       setData({ ...data, files: updatedFiles });
       setFileToDelete(null);
       
@@ -405,11 +434,11 @@ export default function CompanyFolderPage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gray-50">
+      <main className="min-h-screen bg-background">
         <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
           <div className="text-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">Loading company folder...</p>
+            <div className={`animate-spin rounded-full h-12 w-12 border-b-2 ${isDarkMode ? 'border-blue-400' : 'border-blue-600'} mx-auto`}></div>
+            <p className={`mt-4 text-sm ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>Loading company folder...</p>
           </div>
         </div>
       </main>
@@ -418,19 +447,19 @@ export default function CompanyFolderPage() {
 
   if (error || !data) {
     return (
-      <main className="min-h-screen bg-gray-50">
+      <main className="min-h-screen bg-background">
         <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
           <div className="text-center py-12">
-            <div className="text-red-600 mb-4">
+            <div className={`${isDarkMode ? 'text-red-400' : 'text-red-600'} mb-4`}>
               <svg className="mx-auto h-12 w-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">Company Not Found</h3>
-            <p className="text-gray-600 mb-4">{error || 'Company folder not found'}</p>
+            <h3 className={`text-lg font-medium ${isDarkMode ? 'text-slate-100' : 'text-gray-900'} mb-2`}>Company Not Found</h3>
+            <p className={`mb-4 ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>{error || 'Company folder not found'}</p>
             <Link
               href="/memory"
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
+              className={`px-4 py-2 text-sm font-medium rounded-full transition ${isDarkMode ? 'bg-blue-500 text-white hover:bg-blue-400' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
             >
               Back to Memory
             </Link>
@@ -442,7 +471,7 @@ export default function CompanyFolderPage() {
 
   return (
     <main className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1400px] py-8 px-6 md:px-10">
         {/* Header with Breadcrumb */}
         <div className="mb-8">
           <nav className="flex mb-4" aria-label="Breadcrumb">
@@ -468,21 +497,21 @@ export default function CompanyFolderPage() {
 
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
-              <div className="bg-blue-100 p-3 rounded-lg">
-                <svg className="h-8 w-8 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className={`${isDarkMode ? 'bg-blue-500/10 text-blue-300' : 'bg-blue-100 text-blue-600'} p-3 rounded-lg`}>
+                <svg className="h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2-2H5a2 2 0 00-2 2v5a2 2 0 002 2z" />
                 </svg>
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900">{data.company.ticker}</h1>
-                <p className="text-gray-600">{data.company.name}</p>
-                <p className="text-sm text-gray-500">{data.company.exchange}</p>
+                <h1 className={`text-3xl font-bold ${headingColor}`}>{data.company.ticker}</h1>
+                <p className={mutedText}>{data.company.name}</p>
+                <p className={`text-sm ${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>{data.company.exchange}</p>
               </div>
             </div>
 
             <Link
               href={`/company/${ticker}/timing`}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700"
+              className={`px-4 py-2 text-sm font-medium rounded-full transition ${isDarkMode ? 'bg-blue-500 text-white hover:bg-blue-400' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
             >
               Open Analysis
             </Link>
@@ -490,55 +519,63 @@ export default function CompanyFolderPage() {
         </div>
 
         {/* File Management Controls */}
-        <div className="bg-white shadow rounded-lg mb-6">
-          <div className="p-6">
-            <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-end">
-              <div>
-                <h2 className="text-lg font-medium text-gray-900 mb-2">Folder Contents</h2>
-                <p className="text-sm text-gray-600">{sortedFiles.length} files</p>
+        <div className="mb-6">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className={`text-lg font-semibold ${headingColor}`}>Folder Contents</h2>
+              <p className={`text-sm ${mutedText}`}>{sortedFiles.length} files</p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-medium ${labelColor}`}>View</span>
+                <div className={`inline-flex h-11 items-center rounded-full border px-1 ${isDarkMode ? 'border-slate-800' : 'border-gray-300'}`}>
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={`h-9 px-4 text-sm font-semibold rounded-full transition ${
+                      viewMode === 'list'
+                        ? isDarkMode
+                          ? 'bg-blue-500 text-white shadow-sm'
+                          : 'bg-blue-600 text-white shadow-sm'
+                        : isDarkMode
+                          ? 'text-slate-200 hover:bg-slate-800'
+                          : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    List
+                  </button>
+                  <button
+                    onClick={() => setViewMode('grid')}
+                    className={`h-9 px-4 text-sm font-semibold rounded-full transition ${
+                      viewMode === 'grid'
+                        ? isDarkMode
+                          ? 'bg-blue-500 text-white shadow-sm'
+                          : 'bg-blue-600 text-white shadow-sm'
+                        : isDarkMode
+                          ? 'text-slate-200 hover:bg-slate-800'
+                          : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    Grid
+                  </button>
+                </div>
               </div>
 
-              <div className="flex gap-4">
-                {/* View Mode Toggle */}
-                <div className="flex-shrink-0">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">View</label>
-                  <div className="flex rounded-md shadow-sm">
-                    <button
-                      onClick={() => setViewMode('list')}
-                      className={`px-3 py-2 text-sm font-medium rounded-l-md border ${
-                        viewMode === 'list'
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      List
-                    </button>
-                    <button
-                      onClick={() => setViewMode('grid')}
-                      className={`px-3 py-2 text-sm font-medium rounded-r-md border-t border-r border-b ${
-                        viewMode === 'grid'
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                      }`}
-                    >
-                      Grid
-                    </button>
-                  </div>
-                </div>
-
-                {/* Sort Controls */}
-                <div className="flex-shrink-0">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Sort by</label>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => handleSort(e.target.value as 'name' | 'type' | 'lastModified')}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  >
-                    <option value="type">File Type</option>
-                    <option value="name">File Name</option>
-                    <option value="lastModified">Date Modified</option>
-                  </select>
-                </div>
+              <div className="flex items-center gap-2">
+                <span className={`text-sm font-medium ${labelColor}`}>Sort by</span>
+                <select
+                  value={sortBy}
+                  onChange={(e) => handleSort(e.target.value as 'name' | 'type' | 'lastModified')}
+                  className={`h-11 rounded-full border px-4 text-sm shadow-sm transition focus:outline-none focus:ring-2 ${
+                    isDarkMode
+                      ? 'bg-transparent border-slate-700 text-slate-100 focus:ring-slate-500'
+                      : 'bg-white border-gray-300 text-gray-900 focus:ring-blue-500'
+                  }`}
+                >
+                  <option value="type">File Type</option>
+                  <option value="name">File Name</option>
+                  <option value="lastModified">Date Modified</option>
+                </select>
               </div>
             </div>
           </div>
@@ -546,18 +583,20 @@ export default function CompanyFolderPage() {
 
         {/* File Display */}
         {sortedFiles.length === 0 ? (
-          <div className="text-center py-12 bg-white rounded-lg shadow">
-            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className={`text-center py-12 rounded-2xl ${cardSurface} ${isDarkMode ? 'text-slate-100' : 'text-gray-900'}`}>
+            <svg className={`mx-auto h-12 w-12 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
             </svg>
-            <h3 className="mt-4 text-lg font-medium text-gray-900">Empty Folder</h3>
-            <p className="mt-2 text-sm text-gray-500">
+            <h3 className="mt-4 text-lg font-medium">Empty Folder</h3>
+            <p className={`mt-2 text-sm ${mutedText}`}>
               No files found for this company. Start by running an analysis to generate data files.
             </p>
             <div className="mt-6">
               <Link
                 href={`/company/${ticker}/timing`}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                className={`inline-flex items-center px-4 py-2 text-sm font-medium rounded-full transition ${
+                  isDarkMode ? 'bg-blue-500 text-white hover:bg-blue-400' : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
               >
                 Start Analysis
               </Link>
@@ -568,9 +607,9 @@ export default function CompanyFolderPage() {
             {sortedFiles.map((file, index) => (
               <div 
                 key={index} 
-                className={`bg-white rounded-lg shadow hover:shadow-md transition-shadow p-6 ${
-                  file.deleted ? 'bg-gray-50 border-2 border-dashed border-gray-300' : ''
-                }`}
+                className={`${gridCardSurface} rounded-2xl p-6 shadow-sm transition hover:shadow-md hover:border-slate-700/80 ${
+                  file.deleted ? (isDarkMode ? 'border-dashed border-slate-700' : 'border-dashed border-gray-300') : ''
+                } ${isDarkMode ? 'text-slate-100' : 'text-gray-900'}`}
               >
                 <div className="flex items-center justify-center mb-4">
                   {file.deleted ? (
@@ -582,21 +621,21 @@ export default function CompanyFolderPage() {
                   )}
                 </div>
                 <h3 className={`text-sm font-medium text-center mb-2 truncate ${
-                  file.deleted ? 'text-gray-500' : 'text-gray-900'
+                  file.deleted ? mutedText : headingColor
                 }`} title={file.name}>
                   {file.name}
                 </h3>
                 <div className="flex justify-center mb-2">
                   <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                    file.deleted ? 'bg-gray-100 text-gray-600' : getFileTypeColor(file.type)
+                    file.deleted ? 'bg-gray-100 text-gray-600' : getFileTypeColor(file.type, isDarkMode)
                   }`}>
                     {file.deleted ? 'Deleted' : getFileTypeLabel(file.type)}
                   </span>
                 </div>
-                <p className={`text-xs text-center ${file.deleted ? 'text-gray-400' : 'text-gray-500'}`}>
+                <p className={`text-xs text-center ${file.deleted ? 'text-gray-400' : mutedText}`}>
                   {file.size}
                 </p>
-                <p className={`text-xs text-center mt-1 ${file.deleted ? 'text-gray-400' : 'text-gray-500'}`}>
+                <p className={`text-xs text-center mt-1 ${file.deleted ? 'text-gray-400' : mutedText}`}>
                   {new Date(file.lastModified).toLocaleDateString()}
                 </p>
                 
@@ -630,44 +669,48 @@ export default function CompanyFolderPage() {
             ))}
           </div>
         ) : (
-          <div className="bg-white shadow rounded-lg overflow-hidden">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+          <div className={`rounded-2xl overflow-hidden border ${isDarkMode ? 'border-slate-800/70' : 'border-gray-200'}`}>
+            <table className="min-w-full">
+              <thead className="bg-transparent">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>
                     File
                   </th>
                   <th 
                     onClick={() => handleSort('type')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                    className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer ${
+                      isDarkMode ? 'text-slate-300' : 'text-gray-600'
+                    }`}
                   >
                     Type {sortBy === 'type' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>
                     Size/Info
                   </th>
                   <th 
                     onClick={() => handleSort('lastModified')}
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-gray-700"
+                    className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider cursor-pointer ${
+                      isDarkMode ? 'text-slate-300' : 'text-gray-600'
+                    }`}
                   >
                     Last Modified {sortBy === 'lastModified' && (sortDirection === 'asc' ? '↑' : '↓')}
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>
                     Actions
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className={`px-6 py-3 text-left text-xs font-semibold uppercase tracking-wider ${isDarkMode ? 'text-slate-300' : 'text-gray-600'}`}>
                     Delete
                   </th>
                 </tr>
               </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+              <tbody className={isDarkMode ? 'divide-y divide-slate-800/70' : 'divide-y divide-gray-200'}>
                 {sortedFiles.map((file, index) => (
-                  <tr key={index} className={`hover:bg-gray-50 ${file.deleted ? 'bg-gray-50 opacity-75' : ''}`}>
+                  <tr key={index} className={`${isDarkMode ? 'hover:bg-slate-800/50' : 'hover:bg-gray-50'} ${file.deleted ? 'opacity-75' : ''} transition`}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center">
                         <div className="flex-shrink-0 h-6 w-6">
                           {file.deleted ? (
-                            <svg className="h-6 w-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className={`h-6 w-6 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
                           ) : (
@@ -675,7 +718,7 @@ export default function CompanyFolderPage() {
                           )}
                         </div>
                         <div className="ml-3">
-                          <div className={`text-sm font-medium ${file.deleted ? 'text-gray-500' : 'text-gray-900'}`}>
+                          <div className={`text-sm font-medium ${file.deleted ? mutedText : headingColor}`}>
                             {file.name}
                           </div>
                         </div>
@@ -683,39 +726,39 @@ export default function CompanyFolderPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                        file.deleted ? 'bg-gray-100 text-gray-600' : getFileTypeColor(file.type)
+                        file.deleted ? 'bg-gray-100 text-gray-600' : getFileTypeColor(file.type, isDarkMode)
                       }`}>
                         {file.deleted ? 'Deleted' : getFileTypeLabel(file.type)}
                       </span>
                     </td>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm ${file.deleted ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <td className={`px-6 py-4 whitespace-nowrap text-sm ${file.deleted ? 'text-gray-400' : mutedText}`}>
                       {file.size}
                     </td>
-                    <td className={`px-6 py-4 whitespace-nowrap text-sm ${file.deleted ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <td className={`px-6 py-4 whitespace-nowrap text-sm ${file.deleted ? 'text-gray-400' : mutedText}`}>
                       {new Date(file.lastModified).toLocaleDateString()}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {file.deleted ? (
                         <button
                           onClick={() => handleUpload(file)}
-                          className="text-green-600 hover:text-green-900 font-medium"
+                          className={`${isDarkMode ? 'text-green-300 hover:text-green-200' : 'text-green-600 hover:text-green-900'} font-medium`}
                         >
                           Upload
                         </button>
                       ) : (
                         <button
                           onClick={() => handleFileClick(file)}
-                          className="text-blue-600 hover:text-blue-900"
+                          className={isDarkMode ? 'text-blue-300 hover:text-blue-200' : 'text-blue-600 hover:text-blue-900'}
                         >
                           {file.type === 'upload' ? 'View' : 'Edit'}
                         </button>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm">
                       {!file.deleted && (
                         <button
                           onClick={() => confirmDelete(file)}
-                          className="text-red-600 hover:text-red-900 font-medium"
+                          className={isDarkMode ? 'text-red-300 hover:text-red-200 font-medium' : 'text-red-600 hover:text-red-900 font-medium'}
                         >
                           Delete
                         </button>
@@ -730,22 +773,22 @@ export default function CompanyFolderPage() {
 
         {/* Delete Confirmation Modal */}
         {fileToDelete && (
-          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-            <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm overflow-y-auto h-full w-full z-50">
+            <div className={`relative top-20 mx-auto p-5 w-96 rounded-2xl shadow-xl ${cardSurface} ${isDarkMode ? 'text-slate-100' : 'text-gray-900'}`}>
               <div className="mt-3">
                 <div className="flex items-center justify-center mb-4">
-                  <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
-                    <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className={`mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full ${isDarkMode ? 'bg-red-500/10' : 'bg-red-100'}`}>
+                    <svg className={`h-6 w-6 ${isDarkMode ? 'text-red-300' : 'text-red-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L4.35 16.5c-.77.833.192 2.5 1.732 2.5z" />
                     </svg>
                   </div>
                 </div>
                 
                 <div className="text-center">
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  <h3 className="text-lg font-medium mb-2">
                     Are you sure?
                   </h3>
-                  <p className="text-sm text-gray-500 mb-4">
+                  <p className={`text-sm mb-4 ${mutedText}`}>
                     Do you want to delete <strong>{fileToDelete.name}</strong>?
                     <br />
                     This action cannot be undone, but you can upload a new file afterwards.
@@ -756,14 +799,20 @@ export default function CompanyFolderPage() {
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
-                    className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`px-4 py-2 text-sm font-medium rounded-full transition ${
+                      isDarkMode ? 'bg-red-500 text-white hover:bg-red-400' : 'bg-red-600 text-white hover:bg-red-700'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     {deleting ? 'Deleting...' : 'Yes, Delete'}
                   </button>
                   <button
                     onClick={() => setFileToDelete(null)}
                     disabled={deleting}
-                    className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`px-4 py-2 text-sm font-medium rounded-full border transition ${
+                      isDarkMode
+                        ? 'border-slate-700 text-slate-100 hover:bg-slate-800/70'
+                        : 'border-gray-300 text-gray-700 hover:bg-gray-50'
+                    } disabled:opacity-50 disabled:cursor-not-allowed`}
                   >
                     Cancel
                   </button>
