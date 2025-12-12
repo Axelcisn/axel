@@ -424,12 +424,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
   const showTrendEwma = trendOverlays?.ewma ?? false;
-  const shortSeries = ewmaShortSeries ?? [];
-  const longSeries = ewmaLongSeries ?? [];
-  const trendShortSeries = trendEwmaShort ?? [];
-  const trendLongSeries = trendEwmaLong ?? [];
-  const momentumSeries = momentumScoreSeries ?? [];
-  const adxSeriesSafe = adxSeries ?? [];
+  const shortSeries = useMemo(() => ewmaShortSeries ?? [], [ewmaShortSeries]);
+  const longSeries = useMemo(() => ewmaLongSeries ?? [], [ewmaLongSeries]);
+  const trendShortSeries = useMemo(() => trendEwmaShort ?? [], [trendEwmaShort]);
+  const trendLongSeries = useMemo(() => trendEwmaLong ?? [], [trendEwmaLong]);
+  const momentumSeries = useMemo(() => momentumScoreSeries ?? [], [momentumScoreSeries]);
+  const adxSeriesSafe = useMemo(() => adxSeries ?? [], [adxSeries]);
   const hasEwmaShort = showTrendEwma && trendShortSeries.length > 0;
   const hasEwmaLong = showTrendEwma && trendLongSeries.length > 0;
   const shortWindowLabel = ewmaShortWindow;
@@ -613,6 +613,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       start: start ? normalizeDateString(start) : null,
       end: end ? normalizeDateString(end) : null,
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Helper to parse rows into PricePoint[]
@@ -875,7 +876,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   };
 
   // Zoom In: shrink window around hovered index (or center)
-  const zoomIn = () => {
+  const zoomIn = useCallback(() => {
     const total = fullData.length;
     if (total === 0) return;
 
@@ -911,10 +912,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     setViewStartIdx(newStart);
     setViewEndIdx(newEnd);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Zoom Out: expand window around hovered index (or center)
-  const zoomOut = () => {
+  const zoomOut = useCallback(() => {
     const total = fullData.length;
     if (total === 0) return;
 
@@ -955,12 +957,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     setViewStartIdx(newStart);
     setViewEndIdx(newEnd);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Pan left/right by ~30% of current window size
   const panStepFraction = 0.3;
 
-  const panLeft = () => {
+  const panLeft = useCallback(() => {
     const total = fullData.length;
     if (total === 0) return;
 
@@ -981,9 +984,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     setViewStartIdx(newStart);
     setViewEndIdx(newEnd);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
-  const panRight = () => {
+  const panRight = useCallback(() => {
     const total = fullData.length;
     if (total === 0) return;
 
@@ -1004,7 +1008,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     setViewStartIdx(newStart);
     setViewEndIdx(newEnd);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Reset view to base window for current range
   const resetViewWindow = () => {
@@ -1470,6 +1475,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     showTrendEwma,
     momentumMap,
     adxMap,
+    selectedRange,
   ]);
 
   const trendCrossPoints = useMemo(() => {
@@ -4758,6 +4764,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         </div>
       </div>
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     chartDataWithEquity,
     chartDataWithForecastBand,
