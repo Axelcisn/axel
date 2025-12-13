@@ -305,7 +305,12 @@ export interface SimulationRunSummary {
   lastDate: string;
 }
 
-type T212RunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
+type T212RunId =
+  | "ewma-unbiased"
+  | "ewma-biased"
+  | "ewma-biased-max"
+  | "ewma-biased-trend"
+  | "ewma-biased-max-trend";
 type BaseMode = "unbiased" | "biased" | "max";
 
 interface SimulationMode {

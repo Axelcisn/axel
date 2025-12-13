@@ -180,7 +180,7 @@ export async function buildEwmaReactionMap(
   } = config;
 
   // ───────────────────────────────────────────────────────────────────────────
-  // 1. Run EWMA walker to get z_t and dates
+  // 1. Run EWMA walker to get base dates (still neutral) for splitting
   // ───────────────────────────────────────────────────────────────────────────
   const walkerResult = await runEwmaWalker({
     symbol,
@@ -217,8 +217,52 @@ export async function buildEwmaReactionMap(
 
   // ───────────────────────────────────────────────────────────────────────────
   // 4. Load canonical prices for multi-horizon forward returns
+  //    and compute ex-ante neutral z-scores (r_t / sigma_{t-1})
   // ───────────────────────────────────────────────────────────────────────────
   const rows = await loadCanonicalDataWithYahooSupplement(symbol);
+
+  // Helper: compute neutral z per date using only past information
+  const computeNeutralZByDate = (): Map<string, number> => {
+    const valid = rows
+      .filter((r) => (r.adj_close ?? r.close) != null && (r.adj_close ?? r.close)! > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    if (valid.length < 2) return new Map();
+
+    const prices = valid.map((r) => r.adj_close ?? r.close!);
+    const returns: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      returns.push(Math.log(prices[i] / prices[i - 1]));
+    }
+
+    const initialWindow = walkerResult.params.initialWindow;
+    if (returns.length < initialWindow) return new Map();
+
+    // Start with variance based on the first (initialWindow - 1) returns
+    const baseSlice = returns.slice(0, initialWindow - 1);
+    const mean = baseSlice.reduce((s, r) => s + r, 0) / baseSlice.length;
+    let variance = baseSlice.reduce((s, r) => s + Math.pow(r - mean, 2), 0) /
+      Math.max(1, baseSlice.length - 1);
+
+    const zByDate = new Map<string, number>();
+
+    // Start at return index = initialWindow - 1 (r_{initialWindow}); bucket date = rows[index+1]
+    for (let i = initialWindow - 1; i < returns.length; i++) {
+      const sigmaPrev = Math.sqrt(variance);
+      const zNeutral = sigmaPrev > 0 ? returns[i] / sigmaPrev : 0;
+      const date = valid[i + 1]?.date;
+      if (date) {
+        zByDate.set(date, zNeutral);
+      }
+
+      // Update variance with the current return for next step (EWMA recursion)
+      variance = lambda * variance + (1 - lambda) * Math.pow(returns[i], 2);
+    }
+
+    return zByDate;
+  };
+
+  const zNeutralByDate = computeNeutralZByDate();
 
   // Build date → price map
   const priceByDate = new Map<string, number>();
@@ -240,7 +284,7 @@ export async function buildEwmaReactionMap(
   interface TrainPoint {
     date_t: string;
     date_tp1: string;      // date of t+1 (when signal is known)
-    z_t: number;           // standardizedError
+    z_neutral: number;     // r_t / sigma_{t-1} (ex-ante)
     S_t: number;
     S_tp1: number;         // price at t+1
   }
@@ -248,7 +292,7 @@ export async function buildEwmaReactionMap(
   const trainPoints: TrainPoint[] = train.map((p) => ({
     date_t: p.date_t,
     date_tp1: p.date_tp1,
-    z_t: p.standardizedError,
+    z_neutral: zNeutralByDate.get(p.date_t) ?? NaN,
     S_t: p.S_t,
     S_tp1: p.S_tp1,
   }));
@@ -273,18 +317,14 @@ export async function buildEwmaReactionMap(
   // ───────────────────────────────────────────────────────────────────────────
   // 7. For each train point, classify bucket and accumulate forward returns
   //
-  // IMPORTANT: The walker's z_t = log(S_{t+1}/S_t) / sigma_t is computed
-  // AFTER observing S_{t+1}. So the "signal" is known at end of day t+1.
-  // The true forward return should be from t+1 onward:
-  //   r_forward(h) = log(S_{t+1+h} / S_{t+1})
-  //
-  // This ensures we're measuring what happens AFTER the signal, not the
-  // return that defined the signal itself.
+  // Bucketing now uses ex-ante neutral z_t = r_t / sigma_{t-1}
+  // (computed from prices up to and including day t).
   // ───────────────────────────────────────────────────────────────────────────
 
   for (const tp of trainPoints) {
-    const { date_t, z_t, S_t, S_tp1, date_tp1 } = tp;
-    const bucketId = bucketIdForZ(z_t, zBuckets);
+    const { date_t, z_neutral, S_t, S_tp1, date_tp1 } = tp;
+    if (!Number.isFinite(z_neutral)) continue;
+    const bucketId = bucketIdForZ(z_neutral, zBuckets);
     if (!bucketId) continue; // skip if outside defined range
 
     // Get index of t+1 (the day when the signal is known)

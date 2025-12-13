@@ -30,16 +30,16 @@
   "TSLA": {
     "ticker": "TSLA",
     "name": "Tesla, Inc.",
-    "exchange": "NasdaqGS",
+    "exchange": "Nasdaq",
     "createdAt": "2025-12-10T04:12:30.516Z",
-    "updatedAt": "2025-12-10T04:13:47.178Z"
+    "updatedAt": "2025-12-12T14:58:54.264Z"
   },
   "NVDA": {
     "ticker": "NVDA",
     "name": "NVIDIA Corporation",
-    "exchange": "NasdaqGS",
+    "exchange": "Nasdaq",
     "createdAt": "2025-12-10T04:18:33.582Z",
-    "updatedAt": "2025-12-10T05:03:45.832Z"
+    "updatedAt": "2025-12-13T06:06:12.267Z"
   },
   "KO": {
     "ticker": "KO",
@@ -81,7 +81,7 @@
     "name": "Uber Technologies, Inc.",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T15:17:18.762Z",
-    "updatedAt": "2025-12-11T04:53:09.134Z"
+    "updatedAt": "2025-12-12T03:41:50.387Z"
   },
   "WMT": {
     "ticker": "WMT",

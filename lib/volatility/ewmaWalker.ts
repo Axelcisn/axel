@@ -40,6 +40,8 @@ export interface EwmaWalkerPoint {
   sigma_t: number;
   /** Standardized error: (log(S_{t+h}/S_t)) / (sigma_t * sqrt(h)) */
   standardizedError: number;
+  /** Optional bucket id used for tilt (if applicable) */
+  bucketId?: ZBucketId | null;
   /** Whether realized price is inside PI */
   insidePi: boolean;
   /** Direction correct: forecast direction matches realized */
@@ -218,6 +220,30 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
   // Precompute sqrt(h) for h-day volatility scaling
   const sqrtH = Math.sqrt(h);
 
+  // Precompute neutral z-scores z_t = r_t / sigma_{t-1} using only past info
+  const neutralZByDate = (() => {
+    const zMap = new Map<string, number>();
+    if (logReturns.length < initialWindow) return zMap;
+
+    // Variance based on first (initialWindow - 1) returns
+    const baseSlice = logReturns.slice(0, initialWindow - 1);
+    const mean = baseSlice.reduce((s, r) => s + r, 0) / baseSlice.length;
+    let variance = baseSlice.reduce((s, r) => s + Math.pow(r - mean, 2), 0) /
+      Math.max(1, baseSlice.length - 1);
+
+    // r_i corresponds to move from data[i] to data[i+1]; bucket date is data[i+1]
+    for (let i = initialWindow - 1; i < logReturns.length; i++) {
+      const sigmaPrev = Math.sqrt(variance);
+      const zNeutral = sigmaPrev > 0 ? logReturns[i] / sigmaPrev : 0;
+      const date = data[i + 1]?.date;
+      if (date) {
+        zMap.set(date, zNeutral);
+      }
+      variance = lambda * variance + (1 - lambda) * Math.pow(logReturns[i], 2);
+    }
+    return zMap;
+  })();
+
   const points: EwmaWalkerPoint[] = [];
   const piMetrics: EwmaPiMetric[] = [];
 
@@ -259,11 +285,16 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
     // Baseline drift is 0 (neutral random walk)
     let mu_t = 0;
 
-    // If we have a tiltConfig for this horizon, get bucket-specific mu
+    let bucketIdForPoint: ZBucketId | null = null;
+
+    // If we have a tiltConfig for this horizon, get bucket-specific mu using ex-ante z_t
     if (hasTilt) {
-      const bucketId = bucketIdForZ(standardizedError, DEFAULT_Z_BUCKETS);
-      if (bucketId && tiltConfig!.muByBucket[bucketId] != null) {
-        mu_t = tiltConfig!.muByBucket[bucketId]!;
+      const zNeutral = neutralZByDate.get(date_t);
+      if (Number.isFinite(zNeutral)) {
+        bucketIdForPoint = bucketIdForZ(zNeutral!, DEFAULT_Z_BUCKETS);
+      }
+      if (bucketIdForPoint && tiltConfig!.muByBucket[bucketIdForPoint] != null) {
+        mu_t = tiltConfig!.muByBucket[bucketIdForPoint]!;
       }
     }
 
@@ -294,6 +325,7 @@ export async function runEwmaWalker(params: EwmaWalkerParams): Promise<EwmaWalke
       U_tp1: U_target,
       sigma_t,
       standardizedError,
+      bucketId: bucketIdForPoint,
       insidePi,
       directionCorrect
     };
