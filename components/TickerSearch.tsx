@@ -1,36 +1,132 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useRef, useEffect, KeyboardEvent, FormEvent } from "react";
+import Link from "next/link";
+import {
+  useState,
+  useRef,
+  useEffect,
+  KeyboardEvent,
+  FormEvent,
+  useMemo,
+  useId,
+  useCallback,
+} from "react";
 import { useSymbolSearch } from "@/lib/hooks/useSymbolSearch";
+
+type Size = "sm" | "md" | "lg" | "xl";
+type Appearance = "chatgpt" | "minimal" | "tradingview" | "apple";
 
 interface TickerSearchProps {
   initialSymbol?: string;
   className?: string;
+  inputClassName?: string;
   isDarkMode?: boolean;
-  compact?: boolean;
   autoFocus?: boolean;
-  variant?: 'panel' | 'default';
+  size?: Size;
+  appearance?: Appearance;
   showBorder?: boolean;
   showRecentWhenEmpty?: boolean;
+  onSubmitSymbol?: (symbol: string) => void;
+  onRequestClose?: () => void;
+}
+
+type SearchOption = {
+  key: string;
+  symbol: string;
+  name?: string;
+  exchange?: string;
+  source: "recent" | "result";
+};
+
+const STORAGE_KEY = "axel:lastSearches";
+
+const sizeStyles: Record<
+  Size,
+  {
+    wrapper: string;
+    gap: string;
+    input: string;
+    icon: string;
+    clear: string;
+  }
+> = {
+  sm: {
+    wrapper: "h-11 px-3 rounded-xl",
+    gap: "gap-2",
+    input: "text-sm",
+    icon: "h-4 w-4",
+    clear: "h-8 w-8 text-xs",
+  },
+  md: {
+    wrapper: "h-12 px-4 rounded-xl",
+    gap: "gap-3",
+    input: "text-base",
+    icon: "h-5 w-5",
+    clear: "h-9 w-9 text-sm",
+  },
+  lg: {
+    wrapper: "h-[52px] md:h-[56px] px-5 rounded-full",
+    gap: "gap-4",
+    input: "text-base md:text-lg",
+    icon: "h-5 w-5 md:h-6 md:w-6",
+    clear: "h-10 w-10 text-base",
+  },
+  xl: {
+    wrapper: "relative py-3 rounded-none max-w-[980px] w-full",
+    gap: "gap-0",
+    input: "text-[30px] md:text-[36px] font-semibold tracking-tight leading-[1.12] pr-10 pl-9",
+    icon: "h-5 w-5 md:h-6 md:w-6",
+    clear: "h-10 w-10 text-base",
+  },
+};
+
+function highlight(text: string, query: string, isDarkMode: boolean) {
+  if (!query) return text;
+  const lower = text.toLowerCase();
+  const needle = query.toLowerCase();
+  const idx = lower.indexOf(needle);
+  if (idx === -1) return text;
+  const before = text.slice(0, idx);
+  const match = text.slice(idx, idx + query.length);
+  const after = text.slice(idx + query.length);
+  return (
+    <>
+      {before}
+      <span className={isDarkMode ? "text-white" : "text-gray-900"}>{match}</span>
+      {after}
+    </>
+  );
 }
 
 export function TickerSearch({
   initialSymbol,
   className,
+  inputClassName,
   isDarkMode = true,
-  compact = false,
   autoFocus = false,
-  variant = 'default',
+  size = "md",
+  appearance,
   showBorder = false,
   showRecentWhenEmpty = true,
+  onSubmitSymbol,
+  onRequestClose,
 }: TickerSearchProps) {
   const router = useRouter();
-  const [value, setValue] = useState(initialSymbol ?? "");
-  const [localError, setLocalError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-  const { results } = useSymbolSearch(value);
+  const blurTimeoutRef = useRef<number | null>(null);
+  const listboxId = useId();
+
+  const [value, setValue] = useState(initialSymbol ?? "");
   const [recentTickers, setRecentTickers] = useState<string[]>([]);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
+  const [isListOpen, setIsListOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState<number>(-1);
+
+  const { results, isLoading } = useSymbolSearch(value);
+
+  const resolvedAppearance: Appearance = appearance ?? (size === "lg" ? "chatgpt" : "minimal");
 
   useEffect(() => {
     if (autoFocus && inputRef.current) {
@@ -38,249 +134,570 @@ export function TickerSearch({
     }
   }, [autoFocus]);
 
-  // Load recent searches from localStorage on mount
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('axel:lastSearches');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          setRecentTickers(arr as string[]);
-        }
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const arr = JSON.parse(raw);
+      if (Array.isArray(arr)) {
+        setRecentTickers(arr as string[]);
       }
-    } catch (e) {
-      // ignore parsing/storage errors
+    } catch {
+      /* ignore */
     }
   }, []);
 
-  function submit(symbolRaw: string) {
-    const symbol = symbolRaw.trim().toUpperCase();
-    if (!symbol) {
-      setLocalError("Please enter a ticker symbol.");
+  const trimmed = value.trim();
+  const hasQuery = trimmed.length >= 2;
+
+  const recentOptions: SearchOption[] = useMemo(() => {
+    if (!showRecentWhenEmpty || recentTickers.length === 0) return [];
+    return recentTickers.slice(0, 10).map((symbol) => ({
+      key: `recent-${symbol}`,
+      symbol,
+      name: "",
+      exchange: undefined,
+      source: "recent",
+    }));
+  }, [recentTickers, showRecentWhenEmpty]);
+
+  const resultOptions: SearchOption[] = useMemo(() => {
+    if (!hasQuery) return [];
+    return results.map((r) => ({
+      key: `result-${r.symbol}`,
+      symbol: r.symbol,
+      name: r.name,
+      exchange: r.exchange,
+      source: "result",
+    }));
+  }, [results, hasQuery]);
+
+  const options = useMemo(() => [...recentOptions, ...resultOptions], [recentOptions, resultOptions]);
+
+  const quickLinks =
+    resolvedAppearance === "apple"
+      ? [
+          { href: "/analysis", label: "Analysis" },
+          { href: "/memory", label: "Memory" },
+          { href: "/watchlist", label: "Watchlist" },
+          { href: "/t212", label: "Trading212" },
+        ]
+      : [];
+
+  const shouldShowRecentSection = showRecentWhenEmpty && !hasQuery && recentOptions.length > 0;
+  const shouldShowResultsSection = hasQuery;
+  const shouldShowListbox = isListOpen && (shouldShowRecentSection || shouldShowResultsSection);
+
+  useEffect(() => {
+    if (!shouldShowListbox || options.length === 0) {
+      setActiveIndex(-1);
       return;
     }
-    setLocalError(null);
-    // Save to recent searches in localStorage (dedup & limit)
+    setActiveIndex((prev) => {
+      if (prev === -1) return 0;
+      return Math.min(prev, options.length - 1);
+    });
+  }, [options, shouldShowListbox]);
+
+  const clearBlurTimeout = () => {
+    if (blurTimeoutRef.current) {
+      clearTimeout(blurTimeoutRef.current);
+      blurTimeoutRef.current = null;
+    }
+  };
+
+  const persistRecent = useCallback((symbol: string) => {
     try {
-      const key = 'axel:lastSearches';
-      const raw = localStorage.getItem(key);
+      const raw = localStorage.getItem(STORAGE_KEY);
       let arr: string[] = raw ? JSON.parse(raw) : [];
       arr = arr.filter((s) => s !== symbol);
       arr.unshift(symbol);
       arr = arr.slice(0, 10);
-      localStorage.setItem(key, JSON.stringify(arr));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
       setRecentTickers(arr);
-    } catch (e) {
-      // ignore storage errors
+    } catch {
+      /* ignore */
     }
+  }, []);
 
-    router.push(`/company/${encodeURIComponent(symbol)}/timing`);
-  }
+  const goToSymbol = useCallback(
+    async (option: SearchOption | null, fallbackSymbol?: string) => {
+      const symbol = (option?.symbol ?? fallbackSymbol ?? "").trim().toUpperCase();
+      if (!symbol) {
+        setLocalError("Please enter a ticker symbol.");
+        return;
+      }
+      setLocalError(null);
+      persistRecent(symbol);
 
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      submit(value);
-    }
-  }
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setValue(e.target.value);
-  }
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    submit(value);
-  }
-
-  const trimmed = value.trim();
-  const hasQuery = trimmed.length >= 2;
-  const hasResults = results.length > 0;
-  const showSuggestions = hasQuery && hasResults;
-  const label = showSuggestions ? "Suggested" : "Last searched";
-  const visibleRecent = recentTickers.slice(0, 5);
-  const listItems = showSuggestions
-    ? results.map((r) => ({
-        key: r.symbol,
-        symbol: r.symbol,
-        name: r.name,
-        exchange: r.exchange,
-        onClick: async () => {
-          try {
-            await fetch('/api/companies', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ticker: r.symbol, name: r.name, exchange: r.exchange })
-            });
-          } catch (err) {
-            if (process.env.NODE_ENV === 'development') {
-              console.warn('[TickerSearch] failed to upsert company', err);
-            }
+      if (option?.source === "result") {
+        try {
+          await fetch("/api/companies", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticker: option.symbol,
+              name: option.name,
+              exchange: option.exchange,
+            }),
+          });
+        } catch (err) {
+          if (process.env.NODE_ENV === "development") {
+            console.warn("[TickerSearch] failed to upsert company", err);
           }
-          router.push(`/company/${r.symbol}/timing`);
         }
-      }))
-    : recentTickers.map((symbol) => ({
-        key: symbol,
-        symbol,
-        name: '',
-        exchange: undefined,
-        onClick: () => submit(symbol)
-      }));
+      }
 
-  const shouldShowList = showSuggestions || (showRecentWhenEmpty && visibleRecent.length > 0);
+      if (onSubmitSymbol) {
+        onSubmitSymbol(symbol);
+      } else {
+        router.push(`/company/${encodeURIComponent(symbol)}/timing`);
+      }
+      onRequestClose?.();
+    },
+    [onSubmitSymbol, onRequestClose, persistRecent, router],
+  );
 
-  if (variant === 'panel') {
-    const borderClasses = showBorder
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const option = activeIndex >= 0 ? options[activeIndex] ?? null : null;
+    void goToSymbol(option, value);
+    setIsListOpen(false);
+  };
+
+  const handleOptionSelect = (option: SearchOption) => {
+    setValue(option.symbol);
+    setIsListOpen(false);
+    setActiveIndex(-1);
+    void goToSymbol(option);
+  };
+
+  const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!shouldShowListbox || options.length === 0) {
+        setIsListOpen(true);
+        return;
+      }
+      setActiveIndex((prev) => {
+        const next = prev + 1;
+        if (next >= options.length) return 0;
+        return next;
+      });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!shouldShowListbox || options.length === 0) {
+        setIsListOpen(true);
+        return;
+      }
+      setActiveIndex((prev) => {
+        if (prev <= 0) return options.length - 1;
+        return prev - 1;
+      });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const option = activeIndex >= 0 ? options[activeIndex] ?? null : null;
+      void goToSymbol(option, value);
+      setIsListOpen(false);
+    } else if (e.key === "Escape") {
+      setIsListOpen(false);
+      setActiveIndex(-1);
+      onRequestClose?.();
+    } else if (e.key === "Tab") {
+      setIsListOpen(false);
+      setActiveIndex(-1);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setValue(e.target.value);
+    setIsListOpen(true);
+  };
+
+  const handleFocus = () => {
+    clearBlurTimeout();
+    setIsFocused(true);
+    setIsListOpen(true);
+  };
+
+  const handleBlur = () => {
+    clearBlurTimeout();
+    blurTimeoutRef.current = window.setTimeout(() => {
+      setIsFocused(false);
+      setIsListOpen(false);
+      setActiveIndex(-1);
+    }, 120);
+  };
+
+  const handleClear = () => {
+    setValue("");
+    setIsListOpen(true);
+    setActiveIndex(-1);
+  };
+
+  const styles = sizeStyles[size];
+const wrapperTone =
+  resolvedAppearance === "chatgpt"
+    ? isDarkMode
+      ? "bg-white/5 text-slate-100 border border-white/10 focus-within:ring-2 focus-within:ring-white/20 focus-within:border-white/20"
+      : "bg-white text-gray-900 border border-gray-200 focus-within:ring-2 focus-within:ring-gray-200/70 focus-within:border-gray-300"
+    : resolvedAppearance === "apple"
       ? isDarkMode
-        ? 'rounded-full border border-slate-800 bg-transparent px-4 py-3'
-        : 'rounded-full border border-gray-300 bg-transparent px-4 py-3'
-      : '';
+        ? "bg-transparent text-white"
+        : "bg-transparent text-gray-900"
+      : resolvedAppearance === "tradingview"
+        ? isDarkMode
+          ? "bg-transparent text-slate-100 border border-white/12 focus-within:ring-2 focus-within:ring-white/10 focus-within:border-white/20"
+          : "bg-transparent text-gray-900 border border-gray-300 focus-within:ring-2 focus-within:ring-gray-200/70 focus-within:border-gray-400"
+        : isDarkMode
+          ? "bg-slate-900/70 text-slate-100 border border-white/10 focus-within:ring-2 focus-within:ring-white/20 focus-within:border-white/20"
+          : "bg-white/95 text-gray-900 border border-gray-200/80 focus-within:ring-2 focus-within:ring-gray-300/60 focus-within:border-gray-300";
+  const borderOverride =
+    showBorder && resolvedAppearance === "minimal"
+      ? isDarkMode
+        ? "border-white/20"
+        : "border-gray-300"
+      : "";
+  const inputColor =
+    resolvedAppearance === "apple"
+      ? isDarkMode
+        ? "placeholder:text-white/22 text-white/78"
+        : "placeholder:text-gray-400 text-gray-900"
+      : isDarkMode
+        ? "placeholder:text-slate-500"
+        : "placeholder:text-gray-400";
+  const listboxTone =
+    resolvedAppearance === "chatgpt"
+      ? isDarkMode
+        ? "border-white/10 bg-white/[0.04] shadow-[0_20px_80px_rgba(0,0,0,0.55)]"
+        : "border-gray-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.14)]"
+      : resolvedAppearance === "apple"
+        ? isDarkMode
+          ? "border-white/10 bg-black/30 shadow-[0_12px_40px_rgba(0,0,0,0.5)]"
+          : "border-gray-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.16)]"
+      : resolvedAppearance === "tradingview"
+        ? isDarkMode
+          ? "border-white/10 bg-[#141417]/90 shadow-[0_16px_60px_rgba(0,0,0,0.65)]"
+          : "border-gray-200 bg-white shadow-[0_16px_60px_rgba(15,23,42,0.18)]"
+        : isDarkMode
+          ? "border-white/10 bg-[#0c0f16]/95 shadow-[0_18px_40px_rgba(0,0,0,0.45)]"
+          : "border-gray-200 bg-white/95 shadow-[0_18px_40px_rgba(15,23,42,0.12)]";
+  const headerColor = isDarkMode ? "text-slate-500" : "text-gray-500";
+  const optionBase = isDarkMode
+    ? "text-slate-100 hover:bg-white/10"
+    : "text-gray-900 hover:bg-gray-50";
 
-    return (
-      <div className="w-full">
-        <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 pt-20 pb-16">
-          <div className="max-w-5xl">
-            <form onSubmit={handleSubmit} className="w-full">
-              <div className={`flex items-center gap-3 ${borderClasses}`}>
-                <button
-                  type="submit"
-                  className="flex h-6 w-6 items-center justify-center text-slate-500 hover:text-slate-300"
-                >
-                  <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m21 21-4.35-4.35m0 0A7.5 7.5 0 1 0 5 5a7.5 7.5 0 0 0 11.65 11.65Z" />
-                  </svg>
-                </button>
-                <input
-                  ref={inputRef}
-                  value={value}
-                  onChange={handleChange}
-                  onKeyDown={handleKeyDown}
-                  placeholder="Search"
-                  className="flex-1 bg-transparent text-4xl md:text-5xl font-semibold tracking-tight text-slate-100 outline-none placeholder:text-slate-600"
-                />
-              </div>
-              {localError && (
-                <p className="mt-2 text-sm text-red-400">{localError}</p>
-              )}
-            </form>
+  const activeDescendant =
+    shouldShowListbox && activeIndex >= 0 && options[activeIndex]
+      ? `${listboxId}-option-${options[activeIndex].key}`
+      : undefined;
 
-            {shouldShowList && (
-              <section className="mt-10">
-                <p className="text-[10px] md:text-[11px] font-semibold uppercase tracking-[0.20em] text-slate-500">
-                  {label}
-                </p>
+  return (
+    <div className={`relative ${className ?? ""}`}>
+      <form onSubmit={handleSubmit} className="space-y-2">
+        <div
+          className={`flex w-full items-center ${styles.gap} ${styles.wrapper} ${wrapperTone} ${borderOverride} backdrop-blur transition-colors`}
+        >
+          <span className={`flex items-center justify-center text-slate-500 ${isDarkMode ? 'text-white/30' : 'text-gray-500'} ${resolvedAppearance === "apple" ? "absolute left-0 top-1/2 -translate-y-1/2" : ""}`}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              className={`${styles.icon} ${resolvedAppearance === "apple" ? "text-white/30" : ""}`}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35" />
+              <circle cx="11" cy="11" r="6" />
+            </svg>
+          </span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={handleInputChange}
+            onKeyDown={handleInputKeyDown}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
+            autoComplete="off"
+            aria-autocomplete="list"
+            aria-expanded={shouldShowListbox}
+            aria-controls={shouldShowListbox ? listboxId : undefined}
+            aria-activedescendant={activeDescendant}
+            role="combobox"
+            placeholder="Search ticker or company..."
+            className={`flex-1 bg-transparent outline-none ${styles.input} ${inputColor} ${inputClassName ?? ""}`}
+          />
+          {value && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className={`inline-flex items-center justify-center ${styles.clear} transition-colors focus-visible:outline-none ${
+                resolvedAppearance === "apple"
+                  ? "absolute right-0 top-1/2 -translate-y-1/2 text-white/35 hover:text-white/60"
+                  : isDarkMode
+                    ? "text-slate-400 hover:text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-sky-500"
+                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-sky-500"
+              }`}
+              aria-label="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {localError && (
+          <p className="text-sm text-red-400">{localError}</p>
+        )}
+      </form>
 
-                <div className="mt-3 space-y-1.5">
-                  {showSuggestions
-                    ? listItems.map((item) => (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={item.onClick}
-                          className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
-                        >
-                          <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-                          </svg>
-                          <span className="inline-flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded-full bg-slate-700/80 text-xs font-semibold text-slate-200">
-                              {item.symbol}
-                            </span>
-                            <span className="text-slate-300">
-                              {item.name}
-                            </span>
-                          </span>
-                          {item.exchange && (
-                            <span className="ml-auto text-xs font-medium text-slate-500">
-                              {item.exchange}
-                            </span>
-                          )}
-                        </button>
-                      ))
-                    : visibleRecent.map((symbol) => (
-                        <button
-                          key={symbol}
-                          type="button"
-                          onClick={() => submit(symbol)}
-                          className="flex w-full items-center gap-3 py-1.5 text-left text-sm md:text-base text-slate-200 hover:text-slate-50"
-                        >
-                          <svg className="h-4 w-4 text-slate-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 5l7 7-7 7" />
-                          </svg>
-                          <span className="font-semibold">{symbol}</span>
-                        </button>
-                      ))}
+      {resolvedAppearance === "apple" ? (
+        <div className="mt-10 grid grid-cols-1 md:grid-cols-[360px_1fr] gap-16">
+          <div className="space-y-6">
+            {!hasQuery && (
+              <div className="space-y-4 pl-[42px]">
+                <p className="mt-10 text-[12px] font-medium text-white/30">Quick Links</p>
+                <div className="mt-4 space-y-3">
+                  {quickLinks.map((link) => (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className="group flex items-center gap-3 text-[15px] text-white/75 hover:text-white/90 transition-colors"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        className="h-4 w-4 text-white/35 group-hover:translate-x-[2px] transition-transform"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                      <span>{link.label}</span>
+                    </Link>
+                  ))}
                 </div>
-              </section>
+              </div>
+            )}
+
+            {hasQuery && shouldShowListbox && (
+              <div
+                role="listbox"
+                id={listboxId}
+                aria-label="Search suggestions"
+                className="mt-2 pl-[42px] max-w-[820px] divide-y divide-white/10"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {resultOptions.map((option, idx) => {
+                  const globalIndex = recentOptions.length + idx;
+                  const isActive = activeIndex === globalIndex;
+                  const rowClass = `relative w-full flex items-center justify-between py-4 text-left cursor-pointer focus-visible:outline-none`;
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      role="option"
+                      id={`${listboxId}-option-${option.key}`}
+                      aria-selected={isActive}
+                      onMouseEnter={() => setActiveIndex(globalIndex)}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        handleOptionSelect(option);
+                      }}
+                      className={`${rowClass} group`}
+                    >
+                      {isActive && (
+                        <span className="pointer-events-none absolute left-[-12px] top-1/2 -translate-y-1/2 h-5 w-[2px] bg-white/22" />
+                      )}
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className="text-[15px] font-semibold tracking-wide text-white/80 group-hover:text-white">
+                          {highlight(option.symbol, trimmed, isDarkMode)}
+                        </span>
+                        <span className="text-[15px] text-white/50 truncate group-hover:text-white/70">
+                          {highlight(option.name || option.symbol, trimmed, isDarkMode)}
+                        </span>
+                      </div>
+                      <span className="text-[12px] tracking-[0.18em] uppercase text-white/30">
+                        {(option.exchange || "").toUpperCase()}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div className="hidden md:block" aria-hidden />
+        </div>
+      ) : shouldShowListbox && (
+        <div
+          role="listbox"
+          id={listboxId}
+          aria-label="Search suggestions"
+          className={`absolute left-0 right-0 ${resolvedAppearance === "chatgpt" ? "mt-3" : "mt-3"} ${
+            resolvedAppearance === "tradingview" ? "z-[200]" : ""
+          } max-h-80 overflow-auto rounded-2xl border ${listboxTone} backdrop-blur-xl`}
+          onMouseDown={(e) => e.preventDefault()}
+        >
+          <div
+            className={`space-y-2 ${
+              resolvedAppearance === "chatgpt"
+                ? "py-2"
+                : resolvedAppearance === "tradingview"
+                  ? "py-1"
+                  : "px-3 py-3 md:px-4 md:py-4"
+            }`}
+          >
+            {shouldShowRecentSection && (
+              <div className={`${resolvedAppearance === "chatgpt" ? "px-2" : "px-0"} space-y-1`}>
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.12em] ${headerColor}`}>
+                  Recent
+                </p>
+                <div className="space-y-1">
+                  {recentOptions.map((option, idx) => {
+                    const globalIndex = idx;
+                    const isActive = activeIndex === globalIndex;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        role="option"
+                        id={`${listboxId}-option-${option.key}`}
+                        aria-selected={isActive}
+                        onMouseEnter={() => setActiveIndex(globalIndex)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleOptionSelect(option);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                          isActive
+                            ? "bg-white/8"
+                            : "hover:bg-white/[0.05]"
+                        }`}
+                      >
+                        <span className="h-9 min-w-9 px-2 rounded-full bg-white/[0.08] border border-white/10 flex items-center justify-center text-[13px] font-semibold text-slate-100">
+                          {option.symbol}
+                        </span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-semibold text-slate-100">{option.symbol}</span>
+                          <span className="text-xs text-slate-400">Recent search</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {shouldShowResultsSection && (
+              <div className={`${resolvedAppearance === "chatgpt" ? "px-2" : resolvedAppearance === "tradingview" ? "" : "space-y-1.5"}`}>
+                {resolvedAppearance !== "chatgpt" && resolvedAppearance !== "tradingview" && (
+                  <p className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${headerColor}`}>
+                    Results
+                  </p>
+                )}
+                {isLoading && (
+                  <div className={`px-4 py-3 text-sm ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                    Loading…
+                  </div>
+                )}
+                {!isLoading && resultOptions.length === 0 && hasQuery && (
+                  <div className={`px-4 py-3 text-sm ${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>
+                    No matches found.
+                  </div>
+                )}
+                <div
+                  className={`${
+                    resolvedAppearance === "tradingview"
+                      ? "divide-y divide-white/10 max-h-[460px] overflow-y-auto tv-scroll"
+                      : "space-y-1"
+                  }`}
+                >
+                  {resultOptions.map((option, idx) => {
+                    const globalIndex = recentOptions.length + idx;
+                    const isActive = activeIndex === globalIndex;
+                    const baseRow =
+                      resolvedAppearance === "tradingview"
+                        ? `w-full grid grid-cols-[40px_88px_1fr_110px_28px] items-center gap-3 px-4 py-3 text-left transition-colors cursor-pointer focus-visible:outline-none`
+                        : `w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                            isActive ? "bg-white/[0.07]" : "hover:bg-white/[0.05]"
+                          }`;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        role="option"
+                        id={`${listboxId}-option-${option.key}`}
+                        aria-selected={isActive}
+                        onMouseEnter={() => setActiveIndex(globalIndex)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleOptionSelect(option);
+                        }}
+                        className={`${baseRow} group`}
+                      >
+                        {resolvedAppearance === "tradingview" ? (
+                          <>
+                            <span className="h-9 w-9 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center text-[12px] font-semibold text-slate-100">
+                              {(option.symbol || "?").slice(0, 1)}
+                            </span>
+                            <span className="text-sm font-semibold tracking-wide text-slate-100 uppercase">
+                              {highlight(option.symbol, trimmed, isDarkMode)}
+                            </span>
+                            <span className="text-sm text-slate-300 truncate">
+                              {highlight(option.name || option.symbol, trimmed, isDarkMode)}
+                            </span>
+                            <span className="text-xs text-slate-400 uppercase tracking-wide text-right">
+                              {(option.exchange || "").toUpperCase()}
+                            </span>
+                            <span
+                              className={`flex items-center justify-end text-slate-300 transition-opacity ${
+                                isActive ? "opacity-80" : "opacity-0 group-hover:opacity-60"
+                              }`}
+                              aria-hidden="true"
+                            >
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                className="h-4 w-4"
+                              >
+                                <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="h-9 min-w-9 px-2 rounded-full bg-white/[0.08] border border-white/10 flex items-center justify-center text-[13px] font-semibold text-slate-100">
+                              {highlight(option.symbol, trimmed, isDarkMode)}
+                            </span>
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-sm font-semibold text-slate-100">
+                                {highlight(option.name || option.symbol, trimmed, isDarkMode)}
+                              </span>
+                              {option.name && (
+                                <span className="text-xs text-slate-400 truncate">
+                                  {option.exchange ? `${option.exchange} • ` : ""}{option.name}
+                                </span>
+                              )}
+                            </div>
+                            {isActive && (
+                              <span className="ml-auto text-[11px] uppercase tracking-wide text-slate-400">
+                                Enter
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             )}
           </div>
         </div>
-      </div>
-    );
-  }
-
-  return (
-    <form
-      onSubmit={handleSubmit}
-      className={`flex items-center gap-2 text-xs ${className ?? ""}`}
-    >
-      {!compact && (
-        <label className={isDarkMode ? "text-slate-400" : "text-gray-500"}>
-          <span className="mr-2">Search ticker:</span>
-        </label>
       )}
-      <div className="flex w-full items-center gap-1"> 
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={handleKeyDown}
-          ref={inputRef}
-          placeholder={compact ? "Search ticker…" : "AAPL, MSFT, SPY…"}
-          className={`${compact ? 'w-32' : 'w-28'} ${
-            isDarkMode
-              ? "rounded-md border px-2 py-1 text-xs border-slate-700 bg-slate-900/80 text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
-              : "rounded-md border px-2 py-1 text-xs border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:border-sky-500"
-          }`}
-        />
-        <button
-          type="submit"
-          className={`rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
-            isDarkMode
-              ? "border-sky-500 bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"
-              : "border-sky-500 bg-sky-100 text-sky-700 hover:bg-sky-200"
-          }`}
-        >
-          Go
-        </button>
-      </div>
-      <div className="mt-2 w-full">
-        <div className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">
-          {label}
-        </div>
-        {listItems.length > 0 && (
-          <div className="w-full rounded-md border border-slate-700 bg-black/60 shadow-lg">
-            {listItems.map((r) => (
-              <button
-                type="button"
-                key={r.key}
-                onClick={r.onClick}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-800"
-              >
-                <span className="px-2 py-0.5 rounded-full bg-slate-700/80 text-xs font-semibold text-slate-200">
-                  {r.symbol}
-                </span>
-                <span className="flex-1 truncate text-slate-300">{r.name || '—'}</span>
-                <span className="text-xs text-slate-500">{r.exchange ?? "—"}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      {localError && !compact && (
-        <span className="ml-2 text-[11px] text-red-400">{localError}</span>
-      )}
-    </form>
+    </div>
   );
 }

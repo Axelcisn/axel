@@ -9,11 +9,10 @@ import { composePi } from '@/lib/volatility/piComposer';
 import { getNormalCritical } from '@/lib/forecast/critical';
 import { computeGbmExpectedPrice } from '@/lib/gbm/engine';
 import type { SigmaForecast } from '@/lib/volatility/types';
+import { parseSymbolsFromArgv } from './_utils/cli';
 
 const DEFAULT_SYMBOLS = ["NFLX", "NVDA", "META", "TSLA", "MCD"] as const;
-type SymbolInput = typeof DEFAULT_SYMBOLS[number];
-const cliSymbols = process.argv.slice(2);
-const SYMBOLS: string[] = cliSymbols.length > 0 ? cliSymbols : [...DEFAULT_SYMBOLS];
+const SYMBOLS: string[] = parseSymbolsFromArgv(process.argv.slice(2), [...DEFAULT_SYMBOLS]);
 
 const RANGE_MIN_WINDOW = 252;
 const DEFAULT_RANGE_WINDOW = 756;

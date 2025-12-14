@@ -11,11 +11,10 @@ import {
   computeGbmExpectedPrice,
   type GbmInputs,
 } from '@/lib/gbm/engine';
+import { parseSymbolsFromArgv } from './_utils/cli';
 
 const DEFAULT_SYMBOLS = ["MSFT", "AMZN", "JPM", "PEP", "IBM"] as const;
-type SymbolInput = typeof DEFAULT_SYMBOLS[number];
-const cliSymbols = process.argv.slice(2);
-const SYMBOLS: string[] = cliSymbols.length > 0 ? cliSymbols : [...DEFAULT_SYMBOLS];
+const SYMBOLS: string[] = parseSymbolsFromArgv(process.argv.slice(2), [...DEFAULT_SYMBOLS]);
 const WINDOW_CHOICES = [756, 504, 252] as const;
 type WindowChoice = (typeof WINDOW_CHOICES)[number];
 

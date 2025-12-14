@@ -11,11 +11,11 @@ import { composePi } from '@/lib/volatility/piComposer';
 import { getNormalCritical, getStudentTCritical } from '@/lib/forecast/critical';
 import { SigmaForecast } from '@/lib/volatility/types';
 import { computeGbmExpectedPrice } from '@/lib/gbm/engine';
+import { parseSymbolsFromArgv } from './_utils/cli';
 
 const DEFAULT_SYMBOLS = ["V", "MA", "LLY", "COST", "HD"] as const;
 type SymbolInput = typeof DEFAULT_SYMBOLS[number];
-const cliSymbols = process.argv.slice(2);
-const SYMBOLS: string[] = cliSymbols.length > 0 ? cliSymbols : [...DEFAULT_SYMBOLS];
+const SYMBOLS: string[] = parseSymbolsFromArgv(process.argv.slice(2), [...DEFAULT_SYMBOLS]);
 
 // Match production defaults: UI uses ~756 for GARCH window and variance_targeting true
 const DEFAULT_WINDOW = 756;
@@ -121,23 +121,18 @@ async function runForSymbol(symbol: string) {
         returns: returnsForFit,
       });
 
-      // Enrich diagnostics with garch_params to match composePi expectations
-      const diagnostics = {
-        ...(sigmaForecast.diagnostics || {}),
-        garch_params: {
-          omega: sigmaForecast.diagnostics?.omega,
-          alpha: sigmaForecast.diagnostics?.alpha,
-          beta: sigmaForecast.diagnostics?.beta,
-        },
-      };
-      const sigmaForecastWithParams: SigmaForecast = {
-        ...sigmaForecast,
-        diagnostics,
-      };
-
-      const df = dist === "student-t"
-        ? (diagnostics?.nu ?? DEFAULT_DF)
-        : undefined;
+      const diagnostics = (sigmaForecast.diagnostics ?? {}) as Record<string, any>;
+      const omega = diagnostics.omega ?? null;
+      const alpha = diagnostics.alpha ?? null;
+      const beta = diagnostics.beta ?? null;
+      const alpha_plus_beta =
+        diagnostics.alpha_plus_beta ??
+        (typeof alpha === "number" && typeof beta === "number" ? alpha + beta : null);
+      const uncond_var = diagnostics.unconditional_var ?? null;
+      const df =
+        dist === "student-t"
+          ? (typeof diagnostics.nu === "number" ? diagnostics.nu : DEFAULT_DF)
+          : undefined;
 
       const critical =
         dist === "student-t" && typeof df === "number" && df > 2
@@ -151,7 +146,7 @@ async function runForSymbol(symbol: string) {
         coverage,
         mu_star_used,
         S_t,
-        sigma_forecast: sigmaForecastWithParams,
+        sigma_forecast: sigmaForecast,
         critical,
         window_span: { start: validRows[Math.max(0, validRows.length - window)].date, end: date_t },
       });
@@ -174,11 +169,11 @@ async function runForSymbol(symbol: string) {
         window,
         nObs: returnsForFit.length,
         sigma_1d: sigmaForecast.sigma_1d,
-        omega: diagnostics.omega,
-        alpha: diagnostics.alpha,
-        beta: diagnostics.beta,
-        alpha_plus_beta: diagnostics.alpha_plus_beta,
-        uncond_var: diagnostics.unconditional_var,
+        omega: omega ?? "n/a",
+        alpha: alpha ?? "n/a",
+        beta: beta ?? "n/a",
+        alpha_plus_beta: alpha_plus_beta ?? "n/a",
+        uncond_var: uncond_var ?? "n/a",
         y_hat,
         L_h,
         U_h,

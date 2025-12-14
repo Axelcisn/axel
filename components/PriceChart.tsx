@@ -38,6 +38,10 @@ const EWMA_BIASED_MAX_COLOR = '#FACC15'; // yellow for biased max
 const EWMA_BIASED_COLOR_RGB = '6, 182, 212';
 const EWMA_BIASED_MAX_COLOR_RGB = '250, 204, 21';
 
+const SYNC_ID = "timing-sync";
+const CHART_MARGIN = { top: 8, right: 16, left: 16, bottom: 0 };
+const Y_AXIS_WIDTH = 56;
+
 const makeEwmaDot = (color: string) => (props: any) => {
   const dot = AnimatedPriceDot(props);
   if (!dot) return dot;
@@ -204,6 +208,7 @@ type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
 type GarchEstimator = 'Normal' | 'Student-t';
 type RangeEstimator = 'P' | 'GK' | 'RS' | 'YZ';
 export type DateRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
+export type SimCompareRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
 
 interface RecommendedModelInfo {
   volModel: VolModel;
@@ -346,6 +351,11 @@ interface PriceChartProps {
   ewmaSummary?: EwmaSummary | null;
   ewmaBiasedPath?: EwmaWalkerPathPoint[] | null;
   ewmaBiasedSummary?: EwmaSummary | null;
+  /**
+   * Optional dedicated max-config biased EWMA path (keeps baseline params untouched).
+   */
+  ewmaBiasedMaxPath?: EwmaWalkerPathPoint[] | null;
+  ewmaBiasedMaxSummary?: EwmaSummary | null;
   ewmaShortSeries?: EwmaPoint[];
   ewmaLongSeries?: EwmaPoint[];
   ewmaShortWindow?: number;
@@ -361,7 +371,9 @@ interface PriceChartProps {
   onToggleEwmaTrend?: () => void;
   onLoadEwmaUnbiased?: () => void;
   onLoadEwmaBiased?: () => void;
+  onLoadEwmaBiasedMax?: () => void;
   isLoadingEwmaBiased?: boolean;
+  isLoadingEwmaBiasedMax?: boolean;
   ewmaReactionMapDropdown?: EwmaReactionMapDropdownProps;  // Dropdown controls for (⋯) button
   horizonCoverage?: HorizonCoverageProps;
   tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
@@ -374,6 +386,11 @@ interface PriceChartProps {
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
+  simComparePreset?: SimCompareRangePreset;
+  simCompareWindow?: { start: string; end: string } | null;
+  onChangeSimComparePreset?: (p: SimCompareRangePreset) => void;
+  onChangeSimCompareCustom?: (start: string, end: string) => void;
+  onPriceViewWindowChange?: (w: { start: string; end: string }) => void;
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
@@ -397,6 +414,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   ewmaSummary,
   ewmaBiasedPath,
   ewmaBiasedSummary,
+  ewmaBiasedMaxPath,
+  ewmaBiasedMaxSummary,
   ewmaShortSeries,
   ewmaLongSeries,
   ewmaShortWindow,
@@ -412,7 +431,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onToggleEwmaTrend,
   onLoadEwmaUnbiased,
   onLoadEwmaBiased,
+  onLoadEwmaBiasedMax,
   isLoadingEwmaBiased,
+  isLoadingEwmaBiasedMax,
   ewmaReactionMapDropdown,
   horizonCoverage,
   tradeOverlays,
@@ -425,6 +446,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   trendWeight = null,
   trendWeightUpdatedAt = null,
   simulationRuns,
+  simComparePreset,
+  simCompareWindow,
+  onChangeSimComparePreset,
+  onChangeSimCompareCustom,
+  onPriceViewWindowChange,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
@@ -448,6 +474,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const ewmaIsMaximizedFlag = ewmaReactionMapDropdown?.isMaximized ?? false;
   const ewmaOnMaximize = ewmaReactionMapDropdown?.onMaximize;
   const ewmaOnReset = ewmaReactionMapDropdown?.onReset;
+  const activeEwmaBiasedPath = useMemo(() => {
+    if (simulationMode.baseMode === "max") {
+      if (ewmaBiasedMaxPath && ewmaBiasedMaxPath.length > 0) {
+        return ewmaBiasedMaxPath;
+      }
+      return ewmaBiasedPath;
+    }
+    return ewmaBiasedPath;
+  }, [simulationMode.baseMode, ewmaBiasedMaxPath, ewmaBiasedPath]);
 
   // Ensure the active EWMA path for the selected base mode is loaded
   useEffect(() => {
@@ -456,24 +491,32 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         onLoadEwmaUnbiased();
       }
     } else if (showBiasedEwma) {
-      if (!isLoadingEwmaBiased && (!ewmaBiasedPath || ewmaBiasedPath.length === 0) && onLoadEwmaBiased) {
+      const wantsMax = simulationMode.baseMode === "max";
+      if (wantsMax) {
+        if (
+          !isLoadingEwmaBiasedMax &&
+          (!ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0) &&
+          onLoadEwmaBiasedMax
+        ) {
+          onLoadEwmaBiasedMax();
+        }
+      } else if (!isLoadingEwmaBiased && (!ewmaBiasedPath || ewmaBiasedPath.length === 0) && onLoadEwmaBiased) {
         onLoadEwmaBiased();
       }
     }
-  }, [showUnbiasedEwma, showBiasedEwma, ewmaPath, ewmaBiasedPath, onLoadEwmaUnbiased, onLoadEwmaBiased, isLoadingEwmaBiased]);
-
-  // Keep EWMA reaction-map state aligned with the selected Simulation base mode
-  useEffect(() => {
-    if (simulationMode.baseMode === "max") {
-      if (ewmaHasOptimizationResults && !ewmaIsMaximizedFlag) {
-        ewmaOnMaximize?.();
-      }
-    } else {
-      if (ewmaIsMaximizedFlag) {
-        ewmaOnReset?.();
-      }
-    }
-  }, [simulationMode.baseMode, ewmaHasOptimizationResults, ewmaIsMaximizedFlag, ewmaOnMaximize, ewmaOnReset]);
+  }, [
+    showUnbiasedEwma,
+    showBiasedEwma,
+    ewmaPath,
+    ewmaBiasedPath,
+    ewmaBiasedMaxPath,
+    onLoadEwmaUnbiased,
+    onLoadEwmaBiased,
+    onLoadEwmaBiasedMax,
+    isLoadingEwmaBiased,
+    isLoadingEwmaBiasedMax,
+    simulationMode.baseMode,
+  ]);
   
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
@@ -486,10 +529,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Simulation Settings dropdown state
   const [showSimulationSettingsDropdown, setShowSimulationSettingsDropdown] = useState(false);
   const simulationSettingsDropdownRef = useRef<HTMLDivElement>(null);
+  const simRangeDropdownRef = useRef<HTMLDivElement>(null);
   const [simulationInitialEquity, setSimulationInitialEquity] = useState(5000);
   const [simulationLeverage, setSimulationLeverage] = useState(5);
   const [simulationPositionPct, setSimulationPositionPct] = useState(25);
   const [simulationBiasThreshold, setSimulationBiasThreshold] = useState(0);
+  const [showSimRangeMenu, setShowSimRangeMenu] = useState(false);
+  const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(simCompareWindow?.start ?? "");
+  const [customSimRangeEnd, setCustomSimRangeEnd] = useState<string>(simCompareWindow?.end ?? "");
   
   // Click outside to close Model settings dropdown
   useEffect(() => {
@@ -514,6 +561,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showSimulationSettingsDropdown]);
+  
+  useEffect(() => {
+    if (!showSimRangeMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (simRangeDropdownRef.current && !simRangeDropdownRef.current.contains(e.target as Node)) {
+        setShowSimRangeMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showSimRangeMenu]);
   
   // Determine whether the current overlay claims a log domain
   const overlayDomain =
@@ -582,6 +640,55 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     setViewEndIdx(null);
   }, [symbol]);
 
+  useEffect(() => {
+    if (simCompareWindow) {
+      setCustomSimRangeStart(simCompareWindow.start);
+      setCustomSimRangeEnd(simCompareWindow.end);
+    }
+  }, [simCompareWindow]);
+
+  const simRangeLabel = useMemo(
+    () => formatRangeLabel(simCompareWindow ?? null),
+    [simCompareWindow]
+  );
+  const simRangePresetLabel = useMemo(() => {
+    switch (simComparePreset) {
+      case "chart":
+        return "Range from chart";
+      case "7d":
+        return "Last 7 days";
+      case "30d":
+        return "Last 30 days";
+      case "90d":
+        return "Last 90 days";
+      case "365d":
+        return "Last 365 days";
+      case "custom":
+        return "Custom range";
+      case "all":
+      default:
+        return "Entire history";
+    }
+  }, [simComparePreset]);
+  const handleSimRangePreset = useCallback(
+    (preset: SimCompareRangePreset) => {
+      onChangeSimComparePreset?.(preset);
+      setShowSimRangeMenu(false);
+    },
+    [onChangeSimComparePreset]
+  );
+  const handleApplyCustomRange = useCallback(() => {
+    if (!customSimRangeStart || !customSimRangeEnd) return;
+    onChangeSimCompareCustom?.(customSimRangeStart, customSimRangeEnd);
+    onChangeSimComparePreset?.("custom");
+    setShowSimRangeMenu(false);
+  }, [
+    customSimRangeEnd,
+    customSimRangeStart,
+    onChangeSimCompareCustom,
+    onChangeSimComparePreset,
+  ]);
+
   // Insights tab state (TradingView-style)
   type InsightTab =
     | "Overview"
@@ -620,6 +727,33 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
+  useEffect(() => {
+    if (!simCompareWindow || fullData.length === 0) return;
+    const startIdx = fullData.findIndex((p) => p.date >= simCompareWindow.start);
+    let endIdx = -1;
+    for (let i = fullData.length - 1; i >= 0; i--) {
+      if (fullData[i].date <= simCompareWindow.end) {
+        endIdx = i;
+        break;
+      }
+    }
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+      // Only update if indices actually changed to prevent infinite loops
+      if (startIdx !== viewStartIdx || endIdx !== viewEndIdx) {
+        setViewStartIdx(startIdx);
+        setViewEndIdx(endIdx);
+      }
+    }
+  }, [fullData, simCompareWindow, viewStartIdx, viewEndIdx]);
+  const activeSimWindow = useMemo(() => {
+    const start = simCompareWindow?.start ?? priceViewWindow.start;
+    const end = simCompareWindow?.end ?? priceViewWindow.end;
+    if (!start || !end) return null;
+    return {
+      start: normalizeDateString(start),
+      end: normalizeDateString(end),
+    };
+  }, [priceViewWindow.end, priceViewWindow.start, simCompareWindow]);
 
   // Helper to parse rows into PricePoint[]
   const parseRowsToPoints = (rows: any[]): PricePoint[] => {
@@ -878,6 +1012,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     setViewStartIdx(newStart);
     setViewEndIdx(newEnd);
+    onChangeSimComparePreset?.("chart");
   };
 
   // Zoom In: shrink window around hovered index (or center)
@@ -917,6 +1052,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     setViewStartIdx(newStart);
     setViewEndIdx(newEnd);
+    onChangeSimComparePreset?.("chart");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
@@ -1157,9 +1293,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       const [start, end] = computeDefaultWindowForRange(fullData, range);
       setViewStartIdx(start);
       setViewEndIdx(end);
+      onChangeSimComparePreset?.("chart");
     } else {
       setViewStartIdx(null);
       setViewEndIdx(null);
+      onChangeSimComparePreset?.("chart");
     }
   };
 
@@ -1178,6 +1316,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       const sliced = sliceByRange(fullData, range);
       const perfResult = calculateRangePerformance(sliced);
       perfMap[range] = perfResult?.percentage ?? null;
+    }
+
+    // If a global window is provided, prefer that slice for all charts
+    if (simCompareWindow) {
+      const start = normalizeDateString(simCompareWindow.start);
+      const end = normalizeDateString(simCompareWindow.end);
+      const slice = fullData.filter((p) => p.date >= start && p.date <= end);
+      return {
+        rangeData: slice,
+        perfByRange: perfMap,
+      };
     }
 
     // Get data for selected range or explicit view window
@@ -1206,7 +1355,28 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       rangeData,
       perfByRange: perfMap,
     };
-  }, [fullData, selectedRange, zoomDays, viewStartIdx, viewEndIdx]);
+  }, [fullData, selectedRange, zoomDays, viewStartIdx, viewEndIdx, simCompareWindow]);
+
+  // Track previous window to avoid redundant callbacks that cause infinite loops
+  const prevPriceViewWindowRef = useRef<{ start: string; end: string } | null>(null);
+
+  useEffect(() => {
+    if (!onPriceViewWindowChange) return;
+    if (!rangeData || rangeData.length === 0) return;
+    if (simComparePreset !== "chart") return;
+
+    const start = rangeData[0].date;
+    const end = rangeData[rangeData.length - 1].date;
+    
+    // Only call callback if the window has actually changed
+    const prev = prevPriceViewWindowRef.current;
+    if (prev && prev.start === start && prev.end === end) {
+      return;
+    }
+    
+    prevPriceViewWindowRef.current = { start, end };
+    onPriceViewWindowChange({ start, end });
+  }, [onPriceViewWindowChange, rangeData, simComparePreset]);
 
   // Derive last date and future dates
   const lastPoint = rangeData.length > 0 ? rangeData[rangeData.length - 1] : undefined;
@@ -1569,7 +1739,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
   const chartDataWithEwma = useMemo(() => {
     const showNeutral = showUnbiasedEwma && ewmaPath && ewmaPath.length > 0;
-    const showBiased = showBiasedEwma && ewmaBiasedPath && ewmaBiasedPath.length > 0;
+    const showBiased = showBiasedEwma && activeEwmaBiasedPath && activeEwmaBiasedPath.length > 0;
     
     if (!showNeutral && !showBiased) {
       return chartData;
@@ -1628,8 +1798,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       { forecast: number; lower: number; upper: number; originDate: string; targetDate: string }
     >();
 
-    if (showBiased && ewmaBiasedPath) {
-      ewmaBiasedPath.forEach(point => {
+    if (showBiased && activeEwmaBiasedPath) {
+      activeEwmaBiasedPath.forEach(point => {
         const targetDate = normalizeDateString(point.date_tp1);
         const originDate = normalizeDateString(point.date_t);
 
@@ -1663,8 +1833,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         })).sort((a, b) => a.originDate.localeCompare(b.originDate))
       : [];
 
-    const allEwmaBiasedForecasts = showBiased && ewmaBiasedPath
-      ? ewmaBiasedPath.map(point => ({
+    const allEwmaBiasedForecasts = showBiased && activeEwmaBiasedPath
+      ? activeEwmaBiasedPath.map(point => ({
           originDate: normalizeDateString(point.date_t),
           targetDate: normalizeDateString(point.date_tp1),
           forecast: point.y_hat_tp1,
@@ -1847,7 +2017,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
 
     return result;
-  }, [chartData, ewmaPath, showUnbiasedEwma, ewmaBiasedPath, showBiasedEwma]);
+  }, [chartData, ewmaPath, showUnbiasedEwma, activeEwmaBiasedPath, showBiasedEwma]);
 
   // Find last chart points
   const lastChartPoint = chartDataWithEwma[chartDataWithEwma.length - 1];
@@ -2338,15 +2508,53 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       ? priceYDomain[1]
       : undefined;
   }, [priceYDomain]);
+  const normalizedAccountHistory = useMemo<Trading212AccountSnapshot[]>(() => {
+    const hist = t212AccountHistory ?? [];
+    return hist
+      .map((snap) => ({
+        ...snap,
+        date: normalizeDateString(snap.date ?? ""),
+        side: snap.side ?? null,
+      }))
+      .filter((snap) => snap.date)
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [t212AccountHistory]);
+  const windowedAccountHistory = useMemo(() => {
+    if (normalizedAccountHistory.length === 0) {
+      return { history: [] as Trading212AccountSnapshot[], prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+    }
+    if (!activeSimWindow) {
+      return { history: normalizedAccountHistory, prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+    }
+    const { start, end } = activeSimWindow;
+    const startIdx = normalizedAccountHistory.findIndex((snap) => snap.date >= start);
+    if (startIdx === -1) {
+      return { history: [] as Trading212AccountSnapshot[], prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+    }
+    let endIdx = normalizedAccountHistory.length - 1;
+    for (let i = normalizedAccountHistory.length - 1; i >= startIdx; i--) {
+      if (normalizedAccountHistory[i].date <= end) {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx < startIdx) {
+      return { history: [] as Trading212AccountSnapshot[], prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+    }
+    const slice = normalizedAccountHistory.slice(startIdx, endIdx + 1);
+    const prevSideBefore =
+      startIdx > 0 ? normalizedAccountHistory[startIdx - 1]?.side ?? null : null;
+    return { history: slice, prevSideBefore };
+  }, [activeSimWindow, normalizedAccountHistory]);
 
   // === Unified Chart Data with Equity ===
   const chartDataWithEquity = useMemo(() => {
-    if (!t212AccountHistory || t212AccountHistory.length === 0) {
+    if (!normalizedAccountHistory || normalizedAccountHistory.length === 0) {
       return chartDataWithForecastBand;
     }
 
     const equityMap = new Map<string, number>();
-    for (const snap of t212AccountHistory) {
+    for (const snap of normalizedAccountHistory) {
       const key = normalizeDateString(snap.date ?? "");
       if (key && typeof snap.equity === "number" && Number.isFinite(snap.equity)) {
         equityMap.set(key, snap.equity);
@@ -2370,7 +2578,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         equity: direct ?? lastEquity,
       };
     });
-  }, [chartDataWithForecastBand, t212AccountHistory]);
+  }, [chartDataWithForecastBand, normalizedAccountHistory]);
+
+  const chartDataWithEquityWindowed = useMemo(() => {
+    if (!activeSimWindow) return chartDataWithEquity;
+    const { start, end } = activeSimWindow;
+    return chartDataWithEquity.filter((pt) => pt.date && pt.date >= start && pt.date <= end);
+  }, [activeSimWindow, chartDataWithEquity]);
 
   useEffect(() => {
     const invalidCloseCount = chartData.filter(
@@ -2434,26 +2648,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Filtered equity data for Overview stats (full history when date-range dropdown is disabled)
   const filteredEquityData = useMemo(() => {
-    return chartDataWithEquity;
-  }, [chartDataWithEquity]);
+    return chartDataWithEquityWindowed;
+  }, [chartDataWithEquityWindowed]);
 
   const hoveredDate =
-    hoverIndex != null && hoverIndex >= 0 && hoverIndex < chartDataWithEquity.length
-      ? chartDataWithEquity[hoverIndex].date
+    hoverIndex != null && hoverIndex >= 0 && hoverIndex < chartDataWithEquityWindowed.length
+      ? chartDataWithEquityWindowed[hoverIndex].date
       : null;
 
   const hasEquityData = useMemo(() => {
-    return chartDataWithEquity.some((pt) => pt.equity != null);
-  }, [chartDataWithEquity]);
+    return chartDataWithEquityWindowed.some((pt) => pt.equity != null);
+  }, [chartDataWithEquityWindowed]);
 
-  // Equity deltas for histogram (uses full data for chart)
+  // Equity deltas for histogram (uses windowed data for chart)
   const equityPanelData = useMemo(() => {
-    return chartDataWithEquity.map((pt, idx) => {
-      const prev = idx > 0 ? chartDataWithEquity[idx - 1].equity : pt.equity;
+    return chartDataWithEquityWindowed.map((pt, idx) => {
+      const prev = idx > 0 ? chartDataWithEquityWindowed[idx - 1].equity : pt.equity;
       const delta = pt.equity != null && prev != null ? pt.equity - prev : null;
       return { ...pt, equityDelta: delta };
     });
-  }, [chartDataWithEquity]);
+  }, [chartDataWithEquityWindowed]);
 
   // Filtered equity panel data for Overview stats (respects date range selection)
   const filteredEquityPanelData = useMemo(() => {
@@ -2465,28 +2679,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [filteredEquityData]);
 
   // Dedicated Simulation equity series, sourced directly from t212AccountHistory (decoupled from EWMA/price data)
-  const simulationEquityData = useMemo(() => {
-    if (!t212AccountHistory || t212AccountHistory.length === 0) return [];
+const simulationEquityData = useMemo(() => {
+  const history = windowedAccountHistory.history;
+  if (!history || history.length === 0) return [];
 
-    const startDate = priceViewWindow.start ? normalizeDateString(priceViewWindow.start) : null;
-    const endDate = priceViewWindow.end ? normalizeDateString(priceViewWindow.end) : null;
-
-    const series = t212AccountHistory
+  const series = history
       .map((pt) => ({
-        date: normalizeDateString(pt.date ?? ""),
+        date: pt.date ? normalizeDateString(pt.date) : "",
         equity: typeof pt.equity === "number" && Number.isFinite(pt.equity) ? pt.equity : null,
       }))
-      .filter((pt) => pt.date)
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .filter((pt) => pt.date);
 
-    const filtered = series
-      .filter((pt) => (startDate ? pt.date >= startDate : true))
-      .filter((pt) => (endDate ? pt.date <= endDate : true));
+    if (series.length === 0) return [];
 
-    if (filtered.length === 0) return [];
-
-    return filtered.map((pt, idx) => {
-      const prev = idx > 0 ? filtered[idx - 1].equity : pt.equity;
+    return series.map((pt, idx) => {
+      const prev = idx > 0 ? series[idx - 1].equity : pt.equity;
       const equityDelta =
         pt.equity != null && prev != null ? pt.equity - prev : null;
 
@@ -2496,7 +2703,70 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         equityDelta,
       };
     });
-  }, [t212AccountHistory, priceViewWindow.end, priceViewWindow.start]);
+  }, [windowedAccountHistory]);
+  const simViewLength = simulationEquityData.length;
+  const simXAxisInterval = useMemo(() => {
+    if (simViewLength <= 10) return 0;
+    if (simViewLength <= 40) return Math.max(1, Math.ceil(simViewLength / 8));
+    if (simViewLength <= 400) return "preserveStartEnd" as const;
+    return Math.max(1, Math.ceil(simViewLength / 20));
+  }, [simViewLength]);
+  const simTickFormatter = useCallback(
+    (value: string) => {
+      if (!value) return "";
+      const dateObj = new Date(`${value}T00:00:00Z`);
+      if (Number.isNaN(dateObj.getTime())) return value;
+      if (simViewLength <= 40) {
+        return dateObj.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          timeZone: "UTC",
+        });
+      }
+      if (simViewLength <= 400) {
+        return dateObj.toLocaleDateString("en-US", {
+          month: "short",
+          year: "2-digit",
+          timeZone: "UTC",
+        });
+      }
+      return dateObj.getUTCFullYear().toString();
+    },
+    [simViewLength]
+  );
+  const simBarCategoryGap = useMemo(() => {
+    if (simViewLength <= 10) return "70%";
+    if (simViewLength <= 30) return "60%";
+    return "40%";
+  }, [simViewLength]);
+  const simBarGap = useMemo(() => {
+    if (simViewLength <= 10) return 4;
+    if (simViewLength <= 30) return 3;
+    return 2;
+  }, [simViewLength]);
+  const simMaxBarSize = useMemo(() => {
+    if (simViewLength <= 10) return 28;
+    if (simViewLength <= 30) return 26;
+    return 24;
+  }, [simViewLength]);
+  const simShowDots = simViewLength > 0 && simViewLength <= 25;
+  const equityYDomain = useMemo(() => {
+    const equities = simulationEquityData
+      .map((d) => d.equity)
+      .filter((e): e is number => e !== null && e !== undefined);
+
+    if (equities.length === 0) return [0, 100];
+
+    const min = Math.min(...equities);
+    const max = Math.max(...equities);
+    const span = max - min;
+    const basePad = span === 0 ? Math.abs(max || 1) * 0.02 : span * 0.05;
+    const padding = Math.max(basePad, Math.abs(max) * 0.002, 1);
+
+    const lower = min - padding;
+    const upper = max + padding;
+    return [lower, upper];
+  }, [simulationEquityData]);
 
   useEffect(() => {
     console.log('[SIM-CHART] data source', {
@@ -2523,21 +2793,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     chartDataWithForecastBand,
     simulationEquityData,
   ]);
-
-  const equityYDomain = useMemo(() => {
-    // Use simulation equity data for the Overview Simulation chart
-    const equities = simulationEquityData
-      .map((d) => d.equity)
-      .filter((e): e is number => e !== null && e !== undefined);
-
-    if (equities.length === 0) return [0, 100];
-
-    const min = Math.min(...equities);
-    const max = Math.max(...equities);
-    const padding = (max - min) * 0.05 || max * 0.05;
-
-    return [Math.max(0, min - padding), max + padding];
-  }, [simulationEquityData]);
 
   const equityDeltaDomain = useMemo<[number, number]>(() => {
     const deltas = simulationEquityData
@@ -2682,11 +2937,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [equityStatsBase, equityLookup, hoveredDate]);
 
+  const summaryTrades = useMemo(() => {
+    const trades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
+    if (!activeSimWindow) return trades;
+    const { start, end } = activeSimWindow;
+    return trades.filter((t) => {
+      const entry = t.entryDate ? normalizeDateString(t.entryDate) : null;
+      const exit = t.exitDate ? normalizeDateString(t.exitDate) : null;
+      const entryIn = entry && entry >= start && entry <= end;
+      const exitIn = exit && exit >= start && exit <= end;
+      return entryIn || exitIn;
+    });
+  }, [activeSimWindow, tradeOverlays]);
+
   // Flatten all trades once for downstream tables
-  const flattenedTrades = useMemo(
-    () => tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [],
-    [tradeOverlays]
-  );
+  const flattenedTrades = useMemo(() => summaryTrades, [summaryTrades]);
 
   // Formatting helpers for the insight tables
   const formatUsd = (v: number | null | undefined, opts?: { sign?: boolean; precision?: number }) => {
@@ -2702,14 +2967,24 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return `${(v * 100).toFixed(precision)}%`;
   };
 
-  // Comprehensive trade summary for all tabs (full history)
+  // Comprehensive trade summary for all tabs (windowed to simCompareWindow when provided)
   const tradeSummary = useMemo(() => {
-    const allTrades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
-    
+    const allTrades = summaryTrades;
+    const history = windowedAccountHistory.history;
     const longTrades = allTrades.filter((t) => t.side === "long");
     const shortTrades = allTrades.filter((t) => t.side === "short");
     
-    const totalTrades = allTrades.length;
+    const closedTrades = allTrades.filter((t) => t.exitDate);
+    const closedTradesCount = closedTrades.length;
+    let openedTrades = 0;
+    let prevSide: Trading212AccountSnapshot["side"] | null = windowedAccountHistory.prevSideBefore ?? null;
+    for (const snap of history) {
+      if (snap.side && snap.side !== prevSide) {
+        openedTrades++;
+      }
+      prevSide = snap.side;
+    }
+    const totalTrades = Math.max(closedTradesCount, openedTrades);
     const totalLong = longTrades.length;
     const totalShort = shortTrades.length;
     
@@ -2719,8 +2994,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const openLong = openTrades.filter((t) => t.side === "long").length;
     const openShort = openTrades.filter((t) => t.side === "short").length;
     
-    // Closed trades for analysis
-    const closedTrades = allTrades.filter((t) => t.exitDate);
     const closedLong = closedTrades.filter((t) => t.side === "long");
     const closedShort = closedTrades.filter((t) => t.side === "short");
     
@@ -2737,9 +3010,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const profitableShort = winningShort.length;
     
     // Percent profitable
-    const pctProfitable = closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0;
-    const pctProfitableLong = closedLong.length > 0 ? (winningLong.length / closedLong.length) * 100 : 0;
-    const pctProfitableShort = closedShort.length > 0 ? (winningShort.length / closedShort.length) * 100 : 0;
+    const pctProfitable = closedTradesCount > 0 ? (winningTrades.length / closedTradesCount) * 100 : null;
+    const pctProfitableLong = closedLong.length > 0 ? (winningLong.length / closedLong.length) * 100 : null;
+    const pctProfitableShort = closedShort.length > 0 ? (winningShort.length / closedShort.length) * 100 : null;
     
     // Gross profit & loss
     const grossProfit = closedTrades.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
@@ -2803,18 +3076,28 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const avgBarsInLosing = losingDurations.length > 0 ? losingDurations.reduce((a, b) => a + b, 0) / losingDurations.length : 0;
     
     // Initial capital (from first account snapshot if available)
-    const initialCapital = t212AccountHistory && t212AccountHistory.length > 0 ? t212AccountHistory[0].equity : 0;
+    const initialCapital = history.length > 0 ? history[0].equity : 0;
     
     // Open P&L (unrealized from last snapshot)
-    const lastSnapshot = t212AccountHistory && t212AccountHistory.length > 0 ? t212AccountHistory[t212AccountHistory.length - 1] : null;
+    const lastSnapshot = history.length > 0 ? history[history.length - 1] : null;
     const openPnl = lastSnapshot?.unrealisedPnl ?? 0;
     
     // Swap fees total
     const swapFeesTotal = closedTrades.reduce((a, t) => a + (t.swapFees ?? 0), 0);
     
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[SIM][TRADE-SUMMARY]", {
+        closedTradesCount,
+        openedTrades,
+        totalTrades,
+        hasOpenPosition: !!lastSnapshot?.side,
+      });
+    }
+
     return {
       // Overview
       totalTrades,
+      closedTradesCount,
       profitableTrades,
       profitFactor,
       
@@ -2881,23 +3164,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         return dateB.localeCompare(dateA);
       }),
     };
-  }, [tradeOverlays, t212AccountHistory]);
+  }, [summaryTrades, windowedAccountHistory]);
 
   useEffect(() => {
-    console.log('[UI] Simulation header metrics', {
-      simulationMode,
-      equitySummary: {
-        pnlAbs: equitySummary.pnlAbs,
-        pnlPct: equitySummary.pnlPct,
-        maxDrawdownAbs: equitySummary.maxDrawdownAbs,
-        maxDrawdownPct: equitySummary.maxDrawdownPct,
-      },
-      tradeSummary: {
-        totalTrades: tradeSummary.totalTrades,
-        profitableTrades: tradeSummary.profitableTrades,
-        profitFactor: tradeSummary.profitFactor,
-      },
-    });
+      console.log('[UI] Simulation header metrics', {
+        simulationMode,
+        equitySummary: {
+          pnlAbs: equitySummary.pnlAbs,
+          pnlPct: equitySummary.pnlPct,
+          maxDrawdownAbs: equitySummary.maxDrawdownAbs,
+          maxDrawdownPct: equitySummary.maxDrawdownPct,
+        },
+        tradeSummary: {
+          totalTrades: tradeSummary.totalTrades,
+          profitableTrades: tradeSummary.profitableTrades,
+          closedTradesCount: tradeSummary.closedTradesCount,
+          profitFactor: tradeSummary.profitFactor,
+          closedTradesCountLog: tradeSummary.closedTradesCount,
+          openedTradesLog: tradeSummary.totalTrades - tradeSummary.closedTradesCount,
+        },
+      });
   }, [simulationMode, equitySummary, tradeSummary]);
 
   // Additional derived stats for the insight tabs (buy & hold, size, risk ratios)
@@ -3655,7 +3941,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             <ComposedChart
               data={chartDataForRender}
               margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
-              syncId="price-equity-sync"
+                      syncId={SYNC_ID}
               barCategoryGap="0%"
               barGap={0}
               onClick={(state: any) => {
@@ -5372,231 +5658,340 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
       {/* Simulation Controls Row - Above tabs */}
       <div className="mt-4 mb-2 flex flex-col gap-1">
-        <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Simulation</span>
-        <div className="flex items-center gap-2">
-          {/* Base mode pills */}
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Simulation</span>
+            {/* Base mode pills */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className={`
+                  px-3 py-1 text-xs rounded-full transition-colors font-medium
+                  ${simulationMode.baseMode === 'unbiased'
+                    ? 'bg-sky-500 text-white'
+                    : isDarkMode
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }
+                `}
+                onClick={() => onChangeSimulationMode?.({ baseMode: 'unbiased', withTrend: simulationMode.withTrend })}
+              >
+                Unbiased
+              </button>
+              <button
+                type="button"
+                className={`
+                  px-3 py-1 text-xs rounded-full transition-colors font-medium
+                  ${simulationMode.baseMode === 'biased'
+                    ? 'bg-sky-500 text-white'
+                    : isDarkMode 
+                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }
+                `}
+                onClick={() => onChangeSimulationMode?.({ baseMode: 'biased', withTrend: simulationMode.withTrend })}
+              >
+                Biased
+              </button>
+              <button
+                type="button"
+                className={`
+                  px-3 py-1 text-xs rounded-full transition-colors font-medium
+                  ${!hasMaxRun
+                    ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
+                    : simulationMode.baseMode === 'max'
+                      ? 'bg-sky-500 text-white'
+                      : isDarkMode 
+                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }
+                `}
+                disabled={!hasMaxRun}
+                onClick={() => hasMaxRun && onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
+              >
+                Biased (Max)
+              </button>
+            </div>
+
+            {/* Trend toggle */}
             <button
               type="button"
+              onClick={() =>
+                onChangeSimulationMode?.({
+                  baseMode: simulationMode.baseMode,
+                  withTrend: !simulationMode.withTrend,
+                })
+              }
               className={`
                 px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${simulationMode.baseMode === 'unbiased'
+                ${simulationMode.withTrend
                   ? 'bg-sky-500 text-white'
                   : isDarkMode
                     ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }
               `}
-              onClick={() => onChangeSimulationMode?.({ baseMode: 'unbiased', withTrend: simulationMode.withTrend })}
+              title="Toggle Trend-tilted EWMA simulation on/off."
             >
-              Unbiased
+              Trend
             </button>
-            <button
-              type="button"
-              className={`
-                px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${simulationMode.baseMode === 'biased'
-                  ? 'bg-sky-500 text-white'
-                  : isDarkMode 
-                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative" ref={simRangeDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowSimRangeMenu((v) => !v)}
+                className={`inline-flex items-center gap-3 px-3 py-1.5 rounded-lg border text-[11px] ${
+                  isDarkMode
+                    ? "bg-slate-900/80 border-slate-700/70 text-slate-100 hover:border-slate-500"
+                    : "bg-white border-gray-200 text-gray-700 hover:border-gray-400"
+                }`}
+              >
+                <div className="flex flex-col items-start leading-tight">
+                  <span className={isDarkMode ? "text-slate-400" : "text-gray-500"}>
+                    Range
+                  </span>
+                  <span className="font-mono">{simRangeLabel}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
+                    {simRangePresetLabel}
+                  </span>
+                  <span className={isDarkMode ? "text-slate-500" : "text-gray-500"}>▾</span>
+                </div>
+              </button>
+              {showSimRangeMenu && (
+                <div
+                  className={`absolute right-0 mt-2 w-72 rounded-xl border shadow-lg z-20 ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700/70"
+                      : "bg-white border-gray-200"
+                  }`}
+                >
+                  <div className={`px-3 py-2 text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                    Simulation Comparison Range
+                  </div>
+                  <div className="px-2 pb-2 space-y-1">
+                    {[
+                      { key: "chart", label: "Range from chart" },
+                      { key: "7d", label: "Last 7 days" },
+                      { key: "30d", label: "Last 30 days" },
+                      { key: "90d", label: "Last 90 days" },
+                      { key: "365d", label: "Last 365 days" },
+                      { key: "all", label: "Entire history" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-[11px] transition ${
+                          simComparePreset === opt.key
+                            ? isDarkMode
+                              ? "bg-slate-800 text-slate-100"
+                              : "bg-gray-100 text-gray-800"
+                            : isDarkMode
+                              ? "text-slate-300 hover:bg-slate-800/80"
+                              : "text-gray-700 hover:bg-gray-50"
+                        }`}
+                        onClick={() => handleSimRangePreset(opt.key as SimCompareRangePreset)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className={isDarkMode ? "border-t border-slate-800/60" : "border-t border-gray-200"} />
+                  <div className="px-3 py-3 space-y-2">
+                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                      Custom date range
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={customSimRangeStart}
+                        onChange={(e) => setCustomSimRangeStart(e.target.value)}
+                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-gray-300 text-gray-700"
+                        }`}
+                      />
+                      <span className={isDarkMode ? "text-slate-500 text-[10px]" : "text-gray-500 text-[10px]"}>to</span>
+                      <input
+                        type="date"
+                        value={customSimRangeEnd}
+                        onChange={(e) => setCustomSimRangeEnd(e.target.value)}
+                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-gray-300 text-gray-700"
+                        }`}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!customSimRangeStart || !customSimRangeEnd}
+                      onClick={handleApplyCustomRange}
+                      className={`w-full rounded-md px-3 py-2 text-[11px] font-semibold transition ${
+                        !customSimRangeStart || !customSimRangeEnd
+                          ? isDarkMode
+                            ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : isDarkMode
+                            ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                            : "bg-emerald-500 text-white hover:bg-emerald-600"
+                      }`}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Trend Weight chip */}
+            {typeof trendWeight === 'number' && Number.isFinite(trendWeight) && (
+              <span
+                className={`
+                  rounded-full px-3 py-1 text-[10px] font-medium
+                  ${isDarkMode ? 'bg-slate-800 text-sky-200' : 'bg-slate-100 text-sky-700'}
+                `}
+                title={
+                  trendWeightUpdatedAt
+                    ? `Trend Weight calibrated on ${trendWeightUpdatedAt}.`
+                    : 'Global Trend Weight estimated from historical panel regression.'
                 }
-              `}
-              onClick={() => onChangeSimulationMode?.({ baseMode: 'biased', withTrend: simulationMode.withTrend })}
-            >
-              Biased
-            </button>
-            <button
-              type="button"
-              className={`
-                px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${!hasMaxRun
-                  ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
-                  : simulationMode.baseMode === 'max'
-                    ? 'bg-sky-500 text-white'
+              >
+                Trend Weight {trendWeight.toFixed(3)}
+              </span>
+            )}
+
+            {/* Simulation Settings Button (⋯) with Dropdown */}
+            <div className="relative" ref={simulationSettingsDropdownRef}>
+              <button
+                onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
+                className={`
+                  w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
+                  ${showSimulationSettingsDropdown
+                    ? isDarkMode 
+                      ? 'border-amber-500 text-amber-400' 
+                      : 'border-amber-500 text-amber-600'
                     : isDarkMode 
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }
-              `}
-              disabled={!hasMaxRun}
-              onClick={() => hasMaxRun && onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
-          >
-            Biased (Max)
-          </button>
-        </div>
+                      ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
+                      : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                  }
+                `}
+                title="Simulation Settings"
+              >
+                ⋯
+              </button>
 
-          {/* Trend toggle */}
-          <button
-            type="button"
-            onClick={() =>
-              onChangeSimulationMode?.({
-                baseMode: simulationMode.baseMode,
-                withTrend: !simulationMode.withTrend,
-              })
-            }
-            className={`
-              px-3 py-1 text-xs rounded-full transition-colors font-medium
-              ${simulationMode.withTrend
-                ? 'bg-sky-500 text-white'
-                : isDarkMode
-                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }
-            `}
-            title="Toggle Trend-tilted EWMA simulation on/off."
-          >
-            Trend
-          </button>
-
-          {/* Trend Weight chip */}
-          {typeof trendWeight === 'number' && Number.isFinite(trendWeight) && (
-            <span
-              className={`
-                ml-1 rounded-full px-3 py-1 text-[10px] font-medium
-                ${isDarkMode ? 'bg-slate-800 text-sky-200' : 'bg-slate-100 text-sky-700'}
-              `}
-              title={
-                trendWeightUpdatedAt
-                  ? `Trend Weight calibrated on ${trendWeightUpdatedAt}.`
-                  : 'Global Trend Weight estimated from historical panel regression.'
-              }
-            >
-              Trend Weight {trendWeight.toFixed(3)}
-            </span>
-          )}
-
-          {/* Simulation Settings Button (⋯) with Dropdown */}
-          <div className="relative" ref={simulationSettingsDropdownRef}>
-            <button
-              onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
-              className={`
-                w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
-                ${showSimulationSettingsDropdown
-                  ? isDarkMode 
-                    ? 'border-amber-500 text-amber-400' 
-                    : 'border-amber-500 text-amber-600'
-                  : isDarkMode 
-                    ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
-                    : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                }
-              `}
-              title="Simulation Settings"
-            >
-              ⋯
-            </button>
-
-            {/* Simulation Settings Dropdown */}
-            {showSimulationSettingsDropdown && (
-            <div 
-              className={`
-                absolute top-8 left-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
-                ${isDarkMode 
-                  ? 'bg-gray-900/95 border-gray-500/30' 
-                  : 'bg-white/95 border-gray-400/30'
-                }
-              `}
-            >
-              <div className="space-y-2 text-xs">
-                {/* Initial Equity Row */}
-                <div className="flex items-center justify-between gap-4">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
-                  <input
-                    type="number"
-                    min={100}
-                    max={1000000}
-                    step={100}
-                    value={simulationInitialEquity}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val) && val >= 100) {
-                        setSimulationInitialEquity(val);
-                      }
-                    }}
-                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                      isDarkMode 
-                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                    }`}
-                  />
-                </div>
-
-                {/* Leverage Row */}
-                <div className="flex items-center justify-between gap-4">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={simulationLeverage}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val) && val >= 1) {
-                        setSimulationLeverage(Math.min(100, val));
-                      }
-                    }}
-                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                      isDarkMode 
-                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                    }`}
-                  />
-                </div>
-
-                {/* Position % Row */}
-                <div className="flex items-center justify-between gap-4">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={simulationPositionPct}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val) && val >= 1) {
-                        setSimulationPositionPct(Math.min(100, val));
-                      }
-                    }}
-                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                      isDarkMode 
-                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                    }`}
-                  />
-                </div>
-
-                {/* Bias Threshold Row */}
-                <div className="flex items-center justify-between gap-4">
-                  <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={simulationBiasThreshold}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      if (Number.isFinite(val) && val >= 0) {
-                        setSimulationBiasThreshold(Math.min(100, val));
-                      }
-                    }}
-                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                      isDarkMode 
-                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                    }`}
-                  />
+              {/* Simulation Settings Dropdown */}
+              {showSimulationSettingsDropdown && (
+              <div 
+                className={`
+                  absolute top-8 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
+                  ${isDarkMode 
+                    ? 'bg-gray-900/95 border-gray-500/30' 
+                    : 'bg-white/95 border-gray-400/30'
+                  }
+                `}
+              >
+                <div className="space-y-2 text-xs">
+                  {/* Initial Equity Row */}
+                  <div className="flex items-center justify-between gap-4">
+                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
+                    <input
+                      type="number"
+                      min={100}
+                      max={1000000}
+                      step={100}
+                      value={simulationInitialEquity}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (Number.isFinite(val) && val >= 100) {
+                          setSimulationInitialEquity(val);
+                        }
+                      }}
+                      className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                        isDarkMode 
+                          ? 'border-gray-600 text-white focus:border-amber-500' 
+                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                      }`}
+                    />
+                  </div>
+                  {/* Leverage Row */}
+                  <div className="flex items-center justify-between gap-4">
+                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={simulationLeverage}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (Number.isFinite(val) && val >= 1) {
+                          setSimulationLeverage(Math.min(100, val));
+                        }
+                      }}
+                      className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                        isDarkMode 
+                          ? 'border-gray-600 text-white focus:border-amber-500' 
+                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                      }`}
+                    />
+                  </div>
+                  {/* Position % Row */}
+                  <div className="flex items-center justify-between gap-4">
+                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={simulationPositionPct}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (Number.isFinite(val) && val >= 1) {
+                          setSimulationPositionPct(val);
+                        }
+                      }}
+                      className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                        isDarkMode 
+                          ? 'border-gray-600 text-white focus:border-amber-500' 
+                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                      }`}
+                    />
+                  </div>
+                  {/* Bias Threshold Row */}
+                  <div className="flex items-center justify-between gap-4">
+                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
+                    <input
+                      type="number"
+                      min={-0.05}
+                      max={0.05}
+                      step={0.005}
+                      value={simulationBiasThreshold}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        if (Number.isFinite(val)) {
+                          setSimulationBiasThreshold(val);
+                        }
+                      }}
+                      className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                        isDarkMode 
+                          ? 'border-gray-600 text-white focus:border-amber-500' 
+                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                      }`}
+                    />
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
           </div>
         </div>
       </div>
+      </div>
 
-      {/* TradingView-style Insights Panel - Always visible */}
       {true && (
         <div className="mt-6">
           {/* Header Row: Insight Pills (left) + Date Range (right) */}
@@ -5712,144 +6107,158 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
               {/* Equity Chart inside Overview tab */}
               <div className="w-full">
-                <ResponsiveContainer width="100%" height={220}>
+                {simulationEquityData.length < 2 ? (
+                  <div className={`h-[220px] flex items-center justify-center text-xs ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    Not enough points in the selected range to render the simulation chart.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={220}>
                   <ComposedChart
                     data={simulationEquityData}
-                    margin={{ top: 10, right: 0, left: 0, bottom: 10 }}
-                    syncId="price-equity-sync"
+                    margin={CHART_MARGIN}
+                    syncId={SYNC_ID}
                     onMouseMove={applyHoverFromRechartsState}
                     onMouseLeave={handleChartMouseLeave}
+                    barCategoryGap={simBarCategoryGap}
+                    barGap={simBarGap}
                   >
-                    <CartesianGrid
-                      stroke={isDarkMode ? "rgba(148, 163, 184, 0.07)" : "rgba(100, 116, 139, 0.12)"}
-                      vertical={false}
-                    />
-                    <XAxis
-                      dataKey="date"
-                      type="category"
-                      allowDuplicatedCategory={false}
-                      axisLine={false}
-                      tickLine={false}
-                      tickMargin={6}
-                      padding={{ left: 0, right: 0 }}
-                      tick={false}
-                    />
-                    <YAxis
-                      yAxisId="equity"
-                      domain={equityYDomain}
-                      orientation="right"
-                      width={50}
-                      axisLine={false}
-                      tickLine={false}
-                      tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
-                      tickFormatter={(value: number) => {
-                        if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
-                        return value.toFixed(0);
-                      }}
-                    />
-                    <YAxis yAxisId="delta" domain={equityDeltaDomain} hide />
-                    <Tooltip
-                      cursor={false}
-                      animationDuration={0}
-                      content={() => {
-                        if (!hoveredDate) return null;
-                        const point = simulationEquityData.find((p) => p.date === hoveredDate);
-                        if (!point || point.equity == null) return null;
-
-                        const deltaStr =
-                          point.equityDelta != null
-                            ? `${point.equityDelta >= 0 ? "+" : ""}${point.equityDelta.toFixed(2)}`
-                            : "—";
-
-                        return (
-                          <div className={`rounded-xl px-3 py-2 shadow-lg border ${
-                            isDarkMode 
-                              ? 'bg-slate-900/95 border-slate-700/70' 
-                              : 'bg-white/95 border-gray-200'
-                          }`}>
-                            <div className={`text-[11px] font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
-                              {hoveredDate}
-                            </div>
-                            <div className="text-[11px] space-y-0.5">
-                              <div>
-                                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Equity: </span>
-                                <span className="font-mono text-emerald-500 font-semibold">
-                                  ${point.equity.toFixed(2)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Δ Day: </span>
-                                <span className={`font-mono font-semibold ${
-                                  point.equityDelta != null && point.equityDelta >= 0
-                                    ? 'text-emerald-400'
-                                    : 'text-rose-400'
-                                }`}>
-                                  {deltaStr}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }}
-                    />
-
-                    {hoveredDate && (
-                      <ReferenceLine
-                        x={hoveredDate}
-                        stroke={isDarkMode ? "#FFFFFF" : "rgba(148, 163, 184, 0.35)"}
-                        strokeWidth={1}
-                        strokeDasharray="4 2"
+                      <CartesianGrid
+                        stroke={isDarkMode ? "rgba(148, 163, 184, 0.07)" : "rgba(100, 116, 139, 0.12)"}
+                        vertical={false}
                       />
-                    )}
+                      <XAxis
+                        dataKey="date"
+                        type="category"
+                        allowDuplicatedCategory={false}
+                        axisLine={false}
+                        tickLine={false}
+                        tickMargin={6}
+                        padding={{ left: simViewLength <= 10 ? 6 : 0, right: simViewLength <= 10 ? 6 : 0 }}
+                        interval={simXAxisInterval as any}
+                        tick={{
+                          fill: isDarkMode ? '#9CA3AF' : '#6B7280',
+                          fontSize: simViewLength <= 10 ? 11 : 10,
+                        }}
+                        tickFormatter={simTickFormatter}
+                      />
+                      <YAxis
+                        yAxisId="equity"
+                        domain={equityYDomain}
+                        orientation="right"
+                        width={50}
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
+                        tickFormatter={(value: number) => {
+                          if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
+                          return value.toFixed(0);
+                        }}
+                      />
+                      <YAxis yAxisId="delta" domain={equityDeltaDomain} hide />
+                      <Tooltip
+                        cursor={false}
+                        animationDuration={0}
+                        content={() => {
+                          if (!hoveredDate) return null;
+                          const point = simulationEquityData.find((p) => p.date === hoveredDate);
+                          if (!point || point.equity == null) return null;
 
-                    <ReferenceLine
-                      y={0}
-                      yAxisId="delta"
-                      stroke={isDarkMode ? "rgba(148, 163, 184, 0.4)" : "rgba(100, 116, 139, 0.5)"}
-                      strokeDasharray="3 3"
-                      strokeWidth={1}
-                    />
+                          const deltaStr =
+                            point.equityDelta != null
+                              ? `${point.equityDelta >= 0 ? "+" : ""}${point.equityDelta.toFixed(2)}`
+                              : "—";
 
-                    <Bar
-                      yAxisId="delta"
-                      dataKey="equityDelta"
-                      radius={[2, 2, 0, 0]}
-                      isAnimationActive={false}
-                    >
-                      {simulationEquityData.map((entry, index) => {
-                        const positive = (entry.equityDelta ?? 0) >= 0;
-                        return (
-                          <Cell
-                            key={`eq-bar-${index}`}
-                            fill={
-                              positive
-                                ? "rgba(52, 211, 153, 0.35)"
-                                : "rgba(251, 113, 133, 0.35)"
-                            }
-                            stroke={
-                              positive
-                                ? "rgba(16, 185, 129, 0.8)"
-                                : "rgba(244, 63, 94, 0.8)"
-                            }
-                            strokeWidth={1}
-                          />
-                        );
-                      })}
-                    </Bar>
+                          return (
+                            <div className={`rounded-xl px-3 py-2 shadow-lg border ${
+                              isDarkMode 
+                                ? 'bg-slate-900/95 border-slate-700/70' 
+                                : 'bg-white/95 border-gray-200'
+                            }`}>
+                              <div className={`text-[11px] font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
+                                {hoveredDate}
+                              </div>
+                              <div className="text-[11px] space-y-0.5">
+                                <div>
+                                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Equity: </span>
+                                  <span className="font-mono text-emerald-500 font-semibold">
+                                    ${point.equity.toFixed(2)}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Δ Day: </span>
+                                  <span className={`font-mono font-semibold ${
+                                    point.equityDelta != null && point.equityDelta >= 0
+                                      ? 'text-emerald-400'
+                                      : 'text-rose-400'
+                                  }`}>
+                                    {deltaStr}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }}
+                      />
 
-                    <Line
-                      yAxisId="equity"
-                      type="monotone"
-                      dataKey="equity"
-                      stroke={isDarkMode ? "#38bdf8" : "#0ea5e9"}
-                      strokeWidth={2}
-                      dot={false}
-                      isAnimationActive={false}
-                      connectNulls
-                      activeDot={{ r: 4, strokeWidth: 2, fill: isDarkMode ? "#38bdf8" : "#0ea5e9", stroke: isDarkMode ? "#0f172a" : "#f8fafc" }}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                      {hoveredDate && (
+                        <ReferenceLine
+                          x={hoveredDate}
+                          stroke={isDarkMode ? "#FFFFFF" : "rgba(148, 163, 184, 0.35)"}
+                          strokeWidth={1}
+                          strokeDasharray="4 2"
+                        />
+                      )}
+
+                      <ReferenceLine
+                        y={0}
+                        yAxisId="delta"
+                        stroke={isDarkMode ? "rgba(148, 163, 184, 0.4)" : "rgba(100, 116, 139, 0.5)"}
+                        strokeDasharray="3 3"
+                        strokeWidth={1}
+                      />
+
+                      <Bar
+                        yAxisId="delta"
+                        dataKey="equityDelta"
+                        radius={[2, 2, 0, 0]}
+                        isAnimationActive={false}
+                        maxBarSize={simMaxBarSize}
+                      >
+                        {simulationEquityData.map((entry, index) => {
+                          const positive = (entry.equityDelta ?? 0) >= 0;
+                          return (
+                            <Cell
+                              key={`eq-bar-${index}`}
+                              fill={
+                                positive
+                                  ? "rgba(52, 211, 153, 0.35)"
+                                  : "rgba(251, 113, 133, 0.35)"
+                              }
+                              stroke={
+                                positive
+                                  ? "rgba(16, 185, 129, 0.8)"
+                                  : "rgba(244, 63, 94, 0.8)"
+                              }
+                              strokeWidth={1}
+                            />
+                          );
+                        })}
+                      </Bar>
+
+                      <Line
+                        yAxisId="equity"
+                        type="monotone"
+                        dataKey="equity"
+                        stroke={isDarkMode ? "#38bdf8" : "#0ea5e9"}
+                        strokeWidth={2}
+                        dot={simShowDots ? { r: simViewLength <= 10 ? 3 : 2 } : false}
+                        activeDot={simShowDots ? { r: 4, strokeWidth: 2, fill: isDarkMode ? "#38bdf8" : "#0ea5e9", stroke: isDarkMode ? "#0f172a" : "#f8fafc" } : false}
+                        isAnimationActive={false}
+                        connectNulls
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                )}
               </div>
 
               {/* Simulation Comparison Table */}
@@ -5944,7 +6353,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               )}
             </div>
           )}
-
           {/* Performance Tab */}
           {activeInsightTab === "Performance" && (
             <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
@@ -6205,9 +6613,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
                     <td className="py-2.5 px-4">Percent profitable</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.pctProfitable.toFixed(2)}%</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.pctProfitableLong.toFixed(2)}%</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.pctProfitableShort.toFixed(2)}%</td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {tradeSummary.pctProfitable != null ? `${tradeSummary.pctProfitable.toFixed(2)}%` : "—"}
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {tradeSummary.pctProfitableLong != null ? `${tradeSummary.pctProfitableLong.toFixed(2)}%` : "—"}
+                    </td>
+                    <td className="text-right py-2.5 px-4 font-mono">
+                      {tradeSummary.pctProfitableShort != null ? `${tradeSummary.pctProfitableShort.toFixed(2)}%` : "—"}
+                    </td>
                   </tr>
                   <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
                     <td className="py-2.5 px-4">Avg P&L</td>
@@ -6667,6 +7081,28 @@ const formatDateShort = (dateStr: string | null | undefined): string | null => {
   } catch {
     return dateStr;
   }
+};
+
+const formatDateLong = (dateStr: string | null | undefined): string | null => {
+  if (!dateStr) return null;
+  try {
+    const d = new Date(`${dateStr}T00:00:00Z`);
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  } catch {
+    return dateStr;
+  }
+};
+
+const formatRangeLabel = (window: { start: string; end: string } | null | undefined): string => {
+  if (!window) return "Select range";
+  const start = formatDateLong(window.start) ?? window.start;
+  const end = formatDateLong(window.end) ?? window.end;
+  return `${start} — ${end}`;
 };
 
 const PriceTooltip: React.FC<PriceTooltipProps> = ({

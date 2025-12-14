@@ -22,6 +22,9 @@ export interface CanonicalTableMeta {
   missing_trading_days: string[];      // ISO dates
   invalid_rows: number;
   generated_at: string;
+  range?: string;
+  interval?: string;
+  source?: string;
 }
 
 export interface ValidationBadges {

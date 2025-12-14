@@ -17597,6 +17597,20 @@
       "r": 0.003365032761640764,
       "valid": true,
       "issues": []
+    },
+    {
+      "date": "2025-12-12",
+      "open": 128.58999633789062,
+      "high": 130.55999755859375,
+      "low": 128.19000244140625,
+      "close": 128.38999938964844,
+      "adj_close": 128.38999938964844,
+      "volume": 3489799,
+      "split_factor": null,
+      "cash_dividend": null,
+      "r": 0.0030422379294880093,
+      "valid": true,
+      "issues": []
     }
   ],
   "meta": {
@@ -17604,11 +17618,12 @@
     "exchange_tz": "America/New_York",
     "calendar_span": {
       "start": "2020-12-10",
-      "end": "2025-12-11"
+      "end": "2025-12-12"
     },
-    "rows": 1257,
+    "rows": 1258,
     "missing_trading_days": [],
     "invalid_rows": 0,
-    "generated_at": "2025-12-12T03:46:05.930Z"
+    "generated_at": "2025-12-13T09:15:00.464Z",
+    "range": "max"
   }
 }

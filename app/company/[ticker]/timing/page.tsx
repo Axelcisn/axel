@@ -420,6 +420,12 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isLoadingEwmaBiased, setIsLoadingEwmaBiased] = useState(false);
   const [ewmaBiasedError, setEwmaBiasedError] = useState<string | null>(null);
 
+  // EWMA Biased (Max) state - separate path so toggles don't mutate baseline params
+  const [ewmaBiasedMaxSummary, setEwmaBiasedMaxSummary] = useState<EwmaSummary | null>(null);
+  const [ewmaBiasedMaxPath, setEwmaBiasedMaxPath] = useState<EwmaWalkerPathPoint[] | null>(null);
+  const [isLoadingEwmaBiasedMax, setIsLoadingEwmaBiasedMax] = useState(false);
+  const [ewmaBiasedMaxError, setEwmaBiasedMaxError] = useState<string | null>(null);
+
   // EWMA Reaction Map state
   type ReactionBucketSummary = {
     bucketId: string;
@@ -554,6 +560,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   type StrategyKey = "unbiased" | "biased" | "biased-max";
   type BaseRunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
   type Trading212BaseRunsById = Partial<Record<BaseRunId, Trading212SimRun>>;
+  type SimCompareRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
 
   type FilteredStats = {
     days: number;
@@ -591,6 +598,22 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   const [t212BaseRunsById, setT212BaseRunsById] = useState<Trading212BaseRunsById>({});
   const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
   const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
+  const [simComparePreset, setSimComparePreset] = useState<SimCompareRangePreset>("chart");
+  const [simCompareCustom, setSimCompareCustom] = useState<{ start: string; end: string } | null>(null);
+  const [visibleWindow, setVisibleWindow] = useState<{ start: string; end: string } | null>(null);
+  const handleSimComparePresetChange = useCallback((p: SimCompareRangePreset) => {
+    setSimComparePreset(p);
+  }, []);
+  const handleSimCompareCustomChange = useCallback((start: string, end: string) => {
+    if (!start || !end) return;
+    setSimCompareCustom({ start, end });
+    setSimComparePreset("custom");
+  }, []);
+  useEffect(() => {
+    setVisibleWindow(null);
+    setSimCompareCustom(null);
+    setSimComparePreset("chart");
+  }, [params.ticker]);
   const hasMaxRun = useMemo(
     () => t212Runs.some((r) => r.id === "ewma-biased-max" || r.id === "ewma-biased-max-trend"),
     [t212Runs]
@@ -611,55 +634,163 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     () => (t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null),
     [t212VisibleRunIds]
   );
-
-  const computeTradeCount = useCallback((result: Trading212SimulationResult) => {
-    const closedTrades = result.trades.length;
-
-    let openedTrades = 0;
-    let prevSide: Trading212AccountSnapshot["side"] | null = null;
-    for (const snap of result.accountHistory) {
-      if (snap.side && snap.side !== prevSide) {
-        openedTrades++;
-      }
-      prevSide = snap.side;
+  const referenceSimRun = useMemo(
+    () =>
+      t212BaseRunsById["ewma-biased"] ??
+      t212BaseRunsById["ewma-biased-max"] ??
+      t212BaseRunsById["ewma-unbiased"] ??
+      null,
+    [t212BaseRunsById]
+  );
+  const effectiveSimCompareWindow = useMemo(() => {
+    const refHistory = referenceSimRun?.result?.accountHistory;
+    if (!refHistory || refHistory.length === 0) {
+      return null;
+    }
+    const refStart = refHistory[0]?.date;
+    const refEnd = refHistory[refHistory.length - 1]?.date;
+    if (!refStart || !refEnd) {
+      return null;
     }
 
-    return Math.max(closedTrades, openedTrades);
-  }, []);
+    const fullWindow = { start: refStart, end: refEnd };
+
+    const resolveRecentWindow = (count: number) => {
+      const startIdx = Math.max(0, refHistory.length - count);
+      return { start: refHistory[startIdx].date, end: refEnd };
+    };
+
+    switch (simComparePreset) {
+      case "chart":
+        return visibleWindow ?? fullWindow;
+      case "7d":
+        return resolveRecentWindow(7);
+      case "30d":
+        return resolveRecentWindow(30);
+      case "90d":
+        return resolveRecentWindow(90);
+      case "365d":
+        return resolveRecentWindow(365);
+      case "custom":
+        if (simCompareCustom) {
+          const startIdx = refHistory.findIndex((snap) => snap.date >= simCompareCustom.start);
+          const endIdx = (() => {
+            for (let i = refHistory.length - 1; i >= 0; i--) {
+              if (refHistory[i].date <= simCompareCustom.end) {
+                return i;
+              }
+            }
+            return -1;
+          })();
+
+          if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+            return {
+              start: refHistory[startIdx].date,
+              end: refHistory[endIdx].date,
+            };
+          }
+        }
+        return fullWindow;
+      case "all":
+      default:
+        return fullWindow;
+    }
+  }, [visibleWindow, referenceSimRun, simCompareCustom, simComparePreset]);
 
   const summarizeRunStats = useCallback(
-    (run: Trading212SimRun): FilteredStats | null => {
+    (run: Trading212SimRun, window?: { start: string; end: string } | null): FilteredStats | null => {
       const history = run.result.accountHistory;
       if (!history || history.length === 0) {
         return null;
       }
 
-      const first = history[0];
-      const last = history[history.length - 1];
-      const initialEquity = run.result.initialEquity ?? first.equity;
-      const returnPct =
-        initialEquity > 0 ? (run.result.finalEquity - initialEquity) / initialEquity : 0;
-      const maxDrawdown = Number.isFinite(run.result.maxDrawdown)
-        ? run.result.maxDrawdown
-        : (() => {
-            let peak = history[0].equity;
-            let maxDd = 0;
-            for (const snap of history) {
-              if (snap.equity > peak) {
-                peak = snap.equity;
-              }
-              const dd = (peak - snap.equity) / peak;
-              if (dd > maxDd) {
-                maxDd = dd;
-              }
-            }
-            return maxDd;
-          })();
-      const tradeCount = computeTradeCount(run.result);
-      const stopOutEvents = run.result.stopOutEvents ?? 0;
+      const runStart = history[0]?.date;
+      const runEnd = history[history.length - 1]?.date;
+      if (!runStart || !runEnd) {
+        return null;
+      }
+
+      const clampedWindow = window
+        ? {
+            start: window.start > runStart ? window.start : runStart,
+            end: window.end < runEnd ? window.end : runEnd,
+          }
+        : { start: runStart, end: runEnd };
+
+      if (clampedWindow.start > clampedWindow.end) {
+        return null;
+      }
+
+      const startIdx = history.findIndex((snap) => snap.date >= clampedWindow.start);
+      if (startIdx === -1) {
+        return null;
+      }
+
+      let endIdx = history.length - 1;
+      for (let i = history.length - 1; i >= startIdx; i--) {
+        if (history[i].date <= clampedWindow.end) {
+          endIdx = i;
+          break;
+        }
+      }
+
+      if (endIdx < startIdx) {
+        return null;
+      }
+
+      const slice = history.slice(startIdx, endIdx + 1);
+      if (slice.length === 0) {
+        return null;
+      }
+
+      const first = slice[0];
+      const last = slice[slice.length - 1];
+      const initialEquity = first?.equity ?? 0;
+      const lastEquity = last?.equity ?? 0;
+      const returnPct = initialEquity > 0 ? (lastEquity - initialEquity) / initialEquity : 0;
+
+      const maxDrawdown = (() => {
+        let peak = slice[0].equity;
+        let maxDd = 0;
+        for (const snap of slice) {
+          if (snap.equity > peak) {
+            peak = snap.equity;
+          }
+          const dd = peak > 0 ? (peak - snap.equity) / peak : 0;
+          if (dd > maxDd) {
+            maxDd = dd;
+          }
+        }
+        return maxDd;
+      })();
+
+      let openedTrades = 0;
+      let prevSide: Trading212AccountSnapshot["side"] | null =
+        startIdx > 0 ? history[startIdx - 1]?.side ?? null : null;
+      for (let i = startIdx; i <= endIdx; i++) {
+        const side = history[i].side;
+        if (side && side !== prevSide) {
+          openedTrades++;
+        }
+        prevSide = side;
+      }
+
+      const closedTradesCount = run.result.trades.filter(
+        (t) => t.entryDate >= first.date && t.entryDate <= last.date
+      ).length;
+      const tradeCount = Math.max(openedTrades, closedTradesCount);
+
+      let stopOutEvents = 0;
+      if (Array.isArray(run.result.stopOutDates) && run.result.stopOutDates.length > 0) {
+        stopOutEvents = run.result.stopOutDates.filter(
+          (d) => d >= first.date && d <= last.date
+        ).length;
+      } else if (!window || (clampedWindow.start === runStart && clampedWindow.end === runEnd)) {
+        stopOutEvents = run.result.stopOutEvents ?? 0;
+      }
 
       return {
-        days: history.length,
+        days: slice.length,
         firstDate: first?.date ?? "—",
         lastDate: last?.date ?? "—",
         returnPct,
@@ -668,7 +799,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         stopOutEvents,
       };
     },
-    [computeTradeCount]
+    []
   );
 
   const handleChangeSimulationMode = useCallback(
@@ -927,7 +1058,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
 
     const rows: SimulationStrategySummary[] = comparisonRowSpecs.map((spec, idx) => {
       const run = t212BaseRunsById[spec.id];
-      const stats = run ? summarizeRunStats(run) : null;
+      const stats = run ? summarizeRunStats(run, effectiveSimCompareWindow) : null;
 
       const lambda =
         spec.key === "unbiased"
@@ -962,11 +1093,12 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           specId: spec.id,
           label: spec.label,
           runPresent: !!run,
-          lambda: row.lambda,
-          trainFraction: row.trainFraction,
-          firstDate: row.firstDate,
-          lastDate: row.lastDate,
-          trades: row.tradeCount,
+        lambda: row.lambda,
+        trainFraction: row.trainFraction,
+        window: effectiveSimCompareWindow,
+        firstDate: row.firstDate,
+        lastDate: row.lastDate,
+        trades: row.tradeCount,
           returnPct: row.returnPct,
         });
       }
@@ -975,7 +1107,15 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     });
 
     return rows;
-  }, [comparisonRowSpecs, comparisonRunIds, reactionLambda, reactionTrainFraction, summarizeRunStats, t212BaseRunsById]);
+  }, [
+    comparisonRowSpecs,
+    comparisonRunIds,
+    effectiveSimCompareWindow,
+    reactionLambda,
+    reactionTrainFraction,
+    summarizeRunStats,
+    t212BaseRunsById,
+  ]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -1956,6 +2096,99 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     }
   }, [loadEwmaBiasedWalker]);
 
+  // Load EWMA Biased (Max) Walker using the optimized config without mutating baseline params
+  const loadEwmaBiasedMaxWalker = useCallback(async () => {
+    if (!params?.ticker) return;
+    if (!reactionOptimizationBest) return;
+
+    try {
+      setIsLoadingEwmaBiasedMax(true);
+      setEwmaBiasedMaxError(null);
+
+      const maxCfg = getMaxEwmaConfig();
+      const query = new URLSearchParams({
+        lambda: maxCfg.lambda.toString(),
+        coverage: coverage.toString(), // main coverage
+        h: String(h),
+        trainFraction: maxCfg.trainFraction.toString(),
+        minTrainObs: reactionMinTrainObs.toString(),
+        shrinkFactor: "0.5",
+      });
+
+      const res = await fetch(
+        `/api/volatility/ewma-biased/${encodeURIComponent(params.ticker)}?${query.toString()}`
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `EWMA Biased (Max) API error ${res.status}`);
+      }
+
+      const json = await res.json();
+
+      if (!json.success) {
+        throw new Error(json.error || "Failed to load biased EWMA (Max)");
+      }
+
+      const { points, piMetrics, zMean, zStd, directionHitRate, oosForecast } = json;
+      const m = piMetrics || {};
+
+      setEwmaBiasedMaxSummary({
+        coverage: typeof m.empiricalCoverage === "number" ? m.empiricalCoverage : NaN,
+        targetCoverage: typeof m.coverage === "number" ? m.coverage : NaN,
+        intervalScore: typeof m.intervalScore === "number" ? m.intervalScore : NaN,
+        avgWidth: typeof m.avgWidth === "number" ? m.avgWidth : NaN,
+        zMean: typeof zMean === "number" ? zMean : NaN,
+        zStd: typeof zStd === "number" ? zStd : NaN,
+        directionHitRate: typeof directionHitRate === "number" ? directionHitRate : NaN,
+        nPoints: points?.length ?? 0,
+      });
+
+      const mappedPath: EwmaWalkerPathPoint[] = (points || []).map((p: any) => ({
+        date_t: p.date_t,
+        date_tp1: p.date_tp1,
+        S_t: p.S_t,
+        S_tp1: p.S_tp1,
+        y_hat_tp1: p.y_hat_tp1,
+        L_tp1: p.L_tp1,
+        U_tp1: p.U_tp1,
+        sigma_t: p.sigma_t,
+      }));
+
+      if (oosForecast && oosForecast.targetDate) {
+        mappedPath.push({
+          date_t: oosForecast.originDate,
+          date_tp1: oosForecast.targetDate,
+          S_t: oosForecast.S_t,
+          S_tp1: oosForecast.y_hat,
+          y_hat_tp1: oosForecast.y_hat,
+          L_tp1: oosForecast.L,
+          U_tp1: oosForecast.U,
+          sigma_t: oosForecast.sigma_t,
+        });
+      }
+
+      setEwmaBiasedMaxPath(mappedPath);
+    } catch (err: any) {
+      console.error("[EWMA Biased Max] loadEwmaBiasedMaxWalker error", err);
+      setEwmaBiasedMaxError(err?.message || "Failed to load biased EWMA (Max).");
+      setEwmaBiasedMaxSummary(null);
+      setEwmaBiasedMaxPath(null);
+    } finally {
+      setIsLoadingEwmaBiasedMax(false);
+    }
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionOptimizationBest, getMaxEwmaConfig]);
+
+  // Auto-load/refresh max path when optimizer results exist; clear when not available
+  useEffect(() => {
+    if (reactionOptimizationBest) {
+      loadEwmaBiasedMaxWalker();
+    } else {
+      setEwmaBiasedMaxSummary(null);
+      setEwmaBiasedMaxPath(null);
+    }
+  }, [reactionOptimizationBest, loadEwmaBiasedMaxWalker]);
+
   // Load EWMA Reaction Map (manual trigger only)
   const loadReactionMap = useCallback(async () => {
     if (!params?.ticker) return;
@@ -2247,6 +2480,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     trendWeight?: number | null;
     lambdaOverride?: number | null;
     trainFractionOverride?: number | null;
+    ewmaPathOverride?: EwmaWalkerPathPoint[] | null;
   }
 
   const runTrading212SimForSource = useCallback(
@@ -2277,8 +2511,9 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           throw new Error('No canonical data available');
         }
 
-        // Choose the EWMA path based on source
-        const ewmaPathForSim = source === "biased" ? ewmaBiasedPath : ewmaPath;
+        // Choose the EWMA path based on source (or explicit override)
+        const ewmaPathForSim =
+          opts?.ewmaPathOverride ?? (source === "biased" ? ewmaBiasedPath : ewmaPath);
 
         if (!ewmaPathForSim || ewmaPathForSim.length === 0) {
           setT212Error(
@@ -2495,6 +2730,13 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     loadEwmaBiasedWalker();
   }, [ewmaBiasedPath, loadEwmaBiasedWalker]);
 
+  const handleLoadBiasedMaxClick = useCallback(() => {
+    if (ewmaBiasedMaxPath && ewmaBiasedMaxPath.length > 0) {
+      return;
+    }
+    loadEwmaBiasedMaxWalker();
+  }, [ewmaBiasedMaxPath, loadEwmaBiasedMaxWalker]);
+
   // For Unbiased we usually auto-load on mount, but keep a shim for completeness
   const handleLoadUnbiasedClick = useCallback(() => {
     if (!ewmaPath || ewmaPath.length === 0) {
@@ -2570,13 +2812,15 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       runId: T212RunId;
       label: string;
       opts?: RunTrading212SimOptions;
+      ewmaPathOverride?: EwmaWalkerPathPoint[] | null;
     }> = [
-      { source: "unbiased", runId: "ewma-unbiased", label: "EWMA Unbiased" },
-      { source: "biased", runId: "ewma-biased", label: "EWMA Biased" },
+      { source: "unbiased", runId: "ewma-unbiased", label: "EWMA Unbiased", ewmaPathOverride: ewmaPath ?? null },
+      { source: "biased", runId: "ewma-biased", label: "EWMA Biased", ewmaPathOverride: ewmaBiasedPath ?? null },
       {
         source: "biased",
         runId: "ewma-biased-max",
         label: "EWMA Biased (Max)",
+        ewmaPathOverride: ewmaBiasedMaxPath ?? null,
         opts: {
           lambdaOverride: maxConfig.lambda,
           trainFractionOverride: maxConfig.trainFraction,
@@ -2587,10 +2831,14 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     (async () => {
       console.log("[T212 Auto-Run] Seeding baseline sims", specs.map((s) => s.runId));
       for (const spec of specs) {
+        if (spec.runId === "ewma-biased-max" && (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)) {
+          continue;
+        }
         await runTrading212SimForSource(spec.source, spec.runId, spec.label, {
           autoSelect: false,
           useTrendTilt: false,
           trendWeight: null,
+          ewmaPathOverride: spec.ewmaPathOverride,
           ...spec.opts,
         });
       }
@@ -2600,6 +2848,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     isCfdEnabled,
     ewmaPath,
     ewmaBiasedPath,
+    ewmaBiasedMaxPath,
     reactionMapSummary,
     getMaxEwmaConfig,
     runTrading212SimForSource,
@@ -2625,11 +2874,12 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     if (!reactionMapSummary) return;
 
     const maxConfig = getMaxEwmaConfig();
-    const specs: Array<{ runId: T212RunId; label: string; opts?: RunTrading212SimOptions }> = [
-      { runId: "ewma-biased-trend", label: "EWMA Biased + Trend" },
+    const specs: Array<{ runId: T212RunId; label: string; opts?: RunTrading212SimOptions; ewmaPathOverride?: EwmaWalkerPathPoint[] | null }> = [
+      { runId: "ewma-biased-trend", label: "EWMA Biased + Trend", ewmaPathOverride: ewmaBiasedPath ?? null },
       {
         runId: "ewma-biased-max-trend",
         label: "EWMA Biased (Max) + Trend",
+        ewmaPathOverride: ewmaBiasedMaxPath ?? null,
         opts: {
           lambdaOverride: maxConfig.lambda,
           trainFractionOverride: maxConfig.trainFraction,
@@ -2645,10 +2895,14 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         effectiveTrendWeight
       );
       for (const spec of specs) {
+        if (spec.runId === "ewma-biased-max-trend" && (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)) {
+          continue;
+        }
         await runTrading212SimForSource("biased", spec.runId, spec.label, {
           autoSelect: false,
           useTrendTilt: true,
           trendWeight: effectiveTrendWeight,
+          ewmaPathOverride: spec.ewmaPathOverride,
           ...spec.opts,
         });
       }
@@ -2658,6 +2912,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     isCfdEnabled,
     simulationMode.withTrend,
     ewmaBiasedPath,
+    ewmaBiasedMaxPath,
     reactionMapSummary,
     getMaxEwmaConfig,
     effectiveTrendWeight,
@@ -5325,6 +5580,8 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           ewmaSummary={ewmaSummary}
           ewmaBiasedPath={ewmaBiasedPath}
           ewmaBiasedSummary={ewmaBiasedSummary}
+          ewmaBiasedMaxPath={ewmaBiasedMaxPath}
+          ewmaBiasedMaxSummary={ewmaBiasedMaxSummary}
           ewmaShortSeries={trendShortEwma ?? undefined}
           ewmaLongSeries={trendLongEwma ?? undefined}
           ewmaShortWindow={trendShortWindow}
@@ -5340,7 +5597,9 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           adxSeries={chartAdx?.series ?? undefined}
           onLoadEwmaUnbiased={handleLoadUnbiasedClick}
           onLoadEwmaBiased={handleLoadBiasedClick}
+          onLoadEwmaBiasedMax={handleLoadBiasedMaxClick}
           isLoadingEwmaBiased={isLoadingEwmaBiased}
+          isLoadingEwmaBiasedMax={isLoadingEwmaBiasedMax}
           ewmaReactionMapDropdown={{
             reactionLambda,
             setReactionLambda,
@@ -5395,6 +5654,14 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           trendWeight={trendWeight}
           trendWeightUpdatedAt={trendWeightUpdatedAt}
           simulationRuns={simulationRunsSummary}
+          simComparePreset={simComparePreset}
+          simCompareWindow={effectiveSimCompareWindow}
+          onChangeSimComparePreset={handleSimComparePresetChange}
+          onChangeSimCompareCustom={handleSimCompareCustomChange}
+          onPriceViewWindowChange={(window) => {
+            setSimComparePreset("chart");
+            setVisibleWindow(window);
+          }}
         />
       </div>
       

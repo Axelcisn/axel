@@ -85,6 +85,7 @@ export interface Trading212SimulationResult {
   maxDrawdown: number;       // in decimal (e.g., 0.15 = 15%)
   marginCallEvents: number;
   stopOutEvents: number;
+  stopOutDates?: string[];
   swapFeesTotal: number;     // Total overnight swap fees (usually negative for longs)
   fxFeesTotal: number;       // Total FX conversion fees
   firstDate: string | null;
@@ -178,6 +179,7 @@ export function simulateTrading212Cfd(
 
   let marginCallEvents = 0;
   let stopOutEvents = 0;
+  const stopOutDates: string[] = [];
 
   const history: Trading212AccountSnapshot[] = [];
   const trades: Trading212Trade[] = [];
@@ -203,6 +205,7 @@ export function simulateTrading212Cfd(
     // Stop-out: if marginStatus <= stopOutLevel * 100, close the position entirely
     if (position && marginStatus <= config.stopOutLevel * 100) {
       stopOutEvents++;
+      stopOutDates.push(bar.date);
 
       // Close at current price
       const diff = price - position.entryPrice;
@@ -420,6 +423,7 @@ export function simulateTrading212Cfd(
     maxDrawdown,
     marginCallEvents,
     stopOutEvents,
+    stopOutDates,
     swapFeesTotal: swapFeesAccrued,
     fxFeesTotal: fxFeesAccrued,
     firstDate,

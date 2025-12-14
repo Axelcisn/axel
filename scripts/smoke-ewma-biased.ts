@@ -8,14 +8,9 @@ import {
   DEFAULT_Z_BUCKETS,
 } from '@/lib/volatility/ewmaReaction';
 import { runEwmaWalker, EwmaWalkerPoint } from '@/lib/volatility/ewmaWalker';
+import { parseSymbolsFromArgv } from './_utils/cli';
 
 const DEFAULT_SYMBOLS = ['GOOGL', 'BAC', 'DIS', 'INTC', 'CSCO'] as const;
-
-type SymbolInput = string | typeof DEFAULT_SYMBOLS[number];
-
-function parseSymbols(argv: string[]): SymbolInput[] {
-  return argv.length ? argv : [...DEFAULT_SYMBOLS];
-}
 
 function computeNeutralZByDate(prices: number[], dates: string[], lambda: number, initialWindow: number) {
   const zMap = new Map<string, number>();
@@ -66,7 +61,7 @@ function summarizeDirectionHit(points: EwmaWalkerPoint[]) {
   return { hits, total: points.length, hitRate: points.length ? hits / points.length : 0 };
 }
 
-async function runForSymbol(symbol: SymbolInput) {
+async function runForSymbol(symbol: string) {
   console.log(`\n=== ${symbol} ===`);
   const { rows, meta } = await ensureCanonicalOrHistory(symbol, { minRows: 260, interval: '1d' });
   console.log(`Rows: ${rows.length}, tz: ${meta.exchange_tz}`);
@@ -147,7 +142,7 @@ async function runForSymbol(symbol: SymbolInput) {
 }
 
 async function main() {
-  const symbols = parseSymbols(process.argv.slice(2));
+  const symbols = parseSymbolsFromArgv(process.argv.slice(2), [...DEFAULT_SYMBOLS]);
   for (const s of symbols) {
     try {
       await runForSymbol(s);

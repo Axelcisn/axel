@@ -12,15 +12,17 @@ import {
 } from '@/lib/volatility/ewmaReaction';
 import {
   runEwmaWalker,
+  summarizeEwmaWalkerResults,
   type EwmaWalkerPoint,
 } from '@/lib/volatility/ewmaWalker';
 import {
   simulateTrading212Cfd,
   type Trading212CfdConfig,
   type Trading212SimBar,
-  type Trading212SimulationResult,
 } from '@/lib/backtest/trading212Cfd';
 import { computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
+import { parseSymbolsFromArgv } from './_utils/cli';
+import { summarizeTrading212Result } from './_utils/t212Summary';
 
 interface SimSummary {
   symbol: string;
@@ -30,6 +32,13 @@ interface SimSummary {
   trades: number;
   stopOuts: number;
   sharpeApprox?: number;
+  lambda: number;
+  trainFraction: number;
+  cagrPct: number | null;
+  finalEquity: number;
+  initialEquity: number;
+  years: number | null;
+  multiplier: number | null;
 }
 
 type VariantId = SimSummary['variant'];
@@ -128,12 +137,10 @@ function buildBarsFromEwmaPath(
 function summarizeSim(
   symbol: string,
   variant: VariantId,
-  result: Trading212SimulationResult
+  result: ReturnType<typeof simulateTrading212Cfd>,
+  config: { lambda: number; trainFraction: number }
 ): SimSummary {
-  const totalReturnPct = ((result.finalEquity - result.initialEquity) / result.initialEquity) * 100;
-  const maxDrawdownPct = result.maxDrawdown * 100;
-  const trades = result.trades.length;
-  const stopOuts = result.stopOutEvents ?? 0;
+  const summary = summarizeTrading212Result(result);
 
   let sharpeApprox: number | undefined;
   if (result.accountHistory.length > 1) {
@@ -156,19 +163,72 @@ function summarizeSim(
     }
   }
 
-  if (!Number.isFinite(totalReturnPct) || !Number.isFinite(maxDrawdownPct)) {
-    throw new Error(`Non-finite summary for ${symbol} ${variant}`);
-  }
-
   return {
     symbol,
     variant,
-    totalReturnPct,
-    maxDrawdownPct,
-    trades,
-    stopOuts,
+    totalReturnPct: summary.returnPct * 100,
+    maxDrawdownPct: (summary.maxDrawdownPct ?? 0) * 100,
+    trades: summary.trades,
+    stopOuts: summary.stopOuts,
+    cagrPct: summary.cagrPct,
+    finalEquity: summary.finalEquity,
+    initialEquity: summary.initialEquity,
+    years: summary.years,
+    multiplier: summary.multiplier,
     sharpeApprox,
+    lambda: config.lambda,
+    trainFraction: config.trainFraction,
   };
+}
+
+function filterRowsForSim(
+  rows: Array<{ date: string; adj_close: number | null; close: number | null }>,
+  startDate: string | null
+) {
+  if (!startDate) return rows;
+  return rows.filter((r) => r.date >= startDate);
+}
+
+async function optimizeBiasedConfig(
+  symbol: string,
+  coverage: number,
+  horizon: number,
+  shrinkFactor: number
+): Promise<{ lambda: number; trainFraction: number }> {
+  const lambdaGrid = Array.from({ length: 11 }, (_, i) => 0.5 + i * 0.05); // 0.50..1.00
+  const trainGrid = Array.from({ length: 9 }, (_, i) => 0.5 + i * 0.05); // 0.50..0.90
+
+  let best: { lambda: number; trainFraction: number; hit: number } | null = null;
+
+  for (const lambda of lambdaGrid) {
+    for (const trainFraction of trainGrid) {
+      try {
+        const reactionConfig = {
+          ...defaultReactionConfig,
+          lambda,
+          coverage,
+          trainFraction,
+          horizons: [horizon],
+          minTrainObs: MIN_TRAIN_OBS,
+        };
+        const reactionMap = await buildEwmaReactionMap(symbol, reactionConfig);
+        const tiltConfig = buildEwmaTiltConfigFromReactionMap(reactionMap, { shrinkFactor, horizon });
+        const walk = await runEwmaWalker({ symbol, lambda, coverage, horizon, tiltConfig });
+        // Use directionHitRate as a simple objective (same as Timing page optimizer)
+        const summary = summarizeEwmaWalkerResults(walk);
+        const hitRate = summary?.directionHitRate ?? 0;
+        if (!best || hitRate > best.hit) {
+          best = { lambda, trainFraction, hit: hitRate };
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  return best
+    ? { lambda: best.lambda, trainFraction: best.trainFraction }
+    : { lambda: LAMBDA, trainFraction: TRAIN_FRACTION };
 }
 
 async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
@@ -214,7 +274,7 @@ async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
     }
   }
 
-  const reactionMap = await buildEwmaReactionMap(symbol, {
+  const reactionMapBase = await buildEwmaReactionMap(symbol, {
     ...defaultReactionConfig,
     lambda: LAMBDA,
     coverage: COVERAGE,
@@ -223,7 +283,7 @@ async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
     minTrainObs: MIN_TRAIN_OBS,
   });
 
-  const tiltConfig = buildEwmaTiltConfigFromReactionMap(reactionMap, {
+  const tiltConfigBase = buildEwmaTiltConfigFromReactionMap(reactionMapBase, {
     shrinkFactor: SHRINK_FACTOR,
     horizon: HORIZON,
   });
@@ -233,12 +293,36 @@ async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
     lambda: LAMBDA,
     coverage: COVERAGE,
     horizon: HORIZON,
-    tiltConfig,
+    tiltConfig: tiltConfigBase,
   });
 
-  // For this smoke test, reuse the same path for "max" to isolate Trend tilt impact.
+  // Max-config: optimize lambda/trainFraction, then build a separate path
+  const maxConfig = await optimizeBiasedConfig(symbol, COVERAGE, HORIZON, SHRINK_FACTOR);
+  const reactionMapMax = await buildEwmaReactionMap(symbol, {
+    ...defaultReactionConfig,
+    lambda: maxConfig.lambda,
+    coverage: COVERAGE,
+    horizons: [HORIZON],
+    trainFraction: maxConfig.trainFraction,
+    minTrainObs: MIN_TRAIN_OBS,
+  });
+  const tiltConfigMax = buildEwmaTiltConfigFromReactionMap(reactionMapMax, {
+    shrinkFactor: SHRINK_FACTOR,
+    horizon: HORIZON,
+  });
+  const ewmaBiasedMax = await runEwmaWalker({
+    symbol,
+    lambda: maxConfig.lambda,
+    coverage: COVERAGE,
+    horizon: HORIZON,
+    tiltConfig: tiltConfigMax,
+  });
+
   const pathBiased = ewmaBiased.points;
-  const pathBiasedMax = pathBiased;
+  const pathBiasedMax = ewmaBiasedMax.points;
+
+  const simWindowBaseStart = reactionMapBase.meta?.testStart ?? null;
+  const simWindowMaxStart = reactionMapMax.meta?.testStart ?? simWindowBaseStart ?? null;
 
   const variants: VariantId[] = ['biased', 'biased-trend', 'biased-max', 'biased-max-trend'];
   const results: Record<VariantId, SimSummary> = {} as any;
@@ -253,9 +337,15 @@ async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
       continue; // skip Trend variants if we lack calibration
     }
 
-    const path = variant.startsWith('biased-max') ? pathBiasedMax : pathBiased;
+    const isMax = variant.startsWith('biased-max');
+    const path = isMax ? pathBiasedMax : pathBiased;
+    const windowStart = isMax ? simWindowMaxStart : simWindowBaseStart;
+    const lambdaCfg = isMax ? maxConfig.lambda : LAMBDA;
+    const trainCfg = isMax ? maxConfig.trainFraction : TRAIN_FRACTION;
 
-    const bars = buildBarsFromEwmaPath(canonicalRows, path, {
+    const rowsForSim = filterRowsForSim(canonicalRows, windowStart);
+
+    const bars = buildBarsFromEwmaPath(rowsForSim, path, {
       useTrendTilt: !!useTrendTilt,
       trendWeight,
       trendZByDate,
@@ -267,10 +357,33 @@ async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
     }
 
     const sim = simulateTrading212Cfd(bars, INITIAL_EQUITY, T212_CONFIG);
-    results[variant] = summarizeSim(symbol, variant, sim);
+    results[variant] = summarizeSim(symbol, variant, sim, {
+      lambda: lambdaCfg,
+      trainFraction: trainCfg,
+    });
   }
 
   const summaries = Object.values(results);
+
+  // Warn if max config differs but outputs identical
+  const base = results['biased'];
+  const max = results['biased-max'];
+  if (
+    base &&
+    max &&
+    (base.lambda !== max.lambda || base.trainFraction !== max.trainFraction) &&
+    Math.abs(base.totalReturnPct - max.totalReturnPct) < 1e-6 &&
+    Math.abs(base.maxDrawdownPct - max.maxDrawdownPct) < 1e-6 &&
+    base.trades === max.trades
+  ) {
+    console.warn(
+      `[WARN] ${symbol} biased-max uses different params (λ=${max.lambda.toFixed(
+        2
+      )}, train=${(max.trainFraction * 100).toFixed(
+        0
+      )}%) but produced identical metrics to biased; check path coupling`
+    );
+  }
 
   const warnIf = (baseId: VariantId, trendId: VariantId) => {
     const base = results[baseId];
@@ -304,15 +417,7 @@ async function runSmokeForSymbol(symbol: string): Promise<SimSummary[]> {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const symbolsArg = args.find((a) => a.startsWith('--symbols='));
-  const symbols = symbolsArg
-    ? symbolsArg
-        .split('=')[1]
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : ['AAPL', 'TSLA', 'MSFT'];
+  const symbols = parseSymbolsFromArgv(process.argv.slice(2), ['AAPL', 'TSLA', 'MSFT']);
 
   const all: SimSummary[] = [];
   for (const symbol of symbols) {
@@ -325,9 +430,17 @@ async function main() {
         [
           r.symbol.padEnd(6),
           r.variant.padEnd(16),
+          `λ=${r.lambda.toFixed(2)}`.padEnd(10),
+          `train=${(r.trainFraction * 100).toFixed(0)}%`.padEnd(12),
           `Ret: ${r.totalReturnPct.toFixed(2)}%`.padEnd(14),
+          r.multiplier != null ? `(x${r.multiplier.toFixed(2)})`.padEnd(10) : `(x—)`.padEnd(10),
           `DD: ${r.maxDrawdownPct.toFixed(2)}%`.padEnd(14),
           `Trades: ${r.trades}`.padEnd(12),
+          `StopOuts: ${r.stopOuts}`.padEnd(14),
+          `InitEq: ${r.initialEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.padEnd(20),
+          `FinalEq: ${r.finalEquity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.padEnd(22),
+          r.years != null ? `Years: ${r.years.toFixed(2)}`.padEnd(14) : `Years: —`.padEnd(14),
+          r.cagrPct != null ? `CAGR: ${(r.cagrPct * 100).toFixed(2)}%` : `CAGR: —`,
           r.sharpeApprox != null ? `Sharpe~ ${r.sharpeApprox.toFixed(2)}` : '',
         ].join('  ')
       );

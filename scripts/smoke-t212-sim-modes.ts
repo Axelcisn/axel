@@ -17,6 +17,8 @@ import {
   Trading212SimBar,
 } from '@/lib/backtest/trading212Cfd';
 import { CanonicalRow } from '@/lib/types/canonical';
+import { parseSymbolsFromArgv } from './_utils/cli';
+import { summarizeTrading212Result } from './_utils/t212Summary';
 
 const DEFAULT_SYMBOLS = ['CRM', 'NKE', 'ORCL', 'ABNB', 'TSM'] as const;
 
@@ -26,10 +28,6 @@ type EwmaRunBundle = {
   walk: { points: EwmaWalkerPoint[] };
   reactionMapTestStart: string | null;
 };
-
-function parseSymbols(argv: string[]): SymbolInput[] {
-  return argv.length ? argv : [...DEFAULT_SYMBOLS];
-}
 
 function filterRowsForSim(rows: CanonicalRow[], startDate: string | null): CanonicalRow[] {
   if (!startDate) return rows;
@@ -181,7 +179,7 @@ async function runForSymbol(symbol: SymbolInput) {
   const neutralWalk = await runEwmaWalker({ symbol, lambda: lambdaBase, coverage, horizon });
   const unbiasedBars = buildBarsFromEwmaPath(rows, neutralWalk.points, horizon, thresholdPct);
   const unbiasedSim = simulateTrading212Cfd(unbiasedBars, initialEquity, cfdConfig);
-  const unbiasedSummary = summarizeSim(unbiasedSim);
+  const unbiasedSummary = summarizeTrading212Result(unbiasedSim);
 
   // Biased walk (base)
   const biased = await runBiasedWalk(
@@ -195,7 +193,7 @@ async function runForSymbol(symbol: SymbolInput) {
   const biasedRows = filterRowsForSim(rows, biased.reactionMapTestStart);
   const biasedBars = buildBarsFromEwmaPath(biasedRows, biased.walk.points, horizon, thresholdPct);
   const biasedSim = simulateTrading212Cfd(biasedBars, initialEquity, cfdConfig);
-  const biasedSummary = summarizeSim(biasedSim);
+  const biasedSummary = summarizeTrading212Result(biasedSim);
   if (biasedSummary.trades === 0 && Math.abs(biasedSummary.returnPct) > 1e-6) {
     console.warn(
       `[SANITY] ${symbol} biased: non-zero return with zero trades; check bars/run wiring (bars=${biasedBars.length})`
@@ -220,46 +218,44 @@ async function runForSymbol(symbol: SymbolInput) {
     thresholdPct
   );
   const biasedMaxSim = simulateTrading212Cfd(biasedMaxBars, initialEquity, cfdConfig);
-  const biasedMaxSummary = summarizeSim(biasedMaxSim);
+  const biasedMaxSummary = summarizeTrading212Result(biasedMaxSim);
   if (biasedMaxSummary.trades === 0 && Math.abs(biasedMaxSummary.returnPct) > 1e-6) {
     console.warn(
       `[SANITY] ${symbol} biased-max: non-zero return with zero trades; check bars/run wiring (bars=${biasedMaxBars.length})`
     );
   }
 
-  const formatPct = (v: number) => `${(v * 100).toFixed(2)}%`;
+  const formatPct = (v: number | null | undefined) =>
+    v != null && Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : '—';
+  const formatUsd = (v: number | null | undefined) =>
+    v != null && Number.isFinite(v)
+      ? `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : '—';
 
-  console.log({
-    mode: 'unbiased',
-    returnPct: formatPct(unbiasedSummary.returnPct),
-    maxDrawdownPct: formatPct(unbiasedSummary.maxDrawdown),
-    trades: unbiasedSummary.trades,
-    winRate: formatPct(unbiasedSummary.winRate),
-  });
+  const logSummary = (label: string, summary: ReturnType<typeof summarizeTrading212Result>, extra?: Record<string, any>) => {
+    console.log({
+      mode: label,
+      ...(extra ?? {}),
+      returnPct: formatPct(summary.returnPct),
+      multiplier: summary.multiplier != null ? summary.multiplier.toFixed(2) : undefined,
+      finalEquity: formatUsd(summary.finalEquity),
+      initialEquity: formatUsd(summary.initialEquity),
+      years: summary.years != null ? summary.years.toFixed(2) : undefined,
+      maxDrawdownPct: formatPct(summary.maxDrawdownPct),
+      trades: summary.trades,
+      stopOuts: summary.stopOuts,
+      winRate: formatPct(summary.winRatePct),
+      cagr: formatPct(summary.cagrPct),
+    });
+  };
 
-  console.log({
-    mode: 'biased',
-    lambda: lambdaBase,
-    trainFraction: trainFractionBase,
-    returnPct: formatPct(biasedSummary.returnPct),
-    maxDrawdownPct: formatPct(biasedSummary.maxDrawdown),
-    trades: biasedSummary.trades,
-    winRate: formatPct(biasedSummary.winRate),
-  });
-
-  console.log({
-    mode: 'biased-max',
-    lambda: best.lambda,
-    trainFraction: best.trainFraction,
-    returnPct: formatPct(biasedMaxSummary.returnPct),
-    maxDrawdownPct: formatPct(biasedMaxSummary.maxDrawdown),
-    trades: biasedMaxSummary.trades,
-    winRate: formatPct(biasedMaxSummary.winRate),
-  });
+  logSummary('unbiased', unbiasedSummary);
+  logSummary('biased', biasedSummary, { lambda: lambdaBase, trainFraction: trainFractionBase });
+  logSummary('biased-max', biasedMaxSummary, { lambda: best.lambda, trainFraction: best.trainFraction });
 }
 
 async function main() {
-  const symbols = parseSymbols(process.argv.slice(2));
+  const symbols = parseSymbolsFromArgv(process.argv.slice(2), [...DEFAULT_SYMBOLS]);
   for (const s of symbols) {
     try {
       await runForSymbol(s);

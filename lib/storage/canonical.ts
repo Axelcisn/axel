@@ -110,7 +110,7 @@ export async function loadCanonicalDataWithYahooSupplement(symbol: string): Prom
   if (isStale || needsDepth) {
     try {
       // Fetch a deeper history when we don't have enough rows to satisfy EWMA defaults
-      const yahooRange = needsDepth ? "5y" : "1mo";
+      const yahooRange = needsDepth ? "max" : "1mo";
       let yahooRows = await fetchYahooOhlcv(symbol, { range: yahooRange, interval: "1d" });
       
       // IMPORTANT: Filter out today's incomplete bar if market hasn't closed
@@ -137,7 +137,7 @@ export async function loadCanonicalDataWithYahooSupplement(symbol: string): Prom
   if (canonicalRows.length === 0) {
     throw new Error(`No data found for ${symbol}`);
   }
-  
+
   return canonicalRows;
 }
 
@@ -148,16 +148,41 @@ export async function loadCanonicalDataWithYahooSupplement(symbol: string): Prom
  */
 export async function ensureCanonicalOrHistory(
   symbol: string,
-  opts?: { minRows?: number; interval?: '1d'; persist?: boolean }
+  opts?: { minRows?: number; interval?: '1d'; persist?: boolean; forceMaxRefresh?: boolean }
 ): Promise<CanonicalData> {
   const minRows = opts?.minRows ?? 252;
   const interval = opts?.interval ?? '1d';
   const persist = opts?.persist !== false;
+  const forceMaxRefresh = opts?.forceMaxRefresh === true;
 
   let existing: CanonicalData | null = null;
   try {
     existing = await loadCanonicalDataWithMeta(symbol);
-    if (existing.rows.length >= minRows) {
+    const hasRange = (existing.meta as any)?.range;
+    const prevRange = typeof hasRange === "string" ? hasRange : null;
+    const prevStart = existing.meta?.calendar_span?.start ?? null;
+    const prevRows = existing.rows.length;
+
+    const isLikelyShallowDaily =
+      interval === "1d" &&
+      (
+        (prevRange != null && prevRange !== "max") ||
+        (
+          !prevRange &&
+          prevRows >= 1000 &&
+          prevRows <= 2000 &&
+          (() => {
+            if (!prevStart) return false;
+            const startYear = Number(prevStart.slice(0, 4));
+            if (!Number.isFinite(startYear)) return false;
+            const currentYear = new Date().getUTCFullYear();
+            return currentYear - startYear <= 7;
+          })()
+        ) ||
+        forceMaxRefresh
+      );
+
+    if (existing.rows.length >= minRows && !isLikelyShallowDaily) {
       return existing;
     }
   } catch {
@@ -242,6 +267,7 @@ export async function ensureCanonicalOrHistory(
     missing_trading_days: existing?.meta?.missing_trading_days ?? [],
     invalid_rows: existing?.meta?.invalid_rows ?? 0,
     generated_at: new Date().toISOString(),
+    range: "max",
   };
 
   if (mergedRows.length === 0) {
@@ -252,6 +278,18 @@ export async function ensureCanonicalOrHistory(
     // Persist using the same canonical writer as uploads
     const { saveCanonical } = await import('./fsStore');
     await saveCanonical(symbol, { rows: mergedRows, meta });
+    if (process.env.NODE_ENV !== "production") {
+      const prevRange = existing?.meta ? (existing.meta as any).range ?? null : null;
+      const prevStart = existing?.meta?.calendar_span?.start ?? null;
+      console.log("[canonical] refresh shallow cache -> max", {
+        symbol,
+        prevRange,
+        prevRows: existing?.rows.length ?? 0,
+        newRows: mergedRows.length,
+        prevStart,
+        newStart: mergedRows[0]?.date ?? null,
+      });
+    }
   }
 
   return { rows: mergedRows, meta };
