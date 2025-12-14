@@ -20,7 +20,6 @@ import { useDarkMode } from "@/lib/hooks/useDarkMode";
 import {
   sliceByRange,
   calculateRangePerformance,
-  getRangeLabel,
   type PriceRange,
 } from "@/lib/chart/ranges";
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
@@ -41,6 +40,46 @@ const EWMA_BIASED_MAX_COLOR_RGB = '250, 204, 21';
 const SYNC_ID = "timing-sync";
 const CHART_MARGIN = { top: 8, right: 16, left: 16, bottom: 0 };
 const Y_AXIS_WIDTH = 56;
+const TOOLTIP_CLASS =
+  "rounded-xl border shadow-2xl backdrop-blur-xl bg-slate-800/40 border-slate-600/30 text-slate-100 px-4 py-3";
+const TOOLTIP_TITLE_CLASS = "text-slate-100 font-semibold";
+const TOOLTIP_MUTED_CLASS = "text-slate-300";
+
+const getBarSizing = (n: number) => {
+  // Fill the available category width; zero gap for full-width bars
+  return { barCategoryGap: "0%", barGap: 0, maxBarSize: undefined as number | undefined };
+};
+
+const CalendarRangeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
+    <rect x="3" y="5" width="18" height="16" rx="2" ry="2" strokeWidth="1.5" />
+    <path d="M3 10h18" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M8 3v4" strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M16 3v4" strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+const ChevronDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
+    <path
+      d="M6 9l6 6 6-6"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const CheckIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
+    <path
+      d="M5 13l4 4L19 7"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 const makeEwmaDot = (color: string) => (props: any) => {
   const dot = AnimatedPriceDot(props);
@@ -207,8 +246,30 @@ export interface EwmaWalkerPathPoint {
 type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
 type GarchEstimator = 'Normal' | 'Student-t';
 type RangeEstimator = 'P' | 'GK' | 'RS' | 'YZ';
-export type DateRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
-export type SimCompareRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
+export type DateRangePreset =
+  | "chart"
+  | "1d"
+  | "5d"
+  | "1m"
+  | "3m"
+  | "6m"
+  | "ytd"
+  | "1y"
+  | "5y"
+  | "all"
+  | "custom";
+export type SimCompareRangePreset =
+  | "chart"
+  | "1d"
+  | "5d"
+  | "1m"
+  | "3m"
+  | "6m"
+  | "ytd"
+  | "1y"
+  | "5y"
+  | "all"
+  | "custom";
 
 interface RecommendedModelInfo {
   volModel: VolModel;
@@ -387,16 +448,20 @@ interface PriceChartProps {
   trendWeightUpdatedAt?: string | null;
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
   simComparePreset?: SimCompareRangePreset;
-  simCompareWindow?: { start: string; end: string } | null;
+  visibleWindow?: { start: string; end: string } | null;
   onChangeSimComparePreset?: (p: SimCompareRangePreset) => void;
   onChangeSimCompareCustom?: (start: string, end: string) => void;
-  onPriceViewWindowChange?: (w: { start: string; end: string }) => void;
+  onVisibleWindowChange?: (
+    w: { start: string; end: string } | null,
+    source: "chart" | "pill" | "dropdown"
+  ) => void;
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
   "1D",
   "5D", 
   "1M",
+  "3M",
   "6M",
   "YTD",
   "1Y",
@@ -447,10 +512,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   trendWeightUpdatedAt = null,
   simulationRuns,
   simComparePreset,
-  simCompareWindow,
+  visibleWindow,
   onChangeSimComparePreset,
   onChangeSimCompareCustom,
-  onPriceViewWindowChange,
+  onVisibleWindowChange,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
@@ -535,8 +600,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [simulationPositionPct, setSimulationPositionPct] = useState(25);
   const [simulationBiasThreshold, setSimulationBiasThreshold] = useState(0);
   const [showSimRangeMenu, setShowSimRangeMenu] = useState(false);
-  const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(simCompareWindow?.start ?? "");
-  const [customSimRangeEnd, setCustomSimRangeEnd] = useState<string>(simCompareWindow?.end ?? "");
+  const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(visibleWindow?.start ?? "");
+  const [customSimRangeEnd, setCustomSimRangeEnd] = useState<string>(visibleWindow?.end ?? "");
   
   // Click outside to close Model settings dropdown
   useEffect(() => {
@@ -641,53 +706,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [symbol]);
 
   useEffect(() => {
-    if (simCompareWindow) {
-      setCustomSimRangeStart(simCompareWindow.start);
-      setCustomSimRangeEnd(simCompareWindow.end);
+    if (visibleWindow) {
+      setCustomSimRangeStart(visibleWindow.start);
+      setCustomSimRangeEnd(visibleWindow.end);
     }
-  }, [simCompareWindow]);
-
-  const simRangeLabel = useMemo(
-    () => formatRangeLabel(simCompareWindow ?? null),
-    [simCompareWindow]
-  );
-  const simRangePresetLabel = useMemo(() => {
-    switch (simComparePreset) {
-      case "chart":
-        return "Range from chart";
-      case "7d":
-        return "Last 7 days";
-      case "30d":
-        return "Last 30 days";
-      case "90d":
-        return "Last 90 days";
-      case "365d":
-        return "Last 365 days";
-      case "custom":
-        return "Custom range";
-      case "all":
-      default:
-        return "Entire history";
-    }
-  }, [simComparePreset]);
-  const handleSimRangePreset = useCallback(
-    (preset: SimCompareRangePreset) => {
-      onChangeSimComparePreset?.(preset);
-      setShowSimRangeMenu(false);
-    },
-    [onChangeSimComparePreset]
-  );
-  const handleApplyCustomRange = useCallback(() => {
-    if (!customSimRangeStart || !customSimRangeEnd) return;
-    onChangeSimCompareCustom?.(customSimRangeStart, customSimRangeEnd);
-    onChangeSimComparePreset?.("custom");
-    setShowSimRangeMenu(false);
-  }, [
-    customSimRangeEnd,
-    customSimRangeStart,
-    onChangeSimCompareCustom,
-    onChangeSimComparePreset,
-  ]);
+  }, [visibleWindow]);
 
   // Insights tab state (TradingView-style)
   type InsightTab =
@@ -711,49 +734,190 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     [fullData]
   );
 
-  // Current price-chart window in date space (for syncing axes)
-  const priceViewWindow = useMemo(() => {
-    const win = getCurrentWindow(fullData, selectedRange, viewStartIdx, viewEndIdx);
-    if (!win || fullData.length === 0) {
-      return { start: null, end: null };
+  const normalizedVisibleWindow = useMemo(
+    () =>
+      visibleWindow
+        ? {
+            start: normalizeDateString(visibleWindow.start),
+            end: normalizeDateString(visibleWindow.end),
+          }
+        : null,
+    [visibleWindow]
+  );
+
+  const commitWindowFromIndices = useCallback(
+    (startIdx: number, endIdx: number, source: "chart" | "pill" | "dropdown") => {
+      if (fullData.length === 0) return;
+      const clampedStart = Math.max(0, Math.min(startIdx, fullData.length - 1));
+      const clampedEnd = Math.max(clampedStart, Math.min(endIdx, fullData.length - 1));
+      const startDate = fullData[clampedStart]?.date;
+      const endDate = fullData[clampedEnd]?.date;
+      if (!startDate || !endDate) return;
+
+      setViewStartIdx(clampedStart);
+      setViewEndIdx(clampedEnd);
+      onVisibleWindowChange?.(
+        { start: normalizeDateString(startDate), end: normalizeDateString(endDate) },
+        source
+      );
+    },
+    [fullData, onVisibleWindowChange]
+  );
+
+  const clampWindowToDates = useCallback(
+    (startDate: string, endDate: string) => {
+      if (fullData.length === 0) return null;
+      const normalizedStart = normalizeDateString(startDate);
+      const normalizedEnd = normalizeDateString(endDate);
+
+      const startIdx = fullData.findIndex((p) => p.date >= normalizedStart);
+      let endIdx = -1;
+      for (let i = fullData.length - 1; i >= 0; i--) {
+        if (fullData[i].date <= normalizedEnd) {
+          endIdx = i;
+          break;
+        }
+      }
+      if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) return null;
+      return { startIdx, endIdx };
+    },
+    [fullData]
+  );
+
+  const simRangeLabel = useMemo(
+    () => formatRangeLabel(visibleWindow ?? null),
+    [visibleWindow]
+  );
+
+  const quickRangePresets: Array<{ id: SimCompareRangePreset; label: string; spanFull?: boolean }> = [
+    { id: "1d", label: "1D" },
+    { id: "5d", label: "5D" },
+    { id: "1m", label: "1M" },
+    { id: "3m", label: "3M" },
+    { id: "6m", label: "6M" },
+    { id: "ytd", label: "YTD" },
+    { id: "1y", label: "1Y" },
+    { id: "5y", label: "5Y" },
+    { id: "all", label: "ALL", spanFull: true },
+  ];
+
+  const handleSimRangePreset = useCallback(
+    (preset: SimCompareRangePreset) => {
+      onChangeSimComparePreset?.(preset);
+      setShowSimRangeMenu(false);
+
+      if (preset === "chart") {
+        if (normalizedVisibleWindow) {
+          const indices = clampWindowToDates(
+            normalizedVisibleWindow.start,
+            normalizedVisibleWindow.end
+          );
+          if (indices) {
+            commitWindowFromIndices(indices.startIdx, indices.endIdx, "dropdown");
+          }
+        } else if (fullData.length > 0) {
+          const [startIdx, endIdx] = computeDefaultWindowForRange(fullData, selectedRange);
+          commitWindowFromIndices(startIdx, endIdx, "dropdown");
+        }
+        return;
+      }
+
+      if (preset === "all" && fullData.length > 0) {
+        commitWindowFromIndices(0, fullData.length - 1, "dropdown");
+        return;
+      }
+
+      if (preset === "custom") {
+        if (customSimRangeStart && customSimRangeEnd) {
+          const indices = clampWindowToDates(customSimRangeStart, customSimRangeEnd);
+          if (indices) {
+            commitWindowFromIndices(indices.startIdx, indices.endIdx, "dropdown");
+          }
+        }
+        return;
+      }
+
+      const priceRangePresetMap: Partial<Record<SimCompareRangePreset, PriceRange>> = {
+        "1d": "1D",
+        "5d": "5D",
+        "1m": "1M",
+        "3m": "3M",
+        "6m": "6M",
+        ytd: "YTD",
+        "1y": "1Y",
+        "5y": "5Y",
+      };
+      const mappedRange = priceRangePresetMap[preset];
+      if (mappedRange && fullData.length > 0) {
+        setSelectedRange(mappedRange);
+        const [startIdx, endIdx] = computeDefaultWindowForRange(fullData, mappedRange);
+        commitWindowFromIndices(startIdx, endIdx, "dropdown");
+        return;
+      }
+    },
+    [
+      clampWindowToDates,
+      commitWindowFromIndices,
+      customSimRangeEnd,
+      customSimRangeStart,
+      fullData,
+      normalizedVisibleWindow,
+      onChangeSimComparePreset,
+      selectedRange,
+    ]
+  );
+
+  const handleApplyCustomRange = useCallback(() => {
+    if (!customSimRangeStart || !customSimRangeEnd) return;
+    onChangeSimCompareCustom?.(customSimRangeStart, customSimRangeEnd);
+    onChangeSimComparePreset?.("custom");
+    const indices = clampWindowToDates(customSimRangeStart, customSimRangeEnd);
+    if (indices) {
+      commitWindowFromIndices(indices.startIdx, indices.endIdx, "dropdown");
     }
-    const startIdx = Math.max(0, Math.min(win.start, fullData.length - 1));
-    const endIdx = Math.max(0, Math.min(win.end, fullData.length - 1));
-    const start = fullData[startIdx]?.date ?? null;
-    const end = fullData[endIdx]?.date ?? null;
-    return {
-      start: start ? normalizeDateString(start) : null,
-      end: end ? normalizeDateString(end) : null,
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
+    setShowSimRangeMenu(false);
+  }, [
+    clampWindowToDates,
+    commitWindowFromIndices,
+    customSimRangeEnd,
+    customSimRangeStart,
+    onChangeSimCompareCustom,
+    onChangeSimComparePreset,
+  ]);
+
   useEffect(() => {
-    if (!simCompareWindow || fullData.length === 0) return;
-    const startIdx = fullData.findIndex((p) => p.date >= simCompareWindow.start);
+    if (normalizedVisibleWindow || fullData.length === 0) return;
+    const [startIdx, endIdx] = computeDefaultWindowForRange(fullData, selectedRange);
+    const startDate = fullData[startIdx]?.date;
+    const endDate = fullData[endIdx]?.date;
+    if (!startDate || !endDate) return;
+    setViewStartIdx(startIdx);
+    setViewEndIdx(endIdx);
+    onVisibleWindowChange?.(
+      { start: normalizeDateString(startDate), end: normalizeDateString(endDate) },
+      "chart"
+    );
+  }, [fullData, normalizedVisibleWindow, onVisibleWindowChange, selectedRange]);
+
+  useEffect(() => {
+    if (!normalizedVisibleWindow || fullData.length === 0) return;
+    const startIdx = fullData.findIndex((p) => p.date >= normalizedVisibleWindow.start);
     let endIdx = -1;
     for (let i = fullData.length - 1; i >= 0; i--) {
-      if (fullData[i].date <= simCompareWindow.end) {
+      if (fullData[i].date <= normalizedVisibleWindow.end) {
         endIdx = i;
         break;
       }
     }
     if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-      // Only update if indices actually changed to prevent infinite loops
       if (startIdx !== viewStartIdx || endIdx !== viewEndIdx) {
         setViewStartIdx(startIdx);
         setViewEndIdx(endIdx);
       }
     }
-  }, [fullData, simCompareWindow, viewStartIdx, viewEndIdx]);
-  const activeSimWindow = useMemo(() => {
-    const start = simCompareWindow?.start ?? priceViewWindow.start;
-    const end = simCompareWindow?.end ?? priceViewWindow.end;
-    if (!start || !end) return null;
-    return {
-      start: normalizeDateString(start),
-      end: normalizeDateString(end),
-    };
-  }, [priceViewWindow.end, priceViewWindow.start, simCompareWindow]);
+  }, [fullData, normalizedVisibleWindow, viewEndIdx, viewStartIdx]);
+
+  const activeSimWindow = useMemo(() => normalizedVisibleWindow, [normalizedVisibleWindow]);
 
   // Helper to parse rows into PricePoint[]
   const parseRowsToPoints = (rows: any[]): PricePoint[] => {
@@ -973,7 +1137,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const total = data.length;
     if (total === 0) return null;
 
-    const [baseStart, baseEnd] = computeDefaultWindowForRange(data, range);
+    const visibleIndices = normalizedVisibleWindow
+      ? clampWindowToDates(normalizedVisibleWindow.start, normalizedVisibleWindow.end)
+      : null;
+    const [baseStart, baseEnd] = visibleIndices
+      ? [visibleIndices.startIdx, visibleIndices.endIdx]
+      : computeDefaultWindowForRange(data, range);
     const currentStart = startIdx ?? baseStart;
     const currentEnd = endIdx ?? baseEnd;
 
@@ -1010,9 +1179,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       newStart = newEnd - windowSize + 1;
     }
 
-    setViewStartIdx(newStart);
-    setViewEndIdx(newEnd);
-    onChangeSimComparePreset?.("chart");
+    commitWindowFromIndices(newStart, newEnd, "chart");
   };
 
   // Zoom In: shrink window around hovered index (or center)
@@ -1050,11 +1217,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       newStart = newEnd - newSize + 1;
     }
 
-    setViewStartIdx(newStart);
-    setViewEndIdx(newEnd);
-    onChangeSimComparePreset?.("chart");
+    commitWindowFromIndices(newStart, newEnd, "chart");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
+  }, [commitWindowFromIndices, fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Zoom Out: expand window around hovered index (or center)
   const zoomOut = useCallback(() => {
@@ -1070,8 +1235,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     if (windowSize >= baseSize) {
       // Already at base window – reset any overrides
-      setViewStartIdx(null);
-      setViewEndIdx(null);
+      commitWindowFromIndices(baseStart, baseEnd, "chart");
       return;
     }
 
@@ -1096,10 +1260,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       newStart = newEnd - newSize + 1;
     }
 
-    setViewStartIdx(newStart);
-    setViewEndIdx(newEnd);
+    commitWindowFromIndices(newStart, newEnd, "chart");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
+  }, [commitWindowFromIndices, fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Pan left/right by ~30% of current window size
   const panStepFraction = 0.3;
@@ -1123,10 +1286,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       newStart = newEnd - windowSize + 1;
     }
 
-    setViewStartIdx(newStart);
-    setViewEndIdx(newEnd);
+    commitWindowFromIndices(newStart, newEnd, "chart");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
+  }, [commitWindowFromIndices, fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   const panRight = useCallback(() => {
     const total = fullData.length;
@@ -1147,16 +1309,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       newEnd = newStart + windowSize - 1;
     }
 
-    setViewStartIdx(newStart);
-    setViewEndIdx(newEnd);
+    commitWindowFromIndices(newStart, newEnd, "chart");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fullData, selectedRange, viewStartIdx, viewEndIdx]);
+  }, [commitWindowFromIndices, fullData, selectedRange, viewStartIdx, viewEndIdx]);
 
   // Reset view to base window for current range
-  const resetViewWindow = () => {
-    setViewStartIdx(null);
-    setViewEndIdx(null);
-  };
+  const resetViewWindow = useCallback(() => {
+    if (fullData.length === 0) return;
+    if (normalizedVisibleWindow) {
+      const indices = clampWindowToDates(normalizedVisibleWindow.start, normalizedVisibleWindow.end);
+      if (indices) {
+        commitWindowFromIndices(indices.startIdx, indices.endIdx, "chart");
+        return;
+      }
+    }
+    const [startIdx, endIdx] = computeDefaultWindowForRange(fullData, selectedRange);
+    commitWindowFromIndices(startIdx, endIdx, "chart");
+  }, [clampWindowToDates, commitWindowFromIndices, fullData, normalizedVisibleWindow, selectedRange]);
 
   // Scroll-wheel zoom/pan handler with accumulator for smoother experience
   const handleWheelOnChart = useCallback(
@@ -1265,6 +1434,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         return clampLast(5);
       case "1M":
         return clampLast(21);
+      case "3M":
+        return clampLast(63);
       case "6M":
         return clampLast(126);
       case "1Y":
@@ -1284,23 +1455,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
   }
 
-  // Reset zoom when changing ranges manually
-  const handleRangeChange = (range: PriceRange) => {
-    setSelectedRange(range);
-    setZoomDays(null);
-
-    if (fullData.length > 0) {
-      const [start, end] = computeDefaultWindowForRange(fullData, range);
-      setViewStartIdx(start);
-      setViewEndIdx(end);
-      onChangeSimComparePreset?.("chart");
-    } else {
-      setViewStartIdx(null);
-      setViewEndIdx(null);
-      onChangeSimComparePreset?.("chart");
-    }
-  };
-
   // Compute range data and performance
   const { rangeData, perfByRange } = useMemo(() => {
     if (fullData.length === 0) {
@@ -1318,36 +1472,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       perfMap[range] = perfResult?.percentage ?? null;
     }
 
-    // If a global window is provided, prefer that slice for all charts
-    if (simCompareWindow) {
-      const start = normalizeDateString(simCompareWindow.start);
-      const end = normalizeDateString(simCompareWindow.end);
-      const slice = fullData.filter((p) => p.date >= start && p.date <= end);
-      return {
-        rangeData: slice,
-        perfByRange: perfMap,
-      };
-    }
+    const windowStart = normalizedVisibleWindow?.start ?? null;
+    const windowEnd = normalizedVisibleWindow?.end ?? null;
 
-    // Get data for selected range or explicit view window
     let rangeData: PricePoint[];
 
-    if (
+    if (windowStart && windowEnd) {
+      rangeData = fullData.filter((p) => p.date >= windowStart && p.date <= windowEnd);
+    } else if (
       viewStartIdx !== null &&
       viewEndIdx !== null &&
       viewStartIdx >= 0 &&
       viewEndIdx >= viewStartIdx &&
       viewStartIdx < fullData.length
     ) {
-      // New model: explicit index-based window over fullData
       const clampedEnd = Math.min(viewEndIdx, fullData.length - 1);
       rangeData = fullData.slice(viewStartIdx, clampedEnd + 1);
     } else if (zoomDays !== null) {
-      // Legacy zoomDays behaviour (will be refactored later)
       const baseRangeData = sliceByRange(fullData, selectedRange);
       rangeData = baseRangeData.slice(-zoomDays);
     } else {
-      // Legacy range behaviour
       rangeData = sliceByRange(fullData, selectedRange);
     }
 
@@ -1355,28 +1499,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       rangeData,
       perfByRange: perfMap,
     };
-  }, [fullData, selectedRange, zoomDays, viewStartIdx, viewEndIdx, simCompareWindow]);
+  }, [fullData, normalizedVisibleWindow, selectedRange, viewEndIdx, viewStartIdx, zoomDays]);
 
-  // Track previous window to avoid redundant callbacks that cause infinite loops
-  const prevPriceViewWindowRef = useRef<{ start: string; end: string } | null>(null);
-
-  useEffect(() => {
-    if (!onPriceViewWindowChange) return;
-    if (!rangeData || rangeData.length === 0) return;
-    if (simComparePreset !== "chart") return;
-
-    const start = rangeData[0].date;
-    const end = rangeData[rangeData.length - 1].date;
-    
-    // Only call callback if the window has actually changed
-    const prev = prevPriceViewWindowRef.current;
-    if (prev && prev.start === start && prev.end === end) {
-      return;
-    }
-    
-    prevPriceViewWindowRef.current = { start, end };
-    onPriceViewWindowChange({ start, end });
-  }, [onPriceViewWindowChange, rangeData, simComparePreset]);
+  const syncedDates = useMemo(
+    () => rangeData.map((p) => normalizeDateString(p.date)),
+    [rangeData]
+  );
+  const syncedDateSet = useMemo(() => new Set(syncedDates), [syncedDates]);
 
   // Derive last date and future dates
   const lastPoint = rangeData.length > 0 ? rangeData[rangeData.length - 1] : undefined;
@@ -1461,196 +1590,55 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return map;
   }, [trendLongSeries, showTrendEwma]);
 
-  // Create extended chartData with future placeholders
-  const chartData: ChartPoint[] = React.useMemo(() => {
-    // Log rangeData dates and compare with EWMA map
-    if (showTrendEwma && rangeData.length > 0 && trendEwmaShortMap) {
-      const rangeDates = rangeData.map(p => normalizeDateString(p.date));
-      const ewmaDates = Array.from(trendEwmaShortMap.keys());
-      
-      // Check overlap
-      const rangeSet = new Set(rangeDates);
-      const ewmaSet = new Set(ewmaDates);
-      const overlap = ewmaDates.filter(d => rangeSet.has(d));
-      
-      console.log("[PriceChart] DATE COMPARISON:", {
-        rangeDatesCount: rangeDates.length,
-        ewmaDatesCount: ewmaDates.length,
-        overlapCount: overlap.length,
-        rangeFirst3: rangeDates.slice(0, 3),
-        rangeLast3: rangeDates.slice(-3),
-        ewmaFirst3: ewmaDates.slice(0, 3),
-        ewmaLast3: ewmaDates.slice(-3),
-        rangeDataPrices: rangeData.slice(-3).map(p => ({ date: p.date, close: p.adj_close })),
-        ewmaValues: ewmaDates.slice(-3).map(d => ({ date: d, value: trendEwmaShortMap.get(d) })),
-      });
-    }
+  const priceByDate = useMemo(() => {
+    const map = new Map<string, PricePoint>();
+    rangeData.forEach((p) => map.set(normalizeDateString(p.date), p));
+    return map;
+  }, [rangeData]);
 
-    // Historical portion: same as rangeData, but mark as not future
-    const base: ChartPoint[] = rangeData.map((p) => {
-      const isBullish = p.close && p.open && p.close > p.open;
-      const chartDate = normalizeDateString(p.date);
-      
-      // Debug: log first match attempt
-      if (showTrendEwma && trendEwmaShortMap && p === rangeData[0]) {
-        const shortVal = trendEwmaShortMap.get(chartDate);
-        console.log("[PriceChart] First point lookup - chartDate:", chartDate, "shortMap has key:", trendEwmaShortMap.has(chartDate), "value:", shortVal);
-      }
+  // Create chartData aligned to the visible window (no future placeholders)
+  const chartData: ChartPoint[] = React.useMemo(() => {
+    return syncedDates.map((date) => {
+      const p = priceByDate.get(date);
+      const open = p?.open;
+      const close = p?.close;
+      const high = p?.high;
+      const low = p?.low;
+      const adjClose = p?.adj_close;
+      const volume = p?.volume;
+      const isBullish = close != null && open != null ? close > open : false;
 
       return {
-        date: chartDate,
-        value: p.adj_close,
-        open: p.open,
-        high: p.high,
-        low: p.low,
-        close: p.close,
-        volume: p.volume,
-        ewma_short: showTrendEwma ? ewmaShortMap.get(chartDate) ?? null : null,
-        ewma_long: showTrendEwma ? ewmaLongMap.get(chartDate) ?? null : null,
-        trendEwmaShort: showTrendEwma && trendEwmaShortMap ? trendEwmaShortMap.get(chartDate) ?? null : null,
-        trendEwmaLong: showTrendEwma && trendEwmaLongMap ? trendEwmaLongMap.get(chartDate) ?? null : null,
-        momentumScore: momentumMap.get(chartDate),
-        adxValue: adxMap.get(chartDate),
-        // Determine volume color based on price movement (modern glass palette with borders)
+        date,
+        value: adjClose ?? null,
+        open,
+        high,
+        low,
+        close,
+        volume,
+        ewma_short: showTrendEwma ? ewmaShortMap.get(date) ?? null : null,
+        ewma_long: showTrendEwma ? ewmaLongMap.get(date) ?? null : null,
+        trendEwmaShort:
+          showTrendEwma && trendEwmaShortMap ? trendEwmaShortMap.get(date) ?? null : null,
+        trendEwmaLong:
+          showTrendEwma && trendEwmaLongMap ? trendEwmaLongMap.get(date) ?? null : null,
+        momentumScore: momentumMap.get(date),
+        adxValue: adxMap.get(date),
         volumeColor: isBullish ? "rgba(52, 211, 153, 0.35)" : "rgba(251, 113, 133, 0.35)",
         volumeStroke: isBullish ? "rgba(16, 185, 129, 0.8)" : "rgba(244, 63, 94, 0.8)",
         isFuture: false as const,
       };
     });
-
-    // Determine if the current visible window ends at the latest bar in fullData.
-    const latestFullDate =
-      fullData.length > 0 ? fullData[fullData.length - 1].date : null;
-    const lastVisibleDate =
-      rangeData.length > 0 ? rangeData[rangeData.length - 1].date : null;
-
-    const atLatestBar =
-      latestFullDate != null &&
-      lastVisibleDate != null &&
-      lastVisibleDate === latestFullDate;
-
-    // Only build/append future points (forecast horizon) when the visible window
-    // includes the latest bar. If you pan/zoom away from the right edge, we
-    // don't show the forecast cone or extra future placeholders.
-    if (!atLatestBar) {
-      console.log(
-        "[PriceChart] trend fields sample (no future extension)",
-        {
-          range: selectedRange,
-          showTrendEwma,
-          sample: base.slice(0, 5).map((d) => ({
-            date: d.date,
-            trendEwmaShort: d.trendEwmaShort,
-            trendEwmaLong: d.trendEwmaLong,
-          })),
-        }
-      );
-
-      const nanTrendPoints = base.filter(
-        (p) => Number.isNaN(p.trendEwmaShort) || Number.isNaN(p.trendEwmaLong)
-      );
-      if (nanTrendPoints.length > 0) {
-      console.log("[PriceChart] trend NaN points (base)", {
-        range: selectedRange,
-        points: nanTrendPoints.slice(0, 5),
-      });
-      }
-
-      return base;
-    }
-
-    // Calculate target date for forecast overlay; anchor to the latest historical bar
-    // so the cone always starts from the right edge of the visible price series.
-    let forecastTargetDate: string | null = null;
-    const lastHistDateForForecast = rangeData.length > 0 ? rangeData[rangeData.length - 1].date : null;
-    if (forecastOverlay?.activeForecast) {
-      const af = forecastOverlay.activeForecast;
-      const forecastDateT = af.date_t || af.target_date || af.date;
-      // Anchor origin to whichever is later: the forecast's origin or the last visible bar.
-      const originDate =
-        lastHistDateForForecast && forecastDateT
-          ? lastHistDateForForecast > forecastDateT
-            ? lastHistDateForForecast
-            : forecastDateT
-          : forecastDateT || lastHistDateForForecast;
-
-      if (originDate && h) {
-        forecastTargetDate = calculateTargetDate(originDate, h);
-      }
-    }
-
-    // Combine future dates from horizon and forecast target
-    let allFutureDates = [...futureDates];
-    
-    // Ensure forecast target date is included
-    if (forecastTargetDate && !allFutureDates.includes(forecastTargetDate)) {
-      allFutureDates.push(forecastTargetDate);
-      allFutureDates.sort(); // Keep dates sorted
-    }
-
-    let result: ChartPoint[] = base;
-
-    if (allFutureDates.length) {
-      // Future placeholders: extend X-axis; line stops because value=null
-      const futurePoints: ChartPoint[] = allFutureDates.map((d) => ({
-        date: normalizeDateString(d),
-        value: null,
-        volume: undefined,
-        isFuture: true,
-      }));
-
-      result = [...base, ...futurePoints];
-    }
-
-    // Count how many points have trend EWMA values
-    const shortWithValue = result.filter((p) => p.trendEwmaShort != null).length;
-    const longWithValue = result.filter((p) => p.trendEwmaLong != null).length;
-    console.log(
-      "[PriceChart] trend fields sample",
-      {
-        range: selectedRange,
-        showTrendEwma,
-        totalPoints: result.length,
-        shortWithValue,
-        longWithValue,
-        sampleFirst5: result.slice(0, 5).map((d) => ({
-          date: d.date,
-          trendEwmaShort: d.trendEwmaShort,
-          trendEwmaLong: d.trendEwmaLong,
-        })),
-        sampleLast5: result.slice(-5).map((d) => ({
-          date: d.date,
-          trendEwmaShort: d.trendEwmaShort,
-          trendEwmaLong: d.trendEwmaLong,
-        })),
-      }
-    );
-
-    const nanTrendPoints = result.filter(
-      (p) => Number.isNaN(p.trendEwmaShort) || Number.isNaN(p.trendEwmaLong)
-    );
-    if (nanTrendPoints.length > 0) {
-      console.log("[PriceChart] trend NaN points", {
-        range: selectedRange,
-        points: nanTrendPoints.slice(0, 5),
-      });
-    }
-
-    return result;
   }, [
-    rangeData,
-    fullData,
-    futureDates,
-    h,
-    forecastOverlay?.activeForecast,
-    ewmaShortMap,
-    ewmaLongMap,
-    trendEwmaShortMap,
-    trendEwmaLongMap,
-    showTrendEwma,
-    momentumMap,
     adxMap,
-    selectedRange,
+    ewmaLongMap,
+    ewmaShortMap,
+    momentumMap,
+    priceByDate,
+    showTrendEwma,
+    syncedDates,
+    trendEwmaLongMap,
+    trendEwmaShortMap,
   ]);
 
   const trendCrossPoints = useMemo(() => {
@@ -2360,14 +2348,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     if (overlayDate && overlayCenter != null && lastHistoricalPoint) {
       const lastHistDate = lastHistoricalPoint.date;
       const lastHistValue = lastHistoricalPoint.close;
-      
+      const overlayDateNormalized = normalizeDateString(overlayDate);
+      const overlayAllowed = overlayDateNormalized ? syncedDateSet.has(overlayDateNormalized) : false;
+
+      if (!overlayAllowed) {
+        return data;
+      }
+
       // Check if overlayDate exists in data
-      const overlayDateExists = data.some(p => p.date === overlayDate);
-      
+      const overlayDateExists = data.some(p => p.date === overlayDateNormalized);
+
       // If overlayDate doesn't exist in data, add it
       if (!overlayDateExists) {
         data = [...data, {
-          date: overlayDate,
+          date: overlayDateNormalized,
           value: null,
           isFuture: true,
           forecastCenter: overlayCenter,
@@ -2388,10 +2382,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         // Sort by date to maintain order
         data.sort((a, b) => a.date.localeCompare(b.date));
       }
-      
+
       // Find the indices of the last historical point and the overlay date
       const lastHistIndex = data.findIndex(p => p.date === lastHistDate);
-      const overlayIndex = data.findIndex(p => p.date === overlayDate);
+      const overlayIndex = data.findIndex(p => p.date === overlayDateNormalized);
       
       // Update all points from lastHistDate to overlayDate with interpolated values
       // This ensures the line/area renders continuously
@@ -2453,7 +2447,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
     
     return data;
-  }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName, forecastModelMethod, forecastWindowN]);
+  }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName, forecastModelMethod, forecastWindowN, syncedDateSet]);
 
   // Compute Y-axis domain that includes EWMA values when overlay is active
   const priceYDomain = useMemo(() => {
@@ -2679,31 +2673,41 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [filteredEquityData]);
 
   // Dedicated Simulation equity series, sourced directly from t212AccountHistory (decoupled from EWMA/price data)
-const simulationEquityData = useMemo(() => {
-  const history = windowedAccountHistory.history;
-  if (!history || history.length === 0) return [];
+  const simulationEquityData = useMemo(() => {
+    const history = windowedAccountHistory.history;
+    if (syncedDates.length === 0) return [];
 
-  const series = history
-      .map((pt) => ({
-        date: pt.date ? normalizeDateString(pt.date) : "",
-        equity: typeof pt.equity === "number" && Number.isFinite(pt.equity) ? pt.equity : null,
-      }))
-      .filter((pt) => pt.date);
+    const equityMap = new Map<string, number>();
+    if (history && history.length > 0) {
+      history.forEach((pt) => {
+        const date = pt.date ? normalizeDateString(pt.date) : null;
+        if (date && typeof pt.equity === "number" && Number.isFinite(pt.equity)) {
+          equityMap.set(date, pt.equity);
+        }
+      });
+    }
 
-    if (series.length === 0) return [];
+    let lastEquity: number | null = null;
 
-    return series.map((pt, idx) => {
-      const prev = idx > 0 ? series[idx - 1].equity : pt.equity;
+    const aligned = syncedDates.map((date, idx) => {
+      const direct = equityMap.get(date) ?? null;
+      const equity = direct != null ? direct : lastEquity;
+      const prevEquity =
+        idx > 0 ? equityMap.get(syncedDates[idx - 1]) ?? lastEquity : equity;
       const equityDelta =
-        pt.equity != null && prev != null ? pt.equity - prev : null;
-
+        equity != null && prevEquity != null ? equity - prevEquity : null;
+      if (equity != null) {
+        lastEquity = equity;
+      }
       return {
-        date: pt.date,
-        equity: pt.equity,
+        date,
+        equity,
         equityDelta,
       };
     });
-  }, [windowedAccountHistory]);
+
+    return aligned;
+  }, [syncedDates, windowedAccountHistory]);
   const simViewLength = simulationEquityData.length;
   const simXAxisInterval = useMemo(() => {
     if (simViewLength <= 10) return 0;
@@ -2734,21 +2738,7 @@ const simulationEquityData = useMemo(() => {
     },
     [simViewLength]
   );
-  const simBarCategoryGap = useMemo(() => {
-    if (simViewLength <= 10) return "70%";
-    if (simViewLength <= 30) return "60%";
-    return "40%";
-  }, [simViewLength]);
-  const simBarGap = useMemo(() => {
-    if (simViewLength <= 10) return 4;
-    if (simViewLength <= 30) return 3;
-    return 2;
-  }, [simViewLength]);
-  const simMaxBarSize = useMemo(() => {
-    if (simViewLength <= 10) return 28;
-    if (simViewLength <= 30) return 26;
-    return 24;
-  }, [simViewLength]);
+  const sharedBarSizing = useMemo(() => getBarSizing(syncedDates.length || simViewLength || chartDataWithEquity.length || 0), [chartDataWithEquity.length, simViewLength, syncedDates.length]);
   const simShowDots = simViewLength > 0 && simViewLength <= 25;
   const equityYDomain = useMemo(() => {
     const equities = simulationEquityData
@@ -2967,7 +2957,7 @@ const simulationEquityData = useMemo(() => {
     return `${(v * 100).toFixed(precision)}%`;
   };
 
-  // Comprehensive trade summary for all tabs (windowed to simCompareWindow when provided)
+  // Comprehensive trade summary for all tabs (windowed to visibleWindow when provided)
   const tradeSummary = useMemo(() => {
     const allTrades = summaryTrades;
     const history = windowedAccountHistory.history;
@@ -3940,10 +3930,10 @@ const simulationEquityData = useMemo(() => {
           >
             <ComposedChart
               data={chartDataForRender}
-              margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
-                      syncId={SYNC_ID}
-              barCategoryGap="0%"
-              barGap={0}
+              margin={CHART_MARGIN}
+              syncId={SYNC_ID}
+              barCategoryGap={sharedBarSizing.barCategoryGap}
+              barGap={sharedBarSizing.barGap}
               onClick={(state: any) => {
                 chartClickHandlerRef.current?.(state);
               }}
@@ -4187,7 +4177,7 @@ const simulationEquityData = useMemo(() => {
               tickLine={false}
               tickMargin={8}
               minTickGap={50}
-              padding={{ left: 10, right: 10 }}
+              padding={{ left: 0, right: 0 }}
               interval="preserveStartEnd"
               tick={{
                 fontSize: 10,
@@ -4203,7 +4193,7 @@ const simulationEquityData = useMemo(() => {
             axisLine={false}
             tickLine={false}
             tickMargin={8}
-            width={45}
+            width={Y_AXIS_WIDTH}
             tick={{
               fontSize: 10,
               fill: isDarkMode ? "rgba(148, 163, 184, 0.9)" : "rgba(75, 85, 99, 0.9)",
@@ -4613,6 +4603,7 @@ const simulationEquityData = useMemo(() => {
               dataKey="volume"
               fill="#666"
               radius={[2, 2, 0, 0]}
+              maxBarSize={sharedBarSizing.maxBarSize}
             >
               {chartDataWithEquity.map((entry, index) => (
                 <Cell 
@@ -4817,8 +4808,8 @@ const simulationEquityData = useMemo(() => {
               <ResponsiveContainer width="100%" height={180}>
                 <ComposedChart
                   data={chartDataWithEquity}
-                  margin={{ top: 20, right: 0, left: 0, bottom: 20 }}
-                  syncId="price-equity-sync"
+                  margin={CHART_MARGIN}
+                  syncId={SYNC_ID}
                   barCategoryGap="0%"
                   barGap={0}
                   onMouseMove={applyHoverFromRechartsState}
@@ -4856,7 +4847,7 @@ const simulationEquityData = useMemo(() => {
                     tickLine={false}
                     tickMargin={8}
                     tick={{ fontSize: 10, fill: isDarkMode ? "#9ca3af" : "#6b7280" }}
-                    width={45}
+                    width={Y_AXIS_WIDTH}
                   />
                   <YAxis
                     yAxisId="momentum-volume"
@@ -5542,6 +5533,224 @@ const simulationEquityData = useMemo(() => {
               </div>
             )}
 
+            {/* Vertical Divider - before Simulation */}
+            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
+
+            {/* Simulation */}
+            <div className="flex flex-col gap-0.5">
+              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Simulation</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className={`
+                      px-3 py-1 text-xs rounded-full transition-colors font-medium
+                      ${simulationMode.baseMode === 'unbiased'
+                        ? 'bg-sky-500 text-white'
+                        : isDarkMode
+                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
+                    `}
+                    onClick={() => onChangeSimulationMode?.({ baseMode: 'unbiased', withTrend: simulationMode.withTrend })}
+                  >
+                    Unbiased
+                  </button>
+                  <button
+                    type="button"
+                    className={`
+                      px-3 py-1 text-xs rounded-full transition-colors font-medium
+                      ${simulationMode.baseMode === 'biased'
+                        ? 'bg-sky-500 text-white'
+                        : isDarkMode 
+                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
+                    `}
+                    onClick={() => onChangeSimulationMode?.({ baseMode: 'biased', withTrend: simulationMode.withTrend })}
+                  >
+                    Biased
+                  </button>
+                  <button
+                    type="button"
+                    className={`
+                      px-3 py-1 text-xs rounded-full transition-colors font-medium
+                      ${!hasMaxRun
+                        ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
+                        : simulationMode.baseMode === 'max'
+                          ? 'bg-sky-500 text-white'
+                          : isDarkMode 
+                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
+                    `}
+                    disabled={!hasMaxRun}
+                    onClick={() => hasMaxRun && onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
+                  >
+                    Biased (Max)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChangeSimulationMode?.({
+                        baseMode: simulationMode.baseMode,
+                        withTrend: !simulationMode.withTrend,
+                      })
+                    }
+                    className={`
+                      px-3 py-1 text-xs rounded-full transition-colors font-medium
+                      ${simulationMode.withTrend
+                        ? 'bg-sky-500 text-white'
+                        : isDarkMode
+                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }
+                    `}
+                    title="Toggle Trend-tilted EWMA simulation on/off."
+                  >
+                    Trend
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {typeof trendWeight === 'number' && Number.isFinite(trendWeight) && (
+                    <span
+                      className={`
+                        rounded-full px-3 py-1 text-[10px] font-medium
+                        ${isDarkMode ? 'bg-slate-800 text-sky-200' : 'bg-slate-100 text-sky-700'}
+                      `}
+                      title={
+                        trendWeightUpdatedAt
+                          ? `Trend Weight calibrated on ${trendWeightUpdatedAt}.`
+                          : 'Global Trend Weight estimated from historical panel regression.'
+                      }
+                    >
+                      Trend Weight {trendWeight.toFixed(3)}
+                    </span>
+                  )}
+
+                  <div className="relative" ref={simulationSettingsDropdownRef}>
+                    <button
+                      onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
+                      className={`
+                        w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
+                        ${showSimulationSettingsDropdown
+                          ? isDarkMode 
+                            ? 'border-amber-500 text-amber-400' 
+                            : 'border-amber-500 text-amber-600'
+                          : isDarkMode 
+                            ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
+                            : 'border-gray-300 text-gray-700 hover:border-gray-400'
+                        }
+                      `}
+                      title="Simulation Settings"
+                    >
+                      ⋯
+                    </button>
+
+                    {showSimulationSettingsDropdown && (
+                    <div 
+                      className={`
+                        absolute top-8 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
+                        ${isDarkMode 
+                          ? 'bg-gray-900/95 border-gray-500/30' 
+                          : 'bg-white/95 border-gray-400/30'
+                        }
+                      `}
+                    >
+                      <div className="space-y-2 text-xs">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
+                          <input
+                            type="number"
+                            min={100}
+                            max={1000000}
+                            step={100}
+                            value={simulationInitialEquity}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 100) {
+                                setSimulationInitialEquity(val);
+                              }
+                            }}
+                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus:border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={simulationLeverage}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 1) {
+                                setSimulationLeverage(Math.min(100, val));
+                              }
+                            }}
+                            className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus-border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            step={1}
+                            value={simulationPositionPct}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val) && val >= 1) {
+                                setSimulationPositionPct(val);
+                              }
+                            }}
+                            className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus-border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                            }`}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-4">
+                          <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
+                          <input
+                            type="number"
+                            min={-0.05}
+                            max={0.05}
+                            step={0.005}
+                            value={simulationBiasThreshold}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              if (Number.isFinite(val)) {
+                                setSimulationBiasThreshold(val);
+                              }
+                            }}
+                            className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                              isDarkMode 
+                                ? 'border-gray-600 text-white focus-border-amber-500' 
+                                : 'border-gray-300 text-gray-900 focus-border-amber-500'
+                            }`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -5552,13 +5761,139 @@ const simulationEquityData = useMemo(() => {
       {/* Range Selector + Position Controls - independent row below controls */}
       {perfByRange && (
         <div className="mt-7 mb-2 flex items-center justify-between">
-          <RangeSelector
-            selectedRange={selectedRange}
-            perfByRange={perfByRange}
-            onChange={handleRangeChange}
-            isDarkMode={isDarkMode}
-            compact={true}
-          />
+          <div className="flex items-center gap-3">
+            <div className="relative" ref={simRangeDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setShowSimRangeMenu((v) => !v)}
+                className={`
+                  flex items-center gap-2 px-2 py-1 rounded-md transition
+                  ${isDarkMode
+                    ? "text-white/80 hover:text-white hover:bg-white/5"
+                    : "text-slate-700 hover:text-slate-900 hover:bg-slate-100"
+                  }
+                `}
+              >
+                <CalendarRangeIcon className="w-4 h-4" />
+                <span className="font-mono text-xs">
+                  {simRangeLabel || "Select range"}
+                </span>
+                <ChevronDownIcon className="w-3 h-3 opacity-70" />
+              </button>
+              {showSimRangeMenu && (
+                <div
+                  className={`absolute right-0 mt-2 w-72 max-h-[420px] overflow-auto rounded-xl border shadow-lg z-20 ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700/70"
+                      : "bg-white border-gray-200"
+                  }`}
+                >
+                  <div className={`px-3 py-2 text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                    Date range
+                  </div>
+
+                  <div className="px-3 pb-2 space-y-2">
+                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
+                      From chart
+                    </div>
+                    <button
+                      className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-[11px] transition ${
+                        simComparePreset === "chart"
+                          ? isDarkMode
+                            ? "bg-slate-800 text-slate-100"
+                            : "bg-gray-100 text-gray-800"
+                          : isDarkMode
+                            ? "text-slate-300 hover:bg-slate-800/80"
+                            : "text-gray-700 hover:bg-gray-50"
+                      }`}
+                      onClick={() => handleSimRangePreset("chart")}
+                    >
+                      <span>Range from chart</span>
+                      {simComparePreset === "chart" && (
+                        <CheckIcon className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="px-3 pb-2 space-y-2">
+                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
+                      Quick ranges
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {quickRangePresets.map((opt) => {
+                        const isSelected = simComparePreset === opt.id;
+                        const baseClasses = isSelected
+                          ? isDarkMode
+                            ? "bg-slate-800 text-slate-100"
+                            : "bg-gray-100 text-gray-800"
+                          : isDarkMode
+                            ? "text-slate-300 hover:bg-slate-800/80"
+                            : "text-gray-700 hover:bg-gray-50";
+                        return (
+                          <button
+                            key={opt.id}
+                            className={`relative rounded-lg px-3 py-2 text-[11px] font-semibold transition text-left ${baseClasses} ${opt.spanFull ? "col-span-2" : ""}`}
+                            onClick={() => handleSimRangePreset(opt.id)}
+                          >
+                            <span>{opt.label}</span>
+                            {isSelected && (
+                              <CheckIcon className="w-4 h-4 absolute right-2 top-1/2 -translate-y-1/2" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className={isDarkMode ? "border-t border-slate-800/60" : "border-t border-gray-200"} />
+                  <div className="px-3 py-3 space-y-2">
+                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                      Custom date range
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={customSimRangeStart}
+                        onChange={(e) => setCustomSimRangeStart(e.target.value)}
+                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-gray-300 text-gray-700"
+                        }`}
+                      />
+                      <span className={isDarkMode ? "text-slate-500 text-[10px]" : "text-gray-500 text-[10px]"}>to</span>
+                      <input
+                        type="date"
+                        value={customSimRangeEnd}
+                        onChange={(e) => setCustomSimRangeEnd(e.target.value)}
+                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-gray-300 text-gray-700"
+                        }`}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={!customSimRangeStart || !customSimRangeEnd}
+                      onClick={handleApplyCustomRange}
+                      className={`w-full rounded-md px-3 py-2 text-[11px] font-semibold transition ${
+                        !customSimRangeStart || !customSimRangeEnd
+                          ? isDarkMode
+                            ? "bg-slate-800 text-slate-500 cursor-not-allowed"
+                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                          : isDarkMode
+                            ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                            : "bg-emerald-500 text-white hover:bg-emerald-600"
+                      }`}
+                    >
+                      Apply
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
           
           {/* Long/Short Position Controls */}
           <div className="flex items-center gap-2">
@@ -5656,342 +5991,7 @@ const simulationEquityData = useMemo(() => {
         )}
       </div>
 
-      {/* Simulation Controls Row - Above tabs */}
-      <div className="mt-4 mb-2 flex flex-col gap-1">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Simulation</span>
-            {/* Base mode pills */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className={`
-                  px-3 py-1 text-xs rounded-full transition-colors font-medium
-                  ${simulationMode.baseMode === 'unbiased'
-                    ? 'bg-sky-500 text-white'
-                    : isDarkMode
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }
-                `}
-                onClick={() => onChangeSimulationMode?.({ baseMode: 'unbiased', withTrend: simulationMode.withTrend })}
-              >
-                Unbiased
-              </button>
-              <button
-                type="button"
-                className={`
-                  px-3 py-1 text-xs rounded-full transition-colors font-medium
-                  ${simulationMode.baseMode === 'biased'
-                    ? 'bg-sky-500 text-white'
-                    : isDarkMode 
-                      ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }
-                `}
-                onClick={() => onChangeSimulationMode?.({ baseMode: 'biased', withTrend: simulationMode.withTrend })}
-              >
-                Biased
-              </button>
-              <button
-                type="button"
-                className={`
-                  px-3 py-1 text-xs rounded-full transition-colors font-medium
-                  ${!hasMaxRun
-                    ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
-                    : simulationMode.baseMode === 'max'
-                      ? 'bg-sky-500 text-white'
-                      : isDarkMode 
-                        ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }
-                `}
-                disabled={!hasMaxRun}
-                onClick={() => hasMaxRun && onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
-              >
-                Biased (Max)
-              </button>
-            </div>
-
-            {/* Trend toggle */}
-            <button
-              type="button"
-              onClick={() =>
-                onChangeSimulationMode?.({
-                  baseMode: simulationMode.baseMode,
-                  withTrend: !simulationMode.withTrend,
-                })
-              }
-              className={`
-                px-3 py-1 text-xs rounded-full transition-colors font-medium
-                ${simulationMode.withTrend
-                  ? 'bg-sky-500 text-white'
-                  : isDarkMode
-                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }
-              `}
-              title="Toggle Trend-tilted EWMA simulation on/off."
-            >
-              Trend
-            </button>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative" ref={simRangeDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setShowSimRangeMenu((v) => !v)}
-                className={`inline-flex items-center gap-3 px-3 py-1.5 rounded-lg border text-[11px] ${
-                  isDarkMode
-                    ? "bg-slate-900/80 border-slate-700/70 text-slate-100 hover:border-slate-500"
-                    : "bg-white border-gray-200 text-gray-700 hover:border-gray-400"
-                }`}
-              >
-                <div className="flex flex-col items-start leading-tight">
-                  <span className={isDarkMode ? "text-slate-400" : "text-gray-500"}>
-                    Range
-                  </span>
-                  <span className="font-mono">{simRangeLabel}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
-                    {simRangePresetLabel}
-                  </span>
-                  <span className={isDarkMode ? "text-slate-500" : "text-gray-500"}>▾</span>
-                </div>
-              </button>
-              {showSimRangeMenu && (
-                <div
-                  className={`absolute right-0 mt-2 w-72 rounded-xl border shadow-lg z-20 ${
-                    isDarkMode
-                      ? "bg-slate-900 border-slate-700/70"
-                      : "bg-white border-gray-200"
-                  }`}
-                >
-                  <div className={`px-3 py-2 text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
-                    Simulation Comparison Range
-                  </div>
-                  <div className="px-2 pb-2 space-y-1">
-                    {[
-                      { key: "chart", label: "Range from chart" },
-                      { key: "7d", label: "Last 7 days" },
-                      { key: "30d", label: "Last 30 days" },
-                      { key: "90d", label: "Last 90 days" },
-                      { key: "365d", label: "Last 365 days" },
-                      { key: "all", label: "Entire history" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.key}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-[11px] transition ${
-                          simComparePreset === opt.key
-                            ? isDarkMode
-                              ? "bg-slate-800 text-slate-100"
-                              : "bg-gray-100 text-gray-800"
-                            : isDarkMode
-                              ? "text-slate-300 hover:bg-slate-800/80"
-                              : "text-gray-700 hover:bg-gray-50"
-                        }`}
-                        onClick={() => handleSimRangePreset(opt.key as SimCompareRangePreset)}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                  <div className={isDarkMode ? "border-t border-slate-800/60" : "border-t border-gray-200"} />
-                  <div className="px-3 py-3 space-y-2">
-                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
-                      Custom date range
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="date"
-                        value={customSimRangeStart}
-                        onChange={(e) => setCustomSimRangeStart(e.target.value)}
-                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
-                          isDarkMode
-                            ? "bg-slate-900 border-slate-700 text-slate-100"
-                            : "bg-white border-gray-300 text-gray-700"
-                        }`}
-                      />
-                      <span className={isDarkMode ? "text-slate-500 text-[10px]" : "text-gray-500 text-[10px]"}>to</span>
-                      <input
-                        type="date"
-                        value={customSimRangeEnd}
-                        onChange={(e) => setCustomSimRangeEnd(e.target.value)}
-                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
-                          isDarkMode
-                            ? "bg-slate-900 border-slate-700 text-slate-100"
-                            : "bg-white border-gray-300 text-gray-700"
-                        }`}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      disabled={!customSimRangeStart || !customSimRangeEnd}
-                      onClick={handleApplyCustomRange}
-                      className={`w-full rounded-md px-3 py-2 text-[11px] font-semibold transition ${
-                        !customSimRangeStart || !customSimRangeEnd
-                          ? isDarkMode
-                            ? "bg-slate-800 text-slate-500 cursor-not-allowed"
-                            : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                          : isDarkMode
-                            ? "bg-emerald-600 text-white hover:bg-emerald-500"
-                            : "bg-emerald-500 text-white hover:bg-emerald-600"
-                      }`}
-                    >
-                      Apply
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Trend Weight chip */}
-            {typeof trendWeight === 'number' && Number.isFinite(trendWeight) && (
-              <span
-                className={`
-                  rounded-full px-3 py-1 text-[10px] font-medium
-                  ${isDarkMode ? 'bg-slate-800 text-sky-200' : 'bg-slate-100 text-sky-700'}
-                `}
-                title={
-                  trendWeightUpdatedAt
-                    ? `Trend Weight calibrated on ${trendWeightUpdatedAt}.`
-                    : 'Global Trend Weight estimated from historical panel regression.'
-                }
-              >
-                Trend Weight {trendWeight.toFixed(3)}
-              </span>
-            )}
-
-            {/* Simulation Settings Button (⋯) with Dropdown */}
-            <div className="relative" ref={simulationSettingsDropdownRef}>
-              <button
-                onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
-                className={`
-                  w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
-                  ${showSimulationSettingsDropdown
-                    ? isDarkMode 
-                      ? 'border-amber-500 text-amber-400' 
-                      : 'border-amber-500 text-amber-600'
-                    : isDarkMode 
-                      ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
-                      : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                  }
-                `}
-                title="Simulation Settings"
-              >
-                ⋯
-              </button>
-
-              {/* Simulation Settings Dropdown */}
-              {showSimulationSettingsDropdown && (
-              <div 
-                className={`
-                  absolute top-8 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
-                  ${isDarkMode 
-                    ? 'bg-gray-900/95 border-gray-500/30' 
-                    : 'bg-white/95 border-gray-400/30'
-                  }
-                `}
-              >
-                <div className="space-y-2 text-xs">
-                  {/* Initial Equity Row */}
-                  <div className="flex items-center justify-between gap-4">
-                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Initial equity</span>
-                    <input
-                      type="number"
-                      min={100}
-                      max={1000000}
-                      step={100}
-                      value={simulationInitialEquity}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val >= 100) {
-                          setSimulationInitialEquity(val);
-                        }
-                      }}
-                      className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                        isDarkMode 
-                          ? 'border-gray-600 text-white focus:border-amber-500' 
-                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
-                      }`}
-                    />
-                  </div>
-                  {/* Leverage Row */}
-                  <div className="flex items-center justify-between gap-4">
-                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Leverage</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={simulationLeverage}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val >= 1) {
-                          setSimulationLeverage(Math.min(100, val));
-                        }
-                      }}
-                      className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                        isDarkMode 
-                          ? 'border-gray-600 text-white focus:border-amber-500' 
-                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
-                      }`}
-                    />
-                  </div>
-                  {/* Position % Row */}
-                  <div className="flex items-center justify-between gap-4">
-                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Position %</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      step={1}
-                      value={simulationPositionPct}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val) && val >= 1) {
-                          setSimulationPositionPct(val);
-                        }
-                      }}
-                      className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                        isDarkMode 
-                          ? 'border-gray-600 text-white focus:border-amber-500' 
-                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
-                      }`}
-                    />
-                  </div>
-                  {/* Bias Threshold Row */}
-                  <div className="flex items-center justify-between gap-4">
-                    <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Bias threshold</span>
-                    <input
-                      type="number"
-                      min={-0.05}
-                      max={0.05}
-                      step={0.005}
-                      value={simulationBiasThreshold}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        if (Number.isFinite(val)) {
-                          setSimulationBiasThreshold(val);
-                        }
-                      }}
-                      className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                        isDarkMode 
-                          ? 'border-gray-600 text-white focus:border-amber-500' 
-                          : 'border-gray-300 text-gray-900 focus-border-amber-500'
-                      }`}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      </div>
-
+      
       {true && (
         <div className="mt-6">
           {/* Header Row: Insight Pills (left) + Date Range (right) */}
@@ -6119,8 +6119,8 @@ const simulationEquityData = useMemo(() => {
                     syncId={SYNC_ID}
                     onMouseMove={applyHoverFromRechartsState}
                     onMouseLeave={handleChartMouseLeave}
-                    barCategoryGap={simBarCategoryGap}
-                    barGap={simBarGap}
+                    barCategoryGap={sharedBarSizing.barCategoryGap}
+                    barGap={sharedBarSizing.barGap}
                   >
                       <CartesianGrid
                         stroke={isDarkMode ? "rgba(148, 163, 184, 0.07)" : "rgba(100, 116, 139, 0.12)"}
@@ -6133,7 +6133,7 @@ const simulationEquityData = useMemo(() => {
                         axisLine={false}
                         tickLine={false}
                         tickMargin={6}
-                        padding={{ left: simViewLength <= 10 ? 6 : 0, right: simViewLength <= 10 ? 6 : 0 }}
+                        padding={{ left: 0, right: 0 }}
                         interval={simXAxisInterval as any}
                         tick={{
                           fill: isDarkMode ? '#9CA3AF' : '#6B7280',
@@ -6145,7 +6145,7 @@ const simulationEquityData = useMemo(() => {
                         yAxisId="equity"
                         domain={equityYDomain}
                         orientation="right"
-                        width={50}
+                        width={Y_AXIS_WIDTH}
                         axisLine={false}
                         tickLine={false}
                         tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
@@ -6169,28 +6169,23 @@ const simulationEquityData = useMemo(() => {
                               : "—";
 
                           return (
-                            <div className={`rounded-xl px-3 py-2 shadow-lg border ${
-                              isDarkMode 
-                                ? 'bg-slate-900/95 border-slate-700/70' 
-                                : 'bg-white/95 border-gray-200'
-                            }`}>
-                              <div className={`text-[11px] font-medium mb-1 ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
-                                {hoveredDate}
+                            <div className={`${TOOLTIP_CLASS} space-y-1.5`}>
+                              <div className={`text-xs ${TOOLTIP_TITLE_CLASS}`}>
+                                {hoveredDate} · Simulation
                               </div>
                               <div className="text-[11px] space-y-0.5">
-                                <div>
-                                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Equity: </span>
-                                  <span className="font-mono text-emerald-500 font-semibold">
-                                    ${point.equity.toFixed(2)}
-                                  </span>
+                                <div className={`${TOOLTIP_MUTED_CLASS}`}>
+                                  Equity <span className="font-mono text-emerald-400 font-semibold">${point.equity.toFixed(2)}</span>
                                 </div>
-                                <div>
-                                  <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Δ Day: </span>
-                                  <span className={`font-mono font-semibold ${
-                                    point.equityDelta != null && point.equityDelta >= 0
-                                      ? 'text-emerald-400'
-                                      : 'text-rose-400'
-                                  }`}>
+                                <div className={`${TOOLTIP_MUTED_CLASS}`}>
+                                  Δ Day{" "}
+                                  <span
+                                    className={`font-mono font-semibold ${
+                                      point.equityDelta != null && point.equityDelta >= 0
+                                        ? "text-emerald-300"
+                                        : "text-rose-300"
+                                    }`}
+                                  >
                                     {deltaStr}
                                   </span>
                                 </div>
@@ -6222,7 +6217,7 @@ const simulationEquityData = useMemo(() => {
                         dataKey="equityDelta"
                         radius={[2, 2, 0, 0]}
                         isAnimationActive={false}
-                        maxBarSize={simMaxBarSize}
+                        maxBarSize={sharedBarSizing.maxBarSize}
                       >
                         {simulationEquityData.map((entry, index) => {
                           const positive = (entry.equityDelta ?? 0) >= 0;
@@ -6845,106 +6840,6 @@ const simulationEquityData = useMemo(() => {
 // (e.g., T212 table updates) that don't affect chart props
 export const PriceChart = React.memo(PriceChartInner);
 
-type PerfMap = Record<PriceRange, number | null>;
-
-interface RangeSelectorProps {
-  selectedRange: PriceRange;
-  perfByRange: PerfMap;
-  onChange: (range: PriceRange) => void;
-  isDarkMode: boolean;
-  compact?: boolean;  // For inline display in controls row
-}
-
-const RangeSelector: React.FC<RangeSelectorProps> = ({
-  selectedRange,
-  perfByRange,
-  onChange,
-  isDarkMode,
-  compact = false,
-}) => {
-  if (compact) {
-    // Compact inline version for controls row
-    return (
-      <div className="flex items-center gap-1">
-        {RANGE_OPTIONS.map((range) => {
-          const perf = perfByRange[range];
-          const isSelected = range === selectedRange;
-          const isPositive = perf != null && perf >= 0;
-
-          return (
-            <button
-              key={range}
-              type="button"
-              onClick={() => onChange(range)}
-              className={`
-                px-2 py-0.5 text-xs font-medium transition-colors rounded-full flex items-center gap-1.5
-                ${isSelected 
-                  ? 'bg-blue-600 text-white'
-                  : isDarkMode
-                    ? 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'
-                }
-              `}
-            >
-              {range}
-              {isSelected && perf != null && (
-                <span className={`text-[10px] font-semibold ${
-                  isPositive ? 'text-green-300' : 'text-red-300'
-                }`}>
-                  {isPositive ? '+' : ''}{perf.toFixed(1)}%
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // Original full version (kept for backwards compatibility)
-  return (
-    <div className="w-full mt-4">
-      <div className="flex justify-between w-full">
-        {RANGE_OPTIONS.map((range) => {
-          const perf = perfByRange[range];
-          const isSelected = range === selectedRange;
-          const isPositive = perf != null && perf >= 0;
-
-          return (
-            <button
-              key={range}
-              type="button"
-              onClick={() => onChange(range)}
-              className={`
-                flex-1 px-2 py-2 text-sm font-medium transition-all mx-0.5
-                ${isSelected 
-                  ? isDarkMode 
-                    ? 'bg-white/10 text-white border border-white/20 rounded-full' 
-                    : 'bg-gray-200 text-gray-900 border border-gray-300 rounded-full'
-                  : isDarkMode
-                    ? 'bg-transparent text-gray-400 hover:bg-white/5 hover:text-gray-300 border border-transparent rounded-lg hover:rounded-full'
-                    : 'bg-transparent text-gray-600 hover:bg-gray-100 hover:text-gray-800 border border-transparent rounded-lg hover:rounded-full'
-                }
-              `}
-            >
-              <div className="text-center">
-                <div className="text-xs font-medium">{range}</div>
-                {perf != null && (
-                  <div className={`text-xs font-semibold ${
-                    isPositive ? 'text-green-500' : 'text-red-500'
-                  }`}>
-                    {isPositive ? '+' : ''}{perf.toFixed(2)}%
-                  </div>
-                )}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
-
 interface MomentumTooltipProps {
   active?: boolean;
   payload?: any[];
@@ -6998,32 +6893,26 @@ const MomentumTooltip: React.FC<MomentumTooltipProps> = ({
   }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-[11px] text-slate-200 shadow-lg">
-      <div className="mb-1 font-semibold text-slate-100">
-        Momentum ({momentumPeriod}D)
+    <div className={`${TOOLTIP_CLASS} text-[11px] text-white/80 space-y-1.5`}>
+      <div className={`${TOOLTIP_TITLE_CLASS} text-xs`}>Momentum ({momentumPeriod}D)</div>
+      <div className="flex items-baseline justify-between">
+        <span className={TOOLTIP_MUTED_CLASS}>Score</span>
+        <span className="font-mono text-white">{score.toFixed(0)}</span>
       </div>
       <div className="flex items-baseline justify-between">
-        <span className="text-slate-400">Score</span>
-        <span className="font-mono text-slate-100">{score.toFixed(0)}</span>
-      </div>
-      <div className="mt-1 flex items-baseline justify-between">
-        <span className="text-slate-400">Zone</span>
+        <span className={TOOLTIP_MUTED_CLASS}>Zone</span>
         <span className={`font-mono ${zoneClass}`}>{zoneLabel}</span>
       </div>
 
       {adxPeriod && adxValue != null && (
-        <div className="mt-2 border-t border-slate-800 pt-2">
-          <div className="mb-1 font-semibold text-slate-300">
-            ADX ({adxPeriod}D)
+        <div className="pt-2 border-t border-white/10 space-y-1">
+          <div className={`${TOOLTIP_TITLE_CLASS} text-[11px]`}>ADX ({adxPeriod}D)</div>
+          <div className="flex items-baseline justify-between">
+            <span className={TOOLTIP_MUTED_CLASS}>Value</span>
+            <span className="font-mono text-white">{adxValue.toFixed(1)}</span>
           </div>
           <div className="flex items-baseline justify-between">
-            <span className="text-slate-400">Value</span>
-            <span className="font-mono text-slate-100">
-              {adxValue.toFixed(1)}
-            </span>
-          </div>
-          <div className="mt-1 flex items-baseline justify-between">
-            <span className="text-slate-400">Strength</span>
+            <span className={TOOLTIP_MUTED_CLASS}>Strength</span>
             <span className={`font-mono ${adxBandClass}`}>
               {adxBandLabel}
             </span>

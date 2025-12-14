@@ -2,6 +2,7 @@ export type PriceRange =
   | "1D"
   | "5D"
   | "1M"
+  | "3M"
   | "6M"
   | "YTD"
   | "1Y"
@@ -44,6 +45,9 @@ export function sliceByRange(
     case "1M":
       // Approximately 21 trading days (1 month)
       return rows.slice(-21);
+    case "3M":
+      // Approximately 63 trading days (3 months)
+      return rows.slice(-63);
       
     case "6M":
       // Approximately 126 trading days (6 months)
@@ -112,6 +116,7 @@ export function getRangeLabel(range: PriceRange): string {
     case "1D": return "1 day";
     case "5D": return "5 days";
     case "1M": return "1 month";
+    case "3M": return "3 months";
     case "6M": return "6 months";
     case "YTD": return "Year to date";
     case "1Y": return "1 year";

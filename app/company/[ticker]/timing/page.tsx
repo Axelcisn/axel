@@ -560,7 +560,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   type StrategyKey = "unbiased" | "biased" | "biased-max";
   type BaseRunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
   type Trading212BaseRunsById = Partial<Record<BaseRunId, Trading212SimRun>>;
-  type SimCompareRangePreset = "chart" | "7d" | "30d" | "90d" | "365d" | "all" | "custom";
+  type SimCompareRangePreset =
+    | "chart"
+    | "1d"
+    | "5d"
+    | "1m"
+    | "3m"
+    | "6m"
+    | "ytd"
+    | "1y"
+    | "5y"
+    | "all"
+    | "custom";
 
   type FilteredStats = {
     days: number;
@@ -599,7 +610,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
   const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
   const [simComparePreset, setSimComparePreset] = useState<SimCompareRangePreset>("chart");
-  const [simCompareCustom, setSimCompareCustom] = useState<{ start: string; end: string } | null>(null);
+  const [, setSimCompareCustom] = useState<{ start: string; end: string } | null>(null);
   const [visibleWindow, setVisibleWindow] = useState<{ start: string; end: string } | null>(null);
   const handleSimComparePresetChange = useCallback((p: SimCompareRangePreset) => {
     setSimComparePreset(p);
@@ -609,6 +620,21 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     setSimCompareCustom({ start, end });
     setSimComparePreset("custom");
   }, []);
+  const handleVisibleWindowChange = useCallback(
+    (
+      nextWindow: { start: string; end: string } | null,
+      source: "chart" | "pill" | "dropdown"
+    ) => {
+      if (source === "chart" || source === "pill") {
+        setSimComparePreset("chart");
+        setSimCompareCustom(null);
+      } else if (source === "dropdown" && nextWindow) {
+        setSimCompareCustom(nextWindow);
+      }
+      setVisibleWindow(nextWindow);
+    },
+    []
+  );
   useEffect(() => {
     setVisibleWindow(null);
     setSimCompareCustom(null);
@@ -642,61 +668,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       null,
     [t212BaseRunsById]
   );
-  const effectiveSimCompareWindow = useMemo(() => {
-    const refHistory = referenceSimRun?.result?.accountHistory;
-    if (!refHistory || refHistory.length === 0) {
-      return null;
-    }
-    const refStart = refHistory[0]?.date;
-    const refEnd = refHistory[refHistory.length - 1]?.date;
-    if (!refStart || !refEnd) {
-      return null;
-    }
-
-    const fullWindow = { start: refStart, end: refEnd };
-
-    const resolveRecentWindow = (count: number) => {
-      const startIdx = Math.max(0, refHistory.length - count);
-      return { start: refHistory[startIdx].date, end: refEnd };
-    };
-
-    switch (simComparePreset) {
-      case "chart":
-        return visibleWindow ?? fullWindow;
-      case "7d":
-        return resolveRecentWindow(7);
-      case "30d":
-        return resolveRecentWindow(30);
-      case "90d":
-        return resolveRecentWindow(90);
-      case "365d":
-        return resolveRecentWindow(365);
-      case "custom":
-        if (simCompareCustom) {
-          const startIdx = refHistory.findIndex((snap) => snap.date >= simCompareCustom.start);
-          const endIdx = (() => {
-            for (let i = refHistory.length - 1; i >= 0; i--) {
-              if (refHistory[i].date <= simCompareCustom.end) {
-                return i;
-              }
-            }
-            return -1;
-          })();
-
-          if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-            return {
-              start: refHistory[startIdx].date,
-              end: refHistory[endIdx].date,
-            };
-          }
-        }
-        return fullWindow;
-      case "all":
-      default:
-        return fullWindow;
-    }
-  }, [visibleWindow, referenceSimRun, simCompareCustom, simComparePreset]);
-
   const summarizeRunStats = useCallback(
     (run: Trading212SimRun, window?: { start: string; end: string } | null): FilteredStats | null => {
       const history = run.result.accountHistory;
@@ -1058,7 +1029,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
 
     const rows: SimulationStrategySummary[] = comparisonRowSpecs.map((spec, idx) => {
       const run = t212BaseRunsById[spec.id];
-      const stats = run ? summarizeRunStats(run, effectiveSimCompareWindow) : null;
+      const stats = run ? summarizeRunStats(run, visibleWindow) : null;
 
       const lambda =
         spec.key === "unbiased"
@@ -1095,7 +1066,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           runPresent: !!run,
         lambda: row.lambda,
         trainFraction: row.trainFraction,
-        window: effectiveSimCompareWindow,
+        window: visibleWindow,
         firstDate: row.firstDate,
         lastDate: row.lastDate,
         trades: row.tradeCount,
@@ -1110,11 +1081,11 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   }, [
     comparisonRowSpecs,
     comparisonRunIds,
-    effectiveSimCompareWindow,
     reactionLambda,
     reactionTrainFraction,
     summarizeRunStats,
     t212BaseRunsById,
+    visibleWindow,
   ]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
@@ -5655,13 +5626,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           trendWeightUpdatedAt={trendWeightUpdatedAt}
           simulationRuns={simulationRunsSummary}
           simComparePreset={simComparePreset}
-          simCompareWindow={effectiveSimCompareWindow}
+          visibleWindow={visibleWindow}
           onChangeSimComparePreset={handleSimComparePresetChange}
           onChangeSimCompareCustom={handleSimCompareCustomChange}
-          onPriceViewWindowChange={(window) => {
-            setSimComparePreset("chart");
-            setVisibleWindow(window);
-          }}
+          onVisibleWindowChange={handleVisibleWindowChange}
         />
       </div>
       

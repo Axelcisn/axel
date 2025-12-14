@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { TickerSearch } from '@/components/TickerSearch';
 import LayoutContainer from './LayoutContainer';
 
-const CLOSE_ANIM_MS = 220;
-const HOVER_CLOSE_MS = 220;
 const SEARCH_PANEL_ID = 'global-search-panel';
+const APPLE_NAV_BG = 'bg-[#0D0D0D]';
+const APPLE_SURFACE = `${APPLE_NAV_BG} border-b border-white/[0.08]`;
 
 const navItems = [
   { href: '/', label: 'Home' },
@@ -22,83 +22,61 @@ export default function Navigation() {
   const pathname = usePathname();
   const isDarkMode = useDarkMode();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [panelMounted, setPanelMounted] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-  const [isHoveringPanel, setIsHoveringPanel] = useState(false);
-  const timeoutRef = useRef<number | null>(null);
-  const hoverTimeoutRef = useRef<number | null>(null);
-
-  const tickerMatch = pathname.match(/\/company\/([^/]+)/);
-  const currentTicker = tickerMatch ? tickerMatch[1] : undefined;
-
-  // Mount the panel when requested
-  useEffect(() => {
-    if (isSearchOpen) {
-      setPanelMounted(true);
-      setIsClosing(false);
-    }
-  }, [isSearchOpen]);
-
-  // When closing, keep panel mounted long enough for exit animation
-  useEffect(() => {
-    if (!isSearchOpen && panelMounted) {
-      setIsClosing(true);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      const id = window.setTimeout(() => {
-        setPanelMounted(false);
-        setIsClosing(false);
-        timeoutRef.current = null;
-      }, CLOSE_ANIM_MS);
-      timeoutRef.current = id;
-      return () => {
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-          timeoutRef.current = null;
-        }
-        if (hoverTimeoutRef.current) {
-          clearTimeout(hoverTimeoutRef.current);
-          hoverTimeoutRef.current = null;
-        }
-      };
-    }
-    return;
-  }, [isSearchOpen, panelMounted]);
-
-  // ensure hover timeout is cleared on unmount
-  useEffect(() => {
-    return () => {
-      if (hoverTimeoutRef.current) {
-        clearTimeout(hoverTimeoutRef.current);
-        hoverTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  // Blur underlying page content while search is open
-  useEffect(() => {
-    const body = document.body;
-    if (!body) return;
-    if (isSearchOpen) {
-      body.classList.add('search-blur');
-    } else {
-      body.classList.remove('search-blur');
-    }
-    return () => body.classList.remove('search-blur');
-  }, [isSearchOpen]);
+  const closeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchAreaRef = useRef<HTMLDivElement>(null);
 
   const linkBase =
     'text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-full px-3 py-1';
 
-  const surfaceTone = isDarkMode
-    ? 'bg-[#0f0f0f]/95 border-white/10'
-    : 'bg-white/95 border-gray-200';
+  const clearCloseTimeout = useCallback(() => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleClose = useCallback(() => {
+    clearCloseTimeout();
+    closeTimeoutRef.current = setTimeout(() => {
+      setIsSearchOpen(false);
+    }, 300);
+  }, [clearCloseTimeout]);
+
+  const handleMouseEnterSearchArea = useCallback(() => {
+    clearCloseTimeout();
+  }, [clearCloseTimeout]);
+
+  const handleMouseLeaveSearchArea = useCallback(() => {
+    scheduleClose();
+  }, [scheduleClose]);
+
+  useEffect(() => {
+    if (!isSearchOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsSearchOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      clearCloseTimeout();
+    };
+  }, [isSearchOpen, clearCloseTimeout]);
+
+  const closeSearch = () => {
+    clearCloseTimeout();
+    setIsSearchOpen(false);
+  };
 
   return (
-    <nav
-      className={`relative z-[130] backdrop-blur-xl transition-colors ${surfaceTone} ${isSearchOpen ? 'border-0' : 'border-b'}`}
+    <nav 
+      className={`relative z-[130] ${APPLE_SURFACE}`}
+      onMouseEnter={isSearchOpen ? handleMouseEnterSearchArea : undefined}
+      onMouseLeave={isSearchOpen ? handleMouseLeaveSearchArea : undefined}
     >
       <LayoutContainer>
         <div className="grid grid-cols-[1fr_auto_1fr] items-center h-14 gap-4">
@@ -167,59 +145,39 @@ export default function Navigation() {
         </div>
       </LayoutContainer>
 
-      {panelMounted && (
+      {isSearchOpen && (
         <>
+          {/* Top section - solid dark background with search */}
           <div
-            className={`fixed inset-x-0 top-14 bottom-0 z-[180] ${
-              isDarkMode ? 'bg-[#0f0f0f]' : 'bg-white'
-            } transition-opacity duration-[420ms] ${
-              isClosing ? 'opacity-0 pointer-events-none' : 'opacity-100'
-            }`}
-            onClick={() => setIsSearchOpen(false)}
-            onMouseEnter={() => {
-              if (!isHoveringPanel) setIsSearchOpen(false);
-            }}
-          />
-
-          <div
+            ref={searchAreaRef}
             id={SEARCH_PANEL_ID}
-            className={`fixed inset-x-0 top-14 bottom-0 z-[200] ${
-              isClosing ? 'animate-slideUpFade' : 'animate-slideDownFade'
-            } transition-colors ${surfaceTone}`}
-            onMouseEnter={() => {
-              if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-              }
-              setIsHoveringPanel(true);
-            }}
-            onMouseLeave={() => {
-              setIsHoveringPanel(false);
-              if (hoverTimeoutRef.current) {
-                clearTimeout(hoverTimeoutRef.current);
-                hoverTimeoutRef.current = null;
-              }
-              hoverTimeoutRef.current = window.setTimeout(() => {
-                hoverTimeoutRef.current = null;
-                setIsSearchOpen(false);
-              }, HOVER_CLOSE_MS);
-            }}
+            role="dialog"
+            aria-modal="true"
+            className="fixed left-0 right-0 top-14 z-[200] bg-[#0D0D0D] border-b border-white/[0.08] animate-in fade-in slide-in-from-top-2 duration-200 h-[360px]"
+            onMouseEnter={handleMouseEnterSearchArea}
+            onMouseLeave={handleMouseLeaveSearchArea}
           >
             <LayoutContainer>
-              <div className="w-full px-6 md:px-10 pt-14 md:pt-16 pb-20 border-b border-white/10">
+              <div className="max-w-[600px] py-8">
                 <TickerSearch
-                  initialSymbol={currentTicker}
                   isDarkMode={isDarkMode}
                   autoFocus
                   size="xl"
                   appearance="apple"
-                  showBorder={false}
-                  showRecentWhenEmpty={false}
-                  onRequestClose={() => setIsSearchOpen(false)}
+                  showRecentWhenEmpty
+                  placeholder="Search"
+                  onRequestClose={closeSearch}
                 />
               </div>
             </LayoutContainer>
           </div>
+
+          {/* Bottom section - blurred transparent overlay */}
+          <div
+            className="fixed left-0 right-0 bottom-0 z-[199] bg-black/40 backdrop-blur-md animate-in fade-in duration-200"
+            style={{ top: 'calc(56px + 360px)' }}
+            onMouseDown={closeSearch}
+          />
         </>
       )}
     </nav>

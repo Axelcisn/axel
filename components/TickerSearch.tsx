@@ -1,7 +1,6 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   useState,
   useRef,
@@ -27,6 +26,7 @@ interface TickerSearchProps {
   appearance?: Appearance;
   showBorder?: boolean;
   showRecentWhenEmpty?: boolean;
+  placeholder?: string;
   onSubmitSymbol?: (symbol: string) => void;
   onRequestClose?: () => void;
 }
@@ -73,13 +73,15 @@ const sizeStyles: Record<
     clear: "h-10 w-10 text-base",
   },
   xl: {
-    wrapper: "relative py-3 rounded-none max-w-[980px] w-full",
-    gap: "gap-0",
-    input: "text-[30px] md:text-[36px] font-semibold tracking-tight leading-[1.12] pr-10 pl-9",
-    icon: "h-5 w-5 md:h-6 md:w-6",
-    clear: "h-10 w-10 text-base",
+    wrapper: "relative w-full py-1",
+    gap: "gap-4",
+    input: "text-[28px] md:text-[32px] font-semibold tracking-[-0.01em] leading-tight",
+    icon: "h-6 w-6 md:h-7 md:w-7",
+    clear: "h-7 w-7 text-sm",
   },
 };
+
+const APPLE_TEXT_INDENT = "";
 
 function highlight(text: string, query: string, isDarkMode: boolean) {
   if (!query) return text;
@@ -109,6 +111,7 @@ export function TickerSearch({
   appearance,
   showBorder = false,
   showRecentWhenEmpty = true,
+  placeholder = "Search ticker or company...",
   onSubmitSymbol,
   onRequestClose,
 }: TickerSearchProps) {
@@ -173,16 +176,6 @@ export function TickerSearch({
   }, [results, hasQuery]);
 
   const options = useMemo(() => [...recentOptions, ...resultOptions], [recentOptions, resultOptions]);
-
-  const quickLinks =
-    resolvedAppearance === "apple"
-      ? [
-          { href: "/analysis", label: "Analysis" },
-          { href: "/memory", label: "Memory" },
-          { href: "/watchlist", label: "Watchlist" },
-          { href: "/t212", label: "Trading212" },
-        ]
-      : [];
 
   const shouldShowRecentSection = showRecentWhenEmpty && !hasQuery && recentOptions.length > 0;
   const shouldShowResultsSection = hasQuery;
@@ -336,15 +329,13 @@ export function TickerSearch({
   };
 
   const styles = sizeStyles[size];
-const wrapperTone =
-  resolvedAppearance === "chatgpt"
-    ? isDarkMode
-      ? "bg-white/5 text-slate-100 border border-white/10 focus-within:ring-2 focus-within:ring-white/20 focus-within:border-white/20"
-      : "bg-white text-gray-900 border border-gray-200 focus-within:ring-2 focus-within:ring-gray-200/70 focus-within:border-gray-300"
-    : resolvedAppearance === "apple"
+  const wrapperTone =
+    resolvedAppearance === "chatgpt"
       ? isDarkMode
-        ? "bg-transparent text-white"
-        : "bg-transparent text-gray-900"
+        ? "bg-white/5 text-slate-100 border border-white/10 focus-within:ring-2 focus-within:ring-white/20 focus-within:border-white/20"
+        : "bg-white text-gray-900 border border-gray-200 focus-within:ring-2 focus-within:ring-gray-200/70 focus-within:border-gray-300"
+    : resolvedAppearance === "apple"
+      ? "bg-transparent text-white border-0"
       : resolvedAppearance === "tradingview"
         ? isDarkMode
           ? "bg-transparent text-slate-100 border border-white/12 focus-within:ring-2 focus-within:ring-white/10 focus-within:border-white/20"
@@ -361,11 +352,17 @@ const wrapperTone =
   const inputColor =
     resolvedAppearance === "apple"
       ? isDarkMode
-        ? "placeholder:text-white/22 text-white/78"
-        : "placeholder:text-gray-400 text-gray-900"
+        ? "placeholder:text-[#86868b] text-white"
+        : "placeholder:text-gray-500 text-gray-900"
       : isDarkMode
         ? "placeholder:text-slate-500"
         : "placeholder:text-gray-400";
+  const appleInputClasses =
+    `text-[28px] md:text-[32px] font-semibold tracking-[-0.01em] leading-tight bg-transparent outline-none text-white placeholder:text-[#86868b]`;
+  const baseInputClasses =
+    resolvedAppearance === "apple"
+      ? appleInputClasses
+      : `bg-transparent outline-none ${styles.input} ${inputColor}`;
   const listboxTone =
     resolvedAppearance === "chatgpt"
       ? isDarkMode
@@ -394,23 +391,39 @@ const wrapperTone =
 
   return (
     <div className={`relative ${className ?? ""}`}>
-      <form onSubmit={handleSubmit} className="space-y-2">
+      <form onSubmit={handleSubmit}>
         <div
-          className={`flex w-full items-center ${styles.gap} ${styles.wrapper} ${wrapperTone} ${borderOverride} backdrop-blur transition-colors`}
+          className={`flex w-full items-center ${styles.gap} ${styles.wrapper} ${wrapperTone} ${borderOverride} transition-colors`}
         >
-          <span className={`flex items-center justify-center text-slate-500 ${isDarkMode ? 'text-white/30' : 'text-gray-500'} ${resolvedAppearance === "apple" ? "absolute left-0 top-1/2 -translate-y-1/2" : ""}`}>
+          {resolvedAppearance === "apple" ? (
             <svg
               xmlns="http://www.w3.org/2000/svg"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
-              className={`${styles.icon} ${resolvedAppearance === "apple" ? "text-white/30" : ""}`}
+              className="h-6 w-6 md:h-7 md:w-7 flex-shrink-0 text-[#86868b]"
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35" />
               <circle cx="11" cy="11" r="6" />
             </svg>
-          </span>
+          ) : (
+            <span
+              className={`flex items-center justify-center text-slate-500 ${isDarkMode ? "text-white/30" : "text-gray-500"}`}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className={styles.icon}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35" />
+                <circle cx="11" cy="11" r="6" />
+              </svg>
+            </span>
+          )}
           <input
             ref={inputRef}
             type="text"
@@ -419,26 +432,23 @@ const wrapperTone =
             onKeyDown={handleInputKeyDown}
             onFocus={handleFocus}
             onBlur={handleBlur}
-            autoComplete="off"
-            aria-autocomplete="list"
-            aria-expanded={shouldShowListbox}
-            aria-controls={shouldShowListbox ? listboxId : undefined}
-            aria-activedescendant={activeDescendant}
-            role="combobox"
-            placeholder="Search ticker or company..."
-            className={`flex-1 bg-transparent outline-none ${styles.input} ${inputColor} ${inputClassName ?? ""}`}
-          />
-          {value && (
+          autoComplete="off"
+          aria-autocomplete="list"
+          aria-expanded={shouldShowListbox}
+          aria-controls={shouldShowListbox ? listboxId : undefined}
+          aria-activedescendant={activeDescendant}
+          role="combobox"
+          placeholder={placeholder}
+          className={`flex-1 ${baseInputClasses} ${inputClassName ?? ""}`}
+        />
+          {value && resolvedAppearance !== "apple" && (
             <button
               type="button"
               onClick={handleClear}
-              className={`inline-flex items-center justify-center ${styles.clear} transition-colors focus-visible:outline-none ${
-                resolvedAppearance === "apple"
-                  ? "absolute right-0 top-1/2 -translate-y-1/2 text-white/35 hover:text-white/60"
-                  : isDarkMode
-                    ? "text-slate-400 hover:text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-sky-500"
-                    : "text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-sky-500"
-              }`}
+              className={`inline-flex items-center justify-center flex-shrink-0 transition-colors focus-visible:outline-none ${styles.clear} ${isDarkMode
+                  ? "text-slate-400 hover:text-white hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-sky-500"
+                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus-visible:ring-2 focus-visible:ring-sky-500"
+                }`}
               aria-label="Clear search"
             >
               ×
@@ -446,87 +456,87 @@ const wrapperTone =
           )}
         </div>
         {localError && (
-          <p className="text-sm text-red-400">{localError}</p>
+          <p className="text-sm text-red-400 mt-2">{localError}</p>
         )}
       </form>
 
       {resolvedAppearance === "apple" ? (
-        <div className="mt-10 grid grid-cols-1 md:grid-cols-[360px_1fr] gap-16">
-          <div className="space-y-6">
-            {!hasQuery && (
-              <div className="space-y-4 pl-[42px]">
-                <p className="mt-10 text-[12px] font-medium text-white/30">Quick Links</p>
-                <div className="mt-4 space-y-3">
-                  {quickLinks.map((link) => (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className="group flex items-center gap-3 text-[15px] text-white/75 hover:text-white/90 transition-colors"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        className="h-4 w-4 text-white/35 group-hover:translate-x-[2px] transition-transform"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                      </svg>
-                      <span>{link.label}</span>
-                    </Link>
-                  ))}
-                </div>
+        <div className="mt-8">
+          {!hasQuery && recentTickers.length > 0 && (
+            <div className="space-y-4">
+              <p className="text-[12px] font-normal text-[#86868b] tracking-normal">
+                Last searched
+              </p>
+              <div className="space-y-2">
+                {recentTickers.slice(0, 5).map((symbol, idx) => (
+                  <button
+                    key={`recent-${symbol}`}
+                    type="button"
+                    onClick={() => {
+                      setValue(symbol);
+                      void goToSymbol({ key: `recent-${symbol}`, symbol, source: "recent" });
+                    }}
+                    className="group flex w-full items-center gap-3 py-1 text-[14px] font-semibold text-white hover:text-[#2997ff] transition-colors text-left"
+                  >
+                    <span className="text-[#86868b] group-hover:text-[#2997ff] transition-colors">→</span>
+                    <span>{symbol}</span>
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+          )}
 
-            {hasQuery && shouldShowListbox && (
-              <div
-                role="listbox"
-                id={listboxId}
-                aria-label="Search suggestions"
-                className="mt-2 pl-[42px] max-w-[820px] divide-y divide-white/10"
-                onMouseDown={(e) => e.preventDefault()}
-              >
-                {resultOptions.map((option, idx) => {
-                  const globalIndex = recentOptions.length + idx;
-                  const isActive = activeIndex === globalIndex;
-                  const rowClass = `relative w-full flex items-center justify-between py-4 text-left cursor-pointer focus-visible:outline-none`;
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      role="option"
-                      id={`${listboxId}-option-${option.key}`}
-                      aria-selected={isActive}
-                      onMouseEnter={() => setActiveIndex(globalIndex)}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        handleOptionSelect(option);
-                      }}
-                      className={`${rowClass} group`}
-                    >
-                      {isActive && (
-                        <span className="pointer-events-none absolute left-[-12px] top-1/2 -translate-y-1/2 h-5 w-[2px] bg-white/22" />
-                      )}
-                      <div className="flex items-center gap-3 min-w-0">
-                        <span className="text-[15px] font-semibold tracking-wide text-white/80 group-hover:text-white">
-                          {highlight(option.symbol, trimmed, isDarkMode)}
-                        </span>
-                        <span className="text-[15px] text-white/50 truncate group-hover:text-white/70">
-                          {highlight(option.name || option.symbol, trimmed, isDarkMode)}
-                        </span>
-                      </div>
-                      <span className="text-[12px] tracking-[0.18em] uppercase text-white/30">
-                        {(option.exchange || "").toUpperCase()}
+          {hasQuery && shouldShowListbox && (
+            <div
+              role="listbox"
+              id={listboxId}
+              aria-label="Search suggestions"
+              className="mt-8 space-y-2"
+            >
+              {isLoading && (
+                <div className="py-2 text-[14px] text-[#86868b]">
+                  Searching…
+                </div>
+              )}
+              {!isLoading && resultOptions.length === 0 && hasQuery && (
+                <div className="py-2 text-[14px] text-[#86868b]">
+                  No results found.
+                </div>
+              )}
+              {resultOptions.map((option, idx) => {
+                const globalIndex = recentOptions.length + idx;
+                const isActive = activeIndex === globalIndex;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    role="option"
+                    id={`${listboxId}-option-${option.key}`}
+                    aria-selected={isActive}
+                    onMouseEnter={() => setActiveIndex(globalIndex)}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleOptionSelect(option);
+                    }}
+                    className={`group flex w-full items-center gap-3 py-1 text-left cursor-pointer focus-visible:outline-none text-[14px] font-semibold transition-colors ${
+                      isActive ? "text-[#2997ff]" : "text-white hover:text-[#2997ff]"
+                    }`}
+                  >
+                    <span className={`transition-colors ${isActive ? "text-[#2997ff]" : "text-[#86868b] group-hover:text-[#2997ff]"}`}>→</span>
+                    <span>
+                      <span className="font-semibold">
+                        {highlight(option.symbol, trimmed, isDarkMode)}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          <div className="hidden md:block" aria-hidden />
+                      <span className="text-[#86868b] font-normal"> — </span>
+                      <span className="text-[#86868b] font-normal">
+                        {option.name || option.symbol}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : shouldShowListbox && (
         <div
