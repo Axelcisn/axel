@@ -38,7 +38,7 @@ const EWMA_BIASED_COLOR_RGB = '6, 182, 212';
 const EWMA_BIASED_MAX_COLOR_RGB = '250, 204, 21';
 
 const SYNC_ID = "timing-sync";
-const CHART_MARGIN = { top: 8, right: 16, left: 16, bottom: 0 };
+const CHART_MARGIN = { top: 8, right: 0, left: 0, bottom: 0 };
 const Y_AXIS_WIDTH = 56;
 const TOOLTIP_CLASS =
   "rounded-xl border shadow-2xl backdrop-blur-xl bg-slate-800/40 border-slate-600/30 text-slate-100 px-4 py-3";
@@ -595,6 +595,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [showSimulationSettingsDropdown, setShowSimulationSettingsDropdown] = useState(false);
   const simulationSettingsDropdownRef = useRef<HTMLDivElement>(null);
   const simRangeDropdownRef = useRef<HTMLDivElement>(null);
+  const simRangeButtonRef = useRef<HTMLButtonElement>(null);
+  const [simRangeMenuWidth, setSimRangeMenuWidth] = useState<number | null>(null);
   const [simulationInitialEquity, setSimulationInitialEquity] = useState(5000);
   const [simulationLeverage, setSimulationLeverage] = useState(5);
   const [simulationPositionPct, setSimulationPositionPct] = useState(25);
@@ -636,6 +638,19 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showSimRangeMenu]);
+
+  useEffect(() => {
+    if (!showSimRangeMenu) return;
+    const updateWidth = () => {
+      const w = simRangeButtonRef.current?.getBoundingClientRect().width;
+      if (w && Number.isFinite(w)) {
+        setSimRangeMenuWidth(w);
+      }
+    };
+    updateWidth();
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
   }, [showSimRangeMenu]);
   
   // Determine whether the current overlay claims a log domain
@@ -2709,35 +2724,57 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return aligned;
   }, [syncedDates, windowedAccountHistory]);
   const simViewLength = simulationEquityData.length;
-  const simXAxisInterval = useMemo(() => {
-    if (simViewLength <= 10) return 0;
-    if (simViewLength <= 40) return Math.max(1, Math.ceil(simViewLength / 8));
-    if (simViewLength <= 400) return "preserveStartEnd" as const;
-    return Math.max(1, Math.ceil(simViewLength / 20));
+  type SimTickStyle = "md" | "mmyy" | "yyyy";
+  const formatSimDate = useCallback((value: string, style: SimTickStyle) => {
+    if (!value) return "";
+    const dateObj = new Date(`${value}T00:00:00Z`);
+    if (Number.isNaN(dateObj.getTime())) return value;
+    if (style === "yyyy") return dateObj.getUTCFullYear().toString();
+    if (style === "mmyy") {
+      return dateObj.toLocaleDateString("en-US", {
+        month: "short",
+        year: "2-digit",
+        timeZone: "UTC",
+      });
+    }
+    return dateObj.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }, []);
+  const simTickConfig = useMemo(() => {
+    const N = simViewLength;
+    if (N <= 0) return { interval: 0, style: "md" as SimTickStyle };
+    if (N <= 10) return { interval: 0, style: "md" as SimTickStyle };
+    if (N <= 40) return { interval: Math.max(1, Math.ceil(N / 8) - 1), style: "md" as SimTickStyle };
+    if (N <= 120) return { interval: Math.max(1, Math.ceil(N / 8) - 1), style: "md" as SimTickStyle };
+    if (N <= 260) return { interval: Math.max(1, Math.ceil(N / 8) - 1), style: "mmyy" as SimTickStyle };
+    if (N <= 520) return { interval: Math.max(1, Math.ceil(N / 10)), style: "mmyy" as SimTickStyle };
+    return { interval: Math.max(1, Math.ceil(N / 16)), style: "yyyy" as SimTickStyle };
   }, [simViewLength]);
   const simTickFormatter = useCallback(
-    (value: string) => {
-      if (!value) return "";
-      const dateObj = new Date(`${value}T00:00:00Z`);
-      if (Number.isNaN(dateObj.getTime())) return value;
-      if (simViewLength <= 40) {
-        return dateObj.toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          timeZone: "UTC",
-        });
-      }
-      if (simViewLength <= 400) {
-        return dateObj.toLocaleDateString("en-US", {
-          month: "short",
-          year: "2-digit",
-          timeZone: "UTC",
-        });
-      }
-      return dateObj.getUTCFullYear().toString();
-    },
-    [simViewLength]
+    (value: string) => formatSimDate(value, simTickConfig.style),
+    [formatSimDate, simTickConfig.style]
   );
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    const N = simViewLength;
+    const sampleTicks =
+      N > 0
+        ? [
+            simulationEquityData[0]?.date,
+            simulationEquityData[Math.floor(N / 2)]?.date,
+            simulationEquityData[N - 1]?.date,
+          ]
+        : [];
+    console.log("[AXIS][SIM-EQUITY]", {
+      panel: "simEquity",
+      N,
+      interval: simTickConfig.interval,
+      sampleTicks,
+    });
+  }, [simTickConfig.interval, simViewLength, simulationEquityData]);
   const sharedBarSizing = useMemo(() => getBarSizing(syncedDates.length || simViewLength || chartDataWithEquity.length || 0), [chartDataWithEquity.length, simViewLength, syncedDates.length]);
   const simShowDots = simViewLength > 0 && simViewLength <= 25;
   const equityYDomain = useMemo(() => {
@@ -3377,9 +3414,71 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     entryPrice?: number;
     exitDate?: string;
     exitPrice?: number;
+    entrySide?: 'long' | 'short';
+    exitSide?: 'long' | 'short';
   }
 
-  // Custom shape for open/close trade marker (pair glyph: ●──●)
+  const getTrianglePath = (
+    cx: number,
+    cy: number,
+    dir: 'up' | 'down',
+    width = 10,
+    height = 8
+  ) => {
+    const halfW = width / 2;
+    const halfH = height / 2;
+
+    if (dir === 'up') {
+      return [
+        `M ${cx} ${cy - halfH}`, // tip
+        `L ${cx - halfW} ${cy + halfH}`,
+        `L ${cx + halfW} ${cy + halfH}`,
+        'Z',
+      ].join(' ');
+    }
+
+    // down
+    return [
+      `M ${cx} ${cy + halfH}`, // tip
+      `L ${cx - halfW} ${cy - halfH}`,
+      `L ${cx + halfW} ${cy - halfH}`,
+      'Z',
+    ].join(' ');
+  };
+
+  const TradeTriangleMarker: React.FC<{
+    cx?: number;
+    cy?: number;
+    dir: 'up' | 'down';
+    fill?: string;
+    stroke?: string;
+    strokeWidth?: number;
+    width?: number;
+    height?: number;
+  }> = ({
+    cx,
+    cy,
+    dir,
+    fill = 'transparent',
+    stroke = 'none',
+    strokeWidth = 1.5,
+    width = 10,
+    height = 8,
+  }) => {
+    if (cx == null || cy == null) return null;
+    const d = getTrianglePath(cx, cy, dir, width, height);
+    return (
+      <path
+        d={d}
+        fill={fill}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+      />
+    );
+  };
+
+  // Custom shape for same-day open/close marker (stacked triangles)
   const PairTradeMarkerShape: React.FC<any> = (props) => {
     const { cx, cy, marker, isDarkMode: isDark } = props as {
       cx: number;
@@ -3388,49 +3487,43 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       isDarkMode: boolean;
     };
 
-    if (!marker) return null;
+    if (cx == null || cy == null || !marker) return null;
 
-    const isLong = marker.side === 'long';
-
-    // Line color is theme-based (white in dark mode, black in light mode)
-    const lineColor = isDark
-      ? 'rgba(255, 255, 255, 0.9)'
-      : 'rgba(15, 23, 42, 0.9)';
+    const entrySide = marker.entrySide ?? marker.side;
+    const exitSide = marker.exitSide ?? marker.side;
 
     const longFill = 'rgba(34, 197, 94, 1)';
     const shortFill = 'rgba(248, 113, 113, 1)';
-    const sideColor = isLong ? longFill : shortFill;
 
-    const offset = 8; // wider glyph
+    const entryFill = entrySide === 'short' ? shortFill : longFill;
+    const exitStroke = exitSide === 'short' ? 'rgba(248, 113, 113, 0.9)' : 'rgba(34, 197, 94, 0.9)';
+    const exitFill = isDark ? 'rgba(15, 23, 42, 0.95)' : 'rgba(248, 250, 252, 0.95)';
+
+    const offsetY = 7;
+    const width = 10;
+    const height = 8;
+
+    const exitPath = getTrianglePath(cx, cy - offsetY, 'down', width, height);
+    const entryPath = getTrianglePath(cx, cy + offsetY, 'up', width, height);
 
     return (
       <g>
-        {/* Horizontal connector */}
-        <line
-          x1={cx - offset}
-          y1={cy}
-          x2={cx + offset}
-          y2={cy}
-          stroke={lineColor}
+        <path
+          d={exitPath}
+          fill={exitFill}
+          stroke={exitStroke}
           strokeWidth={2}
-          strokeLinecap="round"
+          strokeLinejoin="round"
         />
-        {/* Left dot: Open (solid) */}
-        <circle
-          cx={cx - offset}
-          cy={cy}
-          r={3.5}
-          fill={sideColor}
+        <path
+          d={entryPath}
+          fill={entryFill}
+          stroke="transparent"
+          strokeWidth={0}
+          strokeLinejoin="round"
         />
-        {/* Right dot: Exit (ring) */}
-        <circle
-          cx={cx + offset}
-          cy={cy}
-          r={4}
-          fill={isDark ? 'rgba(15, 23, 42, 1)' : 'rgba(248, 250, 252, 1)'}
-          stroke={sideColor}
-          strokeWidth={1.8}
-        />
+        {/* Generous hover target */}
+        <circle cx={cx} cy={cy} r={12} fill="transparent" pointerEvents="all" />
       </g>
     );
   };
@@ -3507,9 +3600,30 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     // Turn events into actual markers
     eventsByKey.forEach((events) => {
-      if (events.length === 1) {
-        // Single action on this day for this run
-        const e = events[0];
+      const hasEntry = events.some((e) => e.type === 'entry');
+      const hasExit = events.some((e) => e.type === 'exit');
+
+      if (hasEntry && hasExit) {
+        const entryEvent = events.find((e) => e.type === 'entry') as RawEvent;
+        const exitEvent = events.find((e) => e.type === 'exit') as RawEvent;
+
+        markers.push({
+          date: entryEvent.date,
+          type: 'pair',
+          side: entryEvent.side ?? exitEvent.side,
+          runId: entryEvent.runId,
+          label: entryEvent.label,
+          color: entryEvent.color,
+          netPnl: exitEvent.netPnl ?? entryEvent.netPnl,
+          margin: exitEvent.margin ?? entryEvent.margin,
+          entrySide: entryEvent.side,
+          exitSide: exitEvent.side,
+        });
+        return;
+      }
+
+      // Only entries OR only exits on this day → render individually
+      events.forEach((e: RawEvent) => {
         markers.push({
           date: e.date,
           type: e.type,
@@ -3520,36 +3634,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           netPnl: e.netPnl,
           margin: e.margin,
         });
-      } else if (events.length === 2) {
-        // Two actions on same day (e.g. exit + new entry) → use a 'pair' glyph
-        const [e1, e2] = events;
-        const pairSide = e2.side;
-
-        markers.push({
-          date: e2.date,
-          type: 'pair',
-          side: pairSide,
-          runId: e2.runId,
-          label: e2.label,
-          color: e2.color,
-          netPnl: e1.netPnl ?? e2.netPnl,
-          margin: e2.margin,
-        });
-      } else {
-        // Fallback: more than 2 actions → render individually
-        events.forEach((e: RawEvent) => {
-          markers.push({
-            date: e.date,
-            type: e.type,
-            side: e.side,
-            runId: e.runId,
-            label: e.label,
-            color: e.color,
-            netPnl: e.netPnl,
-            margin: e.margin,
-          });
-        });
-      }
+      });
     });
 
     return markers;
@@ -3754,8 +3839,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const isPositive = latestRangePerf != null ? latestRangePerf >= 0 : undefined;
   const lineColor = isPositive === false ? "#ef4444" : "#22c55e"; // Vibrant red or green with glow
 
-  const chartBg = "w-full";
-  const containerClasses = (className ?? "") + " w-full";
+  const chartFrameClasses = "relative w-full overflow-hidden rounded-3xl";
+
+  const chartBg = chartFrameClasses;
+  const containerClasses = `${className ?? ""} w-full`;
 
   // Memoized chart element to prevent re-renders when dropdown states change
   const memoizedChartElement = useMemo(() => {
@@ -4739,13 +4826,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       <PairTradeMarkerShape
                         {...dotProps}
                         marker={m}
+                        isDarkMode={isDarkMode}
                       />
                     )}
                   />
                 );
               }
 
-              // Standard entry/exit dots
+              // Standard entry/exit triangles
               const isEntry = m.type === 'entry';
               const isLong = m.side === 'long';
 
@@ -4782,6 +4870,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   fill={fill}
                   stroke={stroke}
                   strokeWidth={1.5}
+                  shape={(dotProps: any) => (
+                    <TradeTriangleMarker
+                      {...dotProps}
+                      dir={isEntry ? 'up' : 'down'}
+                      fill={fill}
+                      stroke={stroke}
+                      strokeWidth={isEntry ? 1.2 : 1.8}
+                    />
+                  )}
                 />
               );
             })}
@@ -5765,6 +5862,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             <div className="relative" ref={simRangeDropdownRef}>
               <button
                 type="button"
+                ref={simRangeButtonRef}
                 onClick={() => setShowSimRangeMenu((v) => !v)}
                 className={`
                   flex items-center gap-2 px-2 py-1 rounded-md transition
@@ -5782,57 +5880,32 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               </button>
               {showSimRangeMenu && (
                 <div
-                  className={`absolute right-0 mt-2 w-72 max-h-[420px] overflow-auto rounded-xl border shadow-lg z-20 ${
+                  className={`absolute right-0 mt-2 w-full max-h-[420px] overflow-auto rounded-xl border shadow-2xl backdrop-blur-xl z-20 ${
                     isDarkMode
-                      ? "bg-slate-900 border-slate-700/70"
-                      : "bg-white border-gray-200"
+                      ? "bg-transparent border-slate-700/70 shadow-black/40"
+                      : "bg-transparent border-gray-200 shadow-slate-400/40"
                   }`}
+                  style={simRangeMenuWidth ? { width: simRangeMenuWidth } : undefined}
                 >
-                  <div className={`px-3 py-2 text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                  <div className={`px-3 py-2 text-[11px] font-semibold ${isDarkMode ? "text-slate-200" : "text-gray-800"}`}>
                     Date range
                   </div>
 
-                  <div className="px-3 pb-2 space-y-2">
-                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
-                      From chart
-                    </div>
-                    <button
-                      className={`w-full flex items-center justify-between rounded-lg px-3 py-2 text-[11px] transition ${
-                        simComparePreset === "chart"
-                          ? isDarkMode
-                            ? "bg-slate-800 text-slate-100"
-                            : "bg-gray-100 text-gray-800"
-                          : isDarkMode
-                            ? "text-slate-300 hover:bg-slate-800/80"
-                            : "text-gray-700 hover:bg-gray-50"
-                      }`}
-                      onClick={() => handleSimRangePreset("chart")}
-                    >
-                      <span>Range from chart</span>
-                      {simComparePreset === "chart" && (
-                        <CheckIcon className="w-4 h-4" />
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="px-3 pb-2 space-y-2">
-                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
-                      Quick ranges
-                    </div>
+                  <div className="px-3 pb-3">
                     <div className="grid grid-cols-2 gap-2">
                       {quickRangePresets.map((opt) => {
                         const isSelected = simComparePreset === opt.id;
                         const baseClasses = isSelected
                           ? isDarkMode
-                            ? "bg-slate-800 text-slate-100"
-                            : "bg-gray-100 text-gray-800"
+                            ? "bg-emerald-600/90 text-white ring-1 ring-emerald-300"
+                            : "bg-emerald-500/90 text-white ring-1 ring-emerald-200"
                           : isDarkMode
-                            ? "text-slate-300 hover:bg-slate-800/80"
-                            : "text-gray-700 hover:bg-gray-50";
+                            ? "text-slate-200 hover:bg-slate-800/70"
+                            : "text-gray-800 hover:bg-gray-50";
                         return (
                           <button
                             key={opt.id}
-                            className={`relative rounded-lg px-3 py-2 text-[11px] font-semibold transition text-left ${baseClasses} ${opt.spanFull ? "col-span-2" : ""}`}
+                            className={`relative rounded-lg px-2 py-1 text-[11px] font-semibold transition text-left ${baseClasses} ${opt.spanFull ? "col-span-2" : ""}`}
                             onClick={() => handleSimRangePreset(opt.id)}
                           >
                             <span>{opt.label}</span>
@@ -5847,15 +5920,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
                   <div className={isDarkMode ? "border-t border-slate-800/60" : "border-t border-gray-200"} />
                   <div className="px-3 py-3 space-y-2">
-                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                    <div className={`text-[11px] font-semibold ${isDarkMode ? "text-slate-200" : "text-gray-800"}`}>
                       Custom date range
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="grid grid-cols-[auto_auto_auto] items-center gap-2">
                       <input
                         type="date"
                         value={customSimRangeStart}
                         onChange={(e) => setCustomSimRangeStart(e.target.value)}
-                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
+                        className={`w-[100px] min-w-[95px] rounded-md border px-2 py-1 text-[11px] ${
                           isDarkMode
                             ? "bg-slate-900 border-slate-700 text-slate-100"
                             : "bg-white border-gray-300 text-gray-700"
@@ -5866,7 +5939,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         type="date"
                         value={customSimRangeEnd}
                         onChange={(e) => setCustomSimRangeEnd(e.target.value)}
-                        className={`flex-1 rounded-md border px-2 py-1 text-[11px] ${
+                        className={`w-[100px] min-w-[95px] rounded-md border px-2 py-1 text-[11px] ${
                           isDarkMode
                             ? "bg-slate-900 border-slate-700 text-slate-100"
                             : "bg-white border-gray-300 text-gray-700"
@@ -5877,7 +5950,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       type="button"
                       disabled={!customSimRangeStart || !customSimRangeEnd}
                       onClick={handleApplyCustomRange}
-                      className={`w-full rounded-md px-3 py-2 text-[11px] font-semibold transition ${
+                      className={`w-full rounded-full px-3 py-2 text-[11px] font-semibold transition ${
                         !customSimRangeStart || !customSimRangeEnd
                           ? isDarkMode
                             ? "bg-slate-800 text-slate-500 cursor-not-allowed"
@@ -6106,7 +6179,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               </div>
 
               {/* Equity Chart inside Overview tab */}
-              <div className="w-full">
+              <div className={chartFrameClasses}>
                 {simulationEquityData.length < 2 ? (
                   <div className={`h-[220px] flex items-center justify-center text-xs ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     Not enough points in the selected range to render the simulation chart.
@@ -6132,9 +6205,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         allowDuplicatedCategory={false}
                         axisLine={false}
                         tickLine={false}
-                        tickMargin={6}
+                        tickMargin={8}
                         padding={{ left: 0, right: 0 }}
-                        interval={simXAxisInterval as any}
+                        minTickGap={16}
+                        interval={simTickConfig.interval as any}
                         tick={{
                           fill: isDarkMode ? '#9CA3AF' : '#6B7280',
                           fontSize: simViewLength <= 10 ? 11 : 10,

@@ -13,7 +13,7 @@ const APPLE_SURFACE = `${APPLE_NAV_BG} border-b border-white/[0.08]`;
 
 const navItems = [
   { href: '/', label: 'Home' },
-  { href: '/analysis', label: 'Analysis' },
+  { href: '/portfolio', label: 'Portfolio' },
   { href: '/memory', label: 'Memory' },
   { href: '/watchlist', label: 'Watchlist' },
 ];

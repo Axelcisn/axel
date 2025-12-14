@@ -285,7 +285,7 @@ export default function MemoryPage() {
             {!searchTerm && (
               <div className="mt-6">
                 <Link
-                  href="/analysis"
+                  href="/"
                   className={`inline-flex items-center px-5 py-2 text-sm font-medium rounded-full transition ${
                     isDarkMode ? 'bg-blue-500 text-white hover:bg-blue-400' : 'bg-blue-600 text-white hover:bg-blue-700'
                   }`}

@@ -18,7 +18,7 @@
     "name": "Apple Inc.",
     "exchange": "Nasdaq",
     "createdAt": "2025-11-14T04:52:55.852Z",
-    "updatedAt": "2025-12-14T03:26:15.260Z"
+    "updatedAt": "2025-12-14T05:33:12.764Z"
   },
   "MCD": {
     "ticker": "MCD",
@@ -39,14 +39,14 @@
     "name": "NVIDIA Corporation",
     "exchange": "Nasdaq",
     "createdAt": "2025-12-10T04:18:33.582Z",
-    "updatedAt": "2025-12-14T03:41:44.808Z"
+    "updatedAt": "2025-12-14T05:34:59.702Z"
   },
   "KO": {
     "ticker": "KO",
     "name": "The Coca-Cola Company",
     "exchange": "NYSE",
     "createdAt": "2025-12-10T06:24:36.971Z",
-    "updatedAt": "2025-12-11T07:26:45.439Z"
+    "updatedAt": "2025-12-14T09:50:43.052Z"
   },
   "META": {
     "ticker": "META",
@@ -85,10 +85,10 @@
   },
   "WMT": {
     "ticker": "WMT",
-    "name": "Walmart Inc. Common Stock",
-    "exchange": "NasdaqGS",
+    "name": "Walmart Inc.",
+    "exchange": "Nasdaq",
     "createdAt": "2025-12-10T18:19:22.796Z",
-    "updatedAt": "2025-12-11T04:01:58.043Z"
+    "updatedAt": "2025-12-14T05:33:29.521Z"
   },
   "XOM": {
     "ticker": "XOM",
@@ -123,6 +123,6 @@
     "name": "Amazon.com, Inc.",
     "exchange": "Nasdaq",
     "createdAt": "2025-12-11T14:58:22.171Z",
-    "updatedAt": "2025-12-11T14:58:22.651Z"
+    "updatedAt": "2025-12-14T05:35:07.488Z"
   }
 }
