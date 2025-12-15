@@ -7,23 +7,25 @@ export interface CanonicalData {
   meta: CanonicalTableMeta;
 }
 
-function getDataRoot(): string {
+function getDataBaseUrl(): string {
   return process.env.NODE_ENV === 'production'
-    ? '/tmp/data'
-    : path.join(process.cwd(), 'data');
+    ? '' // Use relative path in production
+    : ''; // Use relative path in development too
 }
 
 /**
  * Load canonical data for a symbol
  */
 export async function loadCanonicalData(symbol: string): Promise<CanonicalRow[]> {
-  // Use /tmp in production (Vercel), data/ in development
-  const dataRoot = getDataRoot();
-  const canonicalPath = path.join(dataRoot, 'canonical', `${symbol}.json`);
+  const baseUrl = getDataBaseUrl();
+  const canonicalUrl = `${baseUrl}/data/canonical/${symbol}.json`;
   
   try {
-    const canonicalContent = await fs.promises.readFile(canonicalPath, 'utf-8');
-    const canonicalData: CanonicalData = JSON.parse(canonicalContent);
+    const response = await fetch(canonicalUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const canonicalData: CanonicalData = await response.json();
     return canonicalData.rows;
   } catch (error) {
     throw new Error(`No canonical data found for ${symbol}`);
@@ -34,11 +36,15 @@ export async function loadCanonicalData(symbol: string): Promise<CanonicalRow[]>
  * Load canonical data with metadata for a symbol
  */
 export async function loadCanonicalDataWithMeta(symbol: string): Promise<CanonicalData> {
-  const canonicalPath = path.join(getDataRoot(), 'canonical', `${symbol}.json`);
+  const baseUrl = getDataBaseUrl();
+  const canonicalUrl = `${baseUrl}/data/canonical/${symbol}.json`;
   
   try {
-    const canonicalContent = await fs.promises.readFile(canonicalPath, 'utf-8');
-    const canonicalData: CanonicalData = JSON.parse(canonicalContent);
+    const response = await fetch(canonicalUrl);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const canonicalData: CanonicalData = await response.json();
     return canonicalData;
   } catch (error) {
     throw new Error(`No canonical data found for ${symbol}`);

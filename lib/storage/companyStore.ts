@@ -1,20 +1,12 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { CompanyInfo, CompanyRegistry } from '../types/company';
-
-// Use /tmp in production (Vercel), data/ in development
-const DATA_ROOT = process.env.NODE_ENV === 'production' 
-  ? '/tmp/data' 
-  : path.join(process.cwd(), 'data');
-const COMPANIES_FILE = path.join(DATA_ROOT, 'companies.json');
 
 export async function loadCompanyRegistry(): Promise<CompanyRegistry> {
   try {
-    // Ensure data directory exists
-    await fs.promises.mkdir(DATA_ROOT, { recursive: true });
-    
-    const data = await fs.promises.readFile(COMPANIES_FILE, 'utf-8');
-    return JSON.parse(data);
+    const response = await fetch('/data/companies.json');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.json();
   } catch (error) {
     // Return empty registry if file doesn't exist
     return {};
@@ -22,13 +14,9 @@ export async function loadCompanyRegistry(): Promise<CompanyRegistry> {
 }
 
 export async function saveCompanyRegistry(registry: CompanyRegistry): Promise<void> {
-  // Ensure data directory exists
-  await fs.promises.mkdir(DATA_ROOT, { recursive: true });
-  
-  // Atomic write
-  const tempFile = `${COMPANIES_FILE}.tmp`;
-  await fs.promises.writeFile(tempFile, JSON.stringify(registry, null, 2), 'utf-8');
-  await fs.promises.rename(tempFile, COMPANIES_FILE);
+  // NOTE: In production with static files, we can't save company registry.
+  // This would need to be handled via an API endpoint that stores data elsewhere
+  console.warn('saveCompanyRegistry: Writing to static files not supported in production');
 }
 
 export async function saveCompany(companyInfo: CompanyInfo): Promise<void> {
