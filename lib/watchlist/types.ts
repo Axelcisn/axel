@@ -1,6 +1,7 @@
 export type WatchlistRow = {
   symbol: string;
   as_of: string;  // ISO
+  live?: number | null;
 
   deviation: {
     direction: "up" | "down" | "none";

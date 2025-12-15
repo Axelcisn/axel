@@ -466,6 +466,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     avgWidth: number;
     neutralDirectionHitRate: number;
     neutralIntervalScore: number;
+    shortOpportunityRate: number;
+    zEnterUsed?: number;
+    score?: number;
   };
 
 const [reactionOptimizationBest, setReactionOptimizationBest] = useState<EwmaOptimizationCandidate | null>(null);
@@ -504,6 +507,34 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     withTrend: boolean;
   }
 
+  type SimCostConfig = {
+    spreadBps?: number;
+    feeBps?: number;
+    fxBps?: number;
+    slippageBps?: number;
+  };
+
+  const simCostDefaults: SimCostConfig = {
+    spreadBps: 5,
+    feeBps: 0,
+    fxBps: 0,
+    slippageBps: 0,
+  };
+
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
+
+  function estimateDefaultThresholdPct(costs: SimCostConfig): number {
+    const spread = costs.spreadBps ?? 0;
+    const fee = costs.feeBps ?? 0;
+    const fx = costs.fxBps ?? 0;
+    const slippage = costs.slippageBps ?? 0;
+    const roundTripPct = (2 * (spread + fee + fx + slippage)) / 10000; // convert bps to decimal pct
+    const buffered = roundTripPct + 0.0001; // small buffer (~1 bp) to avoid churn
+    const fallback = 0.001; // 10 bps = 0.10%
+    const candidate = Number.isFinite(buffered) ? buffered : fallback;
+    return clamp(candidate, 0.0002, 0.005); // 2–50 bps
+  }
+
   const [trendWeight, setTrendWeight] = useState<number | null>(null);
   const [trendWeightUpdatedAt, setTrendWeightUpdatedAt] = useState<string | null>(null);
   const [simulationMode, setSimulationMode] = useState<SimulationMode>({
@@ -533,7 +564,14 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   const [t212InitialEquity, setT212InitialEquity] = useState(5000);
   const [t212Leverage, setT212Leverage] = useState(5);
   const [t212PositionFraction, setT212PositionFraction] = useState(0.25); // 25% default
-  const [t212ThresholdPct, setT212ThresholdPct] = useState(0.0); // signal threshold
+  // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
+  const [t212ThresholdFrac, setT212ThresholdFrac] = useState<number>(() => estimateDefaultThresholdPct(simCostDefaults));
+  const [t212CostBps, setT212CostBps] = useState<number>(0);
+  const [t212SignalRule, setT212SignalRule] = useState<"bps" | "z">("bps");
+  const [t212ZMode, setT212ZMode] = useState<"auto" | "manual">("auto");
+  const [t212ZEnter, setT212ZEnter] = useState(0.3);
+  const [t212ZExit, setT212ZExit] = useState(0.1);
+  const [t212ZFlip, setT212ZFlip] = useState(0.6);
   const [t212DailyLongSwap, setT212DailyLongSwap] = useState(0);  // can tune later
   const [t212DailyShortSwap, setT212DailyShortSwap] = useState(0);
   const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
@@ -2248,6 +2286,8 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         coverage: coverage.toString(),
         shrinkFactor: "0.5",
         minTrainObs: reactionMinTrainObs.toString(),
+        zMode: t212ZMode,
+        zEnter: t212ZEnter.toString(),
         // Coarse grid for speed: λ step 0.05, train step 0.05
         lambdaMin: "0.50",
         lambdaMax: "0.99",
@@ -2300,7 +2340,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     } finally {
       setIsOptimizingReaction(false);
     }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs]);
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, t212ZEnter, t212ZMode]);
 
   // Auto-run optimization on initial load when unbiased EWMA is ready
   const hasAutoOptimized = useRef(false);
@@ -2357,6 +2397,11 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     trendWeight?: number | null;
     trendZByDate?: Map<string, number>;
     horizon?: number;
+    zMode?: "auto" | "manual";
+    signalRule?: "bps" | "z";
+    zEnter?: number;
+    zExit?: number;
+    zFlip?: number;
   };
 
   const buildTrading212SimBarsFromEwmaPath = useCallback((
@@ -2366,6 +2411,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     options?: Trading212SimBarsOptions
   ): Trading212SimBar[] => {
     if (!ewmaPathArg) return [];
+
+    const quantile = (arr: number[], q: number): number => {
+      if (!arr.length) return NaN;
+      const sorted = [...arr].sort((a, b) => a - b);
+      const pos = (sorted.length - 1) * q;
+      const base = Math.floor(pos);
+      const rest = pos - base;
+      if (sorted[base + 1] !== undefined) {
+        return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+      }
+      return sorted[base];
+    };
 
     const useTrendTilt =
       !!options?.useTrendTilt &&
@@ -2377,6 +2434,12 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     const trendWeight = options?.trendWeight ?? null;
     const trendZByDate = options?.trendZByDate;
     const horizon = options?.horizon ?? 1;
+    const zMode = options?.zMode ?? "auto";
+    const signalRule = options?.signalRule ?? "bps";
+    const zEnter = options?.zEnter ?? 0.3;
+    const zExit = options?.zExit ?? 0.1;
+    const zFlip = options?.zFlip ?? 0.6;
+    const sqrtH = Math.sqrt(horizon);
 
     // Build lookup from target date to forecast
     const ewmaMap = new Map<string, EwmaWalkerPathPoint>();
@@ -2384,7 +2447,92 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       ewmaMap.set(p.date_tp1, p);
     });
 
+    const simStartDate = canonicalRows[0]?.date ?? null;
+
+    const computeAutoThresholds = (): {
+      enterLong: number;
+      enterShort: number;
+      exitLong: number;
+      exitShort: number;
+      flipLong: number;
+      flipShort: number;
+    } => {
+      const exitRatio = 0.3;
+      const flipRatio = 2.0;
+
+      if (!simStartDate) {
+        const fallback = zEnter;
+        return {
+          enterLong: fallback,
+          enterShort: fallback,
+          exitLong: fallback * exitRatio,
+          exitShort: fallback * exitRatio,
+          flipLong: fallback * flipRatio,
+          flipShort: fallback * flipRatio,
+        };
+      }
+
+      const calibPoints = ewmaPathArg
+        .filter((p) => p.date_tp1 < simStartDate)
+        .sort((a, b) => a.date_tp1.localeCompare(b.date_tp1));
+      const lastCalib = calibPoints.slice(-252);
+
+      const zEdges: number[] = [];
+      for (const p of lastCalib) {
+        const sigmaH = p.sigma_t * sqrtH;
+        const muBase = Math.log(p.y_hat_tp1 / p.S_t);
+        if (!Number.isFinite(muBase) || !Number.isFinite(sigmaH) || sigmaH <= 0) continue;
+        zEdges.push(muBase / sigmaH);
+      }
+
+      if (zEdges.length === 0) {
+        const fallback = zEnter;
+        return {
+          enterLong: fallback,
+          enterShort: fallback,
+          exitLong: fallback * exitRatio,
+          exitShort: fallback * exitRatio,
+          flipLong: fallback * flipRatio,
+          flipShort: fallback * flipRatio,
+        };
+      }
+
+      const targetQ = 0.9;
+      const minSamples = 50;
+      const pos = zEdges.filter((z) => z > 0);
+      const neg = zEdges.filter((z) => z < 0).map((z) => -z);
+      const absVals = zEdges.map((z) => Math.abs(z));
+
+      const symEnter = quantile(absVals, targetQ);
+      const enterLong = pos.length >= minSamples ? quantile(pos, targetQ) : symEnter;
+      const enterShort = neg.length >= minSamples ? quantile(neg, targetQ) : symEnter;
+
+      const enterLongFinal = Number.isFinite(enterLong) ? enterLong : zEnter;
+      const enterShortFinal = Number.isFinite(enterShort) ? enterShort : enterLongFinal;
+
+      return {
+        enterLong: enterLongFinal,
+        enterShort: enterShortFinal,
+        exitLong: enterLongFinal * exitRatio,
+        exitShort: enterShortFinal * exitRatio,
+        flipLong: enterLongFinal * flipRatio,
+        flipShort: enterShortFinal * flipRatio,
+      };
+    };
+
+    const manualThresholds = {
+      enterLong: zEnter,
+      enterShort: zEnter,
+      exitLong: zExit,
+      exitShort: zExit,
+      flipLong: zFlip,
+      flipShort: zFlip,
+    };
+
+    const thresholds = signalRule === "z" ? (zMode === "auto" ? computeAutoThresholds() : manualThresholds) : null;
+
     const bars: Trading212SimBar[] = [];
+    let qPrev = 0; // -1 short, 0 flat, +1 long
 
     for (const row of canonicalRows) {
       const price = row.adj_close ?? row.close;
@@ -2393,45 +2541,64 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       const ewma = ewmaMap.get(row.date);
       if (!ewma) continue; // no forecast for this date
 
-      // Compare forecast center vs origin price
-      const diffPctBase = (ewma.y_hat_tp1 - ewma.S_t) / ewma.S_t;
+      const muBase = Math.log(ewma.y_hat_tp1 / ewma.S_t);
+      const sigmaH = ewma.sigma_t != null ? ewma.sigma_t * sqrtH : NaN;
+      let muUsed = muBase;
 
-      let diffForSignal = diffPctBase;
-
-      // Optional Trend tilt adjustment (only applies to biased runs)
       if (
         useTrendTilt &&
         trendWeight != null &&
         trendZByDate &&
-        ewma.sigma_t != null &&
-        Number.isFinite(ewma.sigma_t)
+        Number.isFinite(sigmaH) &&
+        sigmaH > 0
       ) {
         const zRaw = trendZByDate.get(row.date);
         if (zRaw != null && Number.isFinite(zRaw)) {
           const zClamped = Math.max(-2, Math.min(2, zRaw));
-
-          const muBase = Math.log(ewma.y_hat_tp1 / ewma.S_t);
-          const sigmaH = ewma.sigma_t * Math.sqrt(horizon);
-
-          if (
-            Number.isFinite(muBase) &&
-            Number.isFinite(sigmaH) &&
-            sigmaH > 0
-          ) {
-            const muTrend = muBase + trendWeight * zClamped * sigmaH;
-            const relChange = Math.exp(muTrend) - 1;
-            if (Number.isFinite(relChange)) {
-              diffForSignal = relChange;
-            }
-          }
+          muUsed = muBase + trendWeight * zClamped * sigmaH;
         }
       }
 
+      const edgeFrac = Number.isFinite(muUsed) ? Math.exp(muUsed) - 1 : NaN;
+      const zEdge =
+        Number.isFinite(muUsed) && Number.isFinite(sigmaH) && sigmaH > 0
+          ? muUsed / sigmaH
+          : 0;
+
+      if (!Number.isFinite(edgeFrac)) continue;
+
       let signal: Trading212Signal = "flat";
-      if (diffForSignal > thresholdPct) {
-        signal = "long";
-      } else if (diffForSignal < -thresholdPct) {
-        signal = "short";
+
+      if (signalRule === "bps") {
+        if (edgeFrac > thresholdPct) {
+          signal = "long";
+        } else if (edgeFrac < -thresholdPct) {
+          signal = "short";
+        }
+      } else if (thresholds) {
+        // z-based hysteresis state machine with asymmetric thresholds
+        const {
+          enterLong,
+          enterShort,
+          exitLong,
+          exitShort,
+          flipLong,
+          flipShort,
+        } = thresholds;
+        let q = qPrev;
+        if (qPrev === 0) {
+          if (zEdge >= enterLong) q = 1;
+          else if (zEdge <= -enterShort) q = -1;
+        } else if (qPrev === 1) {
+          if (zEdge <= -flipShort) q = -1;
+          else if (zEdge <= exitLong) q = 0;
+        } else if (qPrev === -1) {
+          if (zEdge >= flipLong) q = 1;
+          else if (zEdge >= -exitShort) q = 0;
+        }
+        qPrev = q;
+        if (q > 0) signal = "long";
+        else if (q < 0) signal = "short";
       }
 
       bars.push({
@@ -2564,12 +2731,17 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         const bars = buildTrading212SimBarsFromEwmaPath(
           rowsForSim,
           ewmaPathForSim,
-          t212ThresholdPct,
+          t212ThresholdFrac,
           {
             useTrendTilt: canUseTrendTilt,
             trendWeight: canUseTrendTilt ? trendWeight! : null,
             trendZByDate,
             horizon: h,
+            zMode: t212ZMode,
+            signalRule: t212SignalRule,
+            zEnter: t212ZEnter,
+            zExit: t212ZExit,
+            zFlip: t212ZFlip,
           }
         );
 
@@ -2582,7 +2754,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           fxFeeRate: 0.005,
           dailyLongSwapRate: t212DailyLongSwap,
           dailyShortSwapRate: t212DailyShortSwap,
-          spreadBps: 5,
+          spreadBps: t212CostBps,
           marginCallLevel: 0.45,
           stopOutLevel: 0.25,
           positionFraction: t212PositionFraction,
@@ -2669,12 +2841,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       ewmaPath,
       ewmaBiasedPath,
       reactionMapSummary,
-      t212ThresholdPct,
+      t212ThresholdFrac,
       t212Leverage,
       t212DailyLongSwap,
       t212DailyShortSwap,
       t212PositionFraction,
       t212InitialEquity,
+      t212CostBps,
+      t212SignalRule,
+      t212ZMode,
+      t212ZEnter,
+      t212ZExit,
+      t212ZFlip,
       reactionLambda,
       reactionTrainFraction,
       reactionOptimizationBest,
@@ -2750,6 +2928,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   // Clear T212 runs when key parameters change to trigger fresh re-computation
   useEffect(() => {
     if (t212Runs.length > 0) {
+      console.log("[T212 settings] changed, clearing sims", {
+        t212InitialEquity,
+        t212Leverage,
+        t212PositionFraction,
+          t212ThresholdFrac,
+        t212CostBps,
+        t212SignalRule,
+        t212ZMode,
+        t212ZEnter,
+        t212ZExit,
+        t212ZFlip,
+      });
       setT212Runs([]);
       setT212BaseRunsById({});
       setT212CurrentRunId(null);
@@ -2764,7 +2954,13 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     t212InitialEquity,
     t212Leverage,
     t212PositionFraction,
-    t212ThresholdPct,
+          t212ThresholdFrac,
+    t212CostBps,
+    t212SignalRule,
+    t212ZMode,
+    t212ZEnter,
+    t212ZExit,
+    t212ZFlip,
     trendShortWindow,
     trendLongWindow,
     trendMomentumPeriod,
@@ -2830,7 +3026,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     t212InitialEquity,
     t212Leverage,
     t212PositionFraction,
-    t212ThresholdPct,
+    t212ThresholdFrac,
     t212DailyLongSwap,
     t212DailyShortSwap,
     trendShortWindow,
@@ -2895,7 +3091,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     t212InitialEquity,
     t212Leverage,
     t212PositionFraction,
-    t212ThresholdPct,
+    t212ThresholdFrac,
     t212DailyLongSwap,
     t212DailyShortSwap,
     trendShortWindow,
@@ -5630,6 +5826,26 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           onChangeSimComparePreset={handleSimComparePresetChange}
           onChangeSimCompareCustom={handleSimCompareCustomChange}
           onVisibleWindowChange={handleVisibleWindowChange}
+          t212InitialEquity={t212InitialEquity}
+          t212Leverage={t212Leverage}
+          t212PositionFraction={t212PositionFraction}
+          t212ThresholdFrac={t212ThresholdFrac}
+          t212CostBps={t212CostBps}
+          t212ZMode={t212ZMode}
+          t212SignalRule={t212SignalRule}
+          t212ZEnter={t212ZEnter}
+          t212ZExit={t212ZExit}
+          t212ZFlip={t212ZFlip}
+          onChangeT212InitialEquity={setT212InitialEquity}
+          onChangeT212Leverage={setT212Leverage}
+          onChangeT212PositionFraction={setT212PositionFraction}
+          onChangeT212ThresholdPct={setT212ThresholdFrac}
+          onChangeT212CostBps={setT212CostBps}
+          onChangeT212ZMode={setT212ZMode}
+          onChangeT212SignalRule={setT212SignalRule}
+          onChangeT212ZEnter={setT212ZEnter}
+          onChangeT212ZExit={setT212ZExit}
+          onChangeT212ZFlip={setT212ZFlip}
         />
       </div>
       
@@ -5716,10 +5932,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             
             {/* Left Column: Bucket Statistics */}
-            <div className={`rounded-xl p-4 ${
+            <div className={`rounded-xl p-4 border ${
               isDarkMode 
-                ? 'bg-slate-900/60 border border-slate-700/50' 
-                : 'bg-gray-50 border border-gray-200'
+                ? 'bg-transparent border-slate-700/50' 
+                : 'bg-transparent border-gray-200'
             }`}>
               <h4 className={`text-sm font-medium mb-3 ${
                 isDarkMode ? 'text-slate-300' : 'text-gray-700'
@@ -5775,10 +5991,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
             </div>
 
             {/* Right Column: Optimization Results */}
-            <div className={`rounded-xl p-4 ${
+            <div className={`rounded-xl p-4 border ${
               isDarkMode 
-                ? 'bg-slate-900/60 border border-slate-700/50' 
-                : 'bg-gray-50 border border-gray-200'
+                ? 'bg-transparent border-slate-700/50' 
+                : 'bg-transparent border-gray-200'
             }`}>
               <div className="flex items-center justify-between mb-3">
                 <h4 className={`text-sm font-medium ${
@@ -5897,10 +6113,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
             </div>
           </div>
         ) : !isLoadingReaction && !reactionError && (
-          <div className={`text-center py-12 rounded-xl ${
+          <div className={`text-center py-12 rounded-xl border ${
             isDarkMode 
-              ? 'bg-slate-900/40 text-slate-500' 
-              : 'bg-gray-50 text-gray-400'
+              ? 'bg-transparent text-slate-500 border-slate-800/50' 
+              : 'bg-transparent text-gray-500 border-gray-200'
           }`}>
             Click &quot;Run&quot; to compute the EWMA Reaction Map
           </div>

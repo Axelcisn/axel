@@ -23191,10 +23191,38 @@
       "low": 82.72000122070312,
       "close": 84.16000366210938,
       "adj_close": 84.16000366210938,
-      "volume": 51120300,
+      "volume": 51202000,
       "split_factor": null,
       "cash_dividend": null,
       "r": -0.0567027815144757,
+      "valid": true,
+      "issues": []
+    },
+    {
+      "date": "2025-12-11",
+      "open": 84.05500030517578,
+      "high": 85.74500274658203,
+      "low": 83.33999633789062,
+      "close": 85.44000244140625,
+      "adj_close": 85.44000244140625,
+      "volume": 23346300,
+      "split_factor": null,
+      "cash_dividend": null,
+      "r": 0.015094611283339934,
+      "valid": true,
+      "issues": []
+    },
+    {
+      "date": "2025-12-12",
+      "open": 85.5,
+      "high": 86.44999694824219,
+      "low": 84.51840209960938,
+      "close": 85.11000061035156,
+      "adj_close": 85.11000061035156,
+      "volume": 15626015,
+      "split_factor": null,
+      "cash_dividend": null,
+      "r": -0.00386985912619997,
       "valid": true,
       "issues": []
     }
@@ -23204,11 +23232,12 @@
     "exchange_tz": "America/New_York",
     "calendar_span": {
       "start": "2019-05-10",
-      "end": "2025-12-10"
+      "end": "2025-12-12"
     },
-    "rows": 1657,
+    "rows": 1659,
     "missing_trading_days": [],
     "invalid_rows": 0,
-    "generated_at": "2025-12-11T04:53:09.034Z"
+    "generated_at": "2025-12-14T11:30:05.545Z",
+    "range": "max"
   }
 }

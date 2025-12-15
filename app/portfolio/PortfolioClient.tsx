@@ -6,17 +6,19 @@ import PortfolioTabs from '@/components/portfolio/PortfolioTabs';
 import PortfolioToolbar from '@/components/portfolio/PortfolioToolbar';
 import PortfolioTable, { SortDirection, SortField } from '@/components/portfolio/PortfolioTable';
 import Sparkline from '@/components/portfolio/Sparkline';
-import { fetchPortfolioData } from '@/lib/portfolio/data';
+import PortfolioValuePerformancePanel from '@/components/portfolio/PortfolioValuePerformancePanel';
+import { fetchPortfolioData, fetchPortfolioEquitySeries } from '@/lib/portfolio/data';
 import {
   PortfolioBalance,
   PortfolioDataResponse,
+  PortfolioEquitySeries,
   PortfolioOrder,
   PortfolioPosition,
   PortfolioSummary,
   PortfolioTab,
   PortfolioTrade,
 } from '@/lib/portfolio/types';
-import { formatCurrency, formatNumber, formatPercent, toneForNumber } from '@/lib/portfolio/format';
+import { formatCurrency, formatNumber, toneForNumber } from '@/lib/portfolio/format';
 import {
   DIVIDER,
   HEADER_BG,
@@ -48,6 +50,7 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
   const [orders, setOrders] = useState<PortfolioOrder[]>(initialData?.orders ?? []);
   const [trades, setTrades] = useState<PortfolioTrade[]>(initialData?.trades ?? []);
   const [balances, setBalances] = useState<PortfolioBalance[]>(initialData?.balances ?? []);
+  const [equitySeries, setEquitySeries] = useState<PortfolioEquitySeries>([]);
 
   const [loading, setLoading] = useState<Record<PortfolioTab, boolean>>({
     positions: false,
@@ -55,7 +58,8 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
     trades: false,
     balances: false,
   });
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialData?.error ?? null);
+  const [equityLoading, setEquityLoading] = useState<boolean>(true);
 
   useEffect(() => {
     if (sortMode === 'alphabetical') {
@@ -73,27 +77,69 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
   useEffect(() => {
     let cancelled = false;
 
+    const loadEquitySeries = async (showSkeleton: boolean) => {
+      if (showSkeleton) {
+        setEquityLoading(true);
+      }
+
+      try {
+        const series = await fetchPortfolioEquitySeries();
+        if (!cancelled) {
+          setEquitySeries(series);
+        }
+      } catch (err) {
+        // Ignore errors; UI will keep the last known series
+        console.error('Failed to fetch portfolio equity series', err);
+      } finally {
+        if (!cancelled && showSkeleton) {
+          setEquityLoading(false);
+        }
+      }
+    };
+
+    loadEquitySeries(true);
+    const id = setInterval(() => loadEquitySeries(false), 60000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
     const load = async () => {
       setLoading((prev) => ({ ...prev, [activeTab]: true }));
       try {
         const data = await fetchPortfolioData(activeTab);
         if (cancelled) return;
 
-        setError(null);
+        setError(data.error ?? null);
 
         if (activeTab === 'positions') {
-          if (data.summary) setSummary(data.summary);
-          if (data.positions) setPositions(data.positions);
+          setSummary(data.summary ?? null);
+          setPositions(data.positions ?? []);
         } else if (activeTab === 'orders') {
-          if (data.orders) setOrders(data.orders);
+          setOrders(data.orders ?? []);
         } else if (activeTab === 'trades') {
-          if (data.trades) setTrades(data.trades);
+          setTrades(data.trades ?? []);
         } else if (activeTab === 'balances') {
-          if (data.balances) setBalances(data.balances);
+          setBalances(data.balances ?? []);
         }
       } catch (err) {
         if (!cancelled) {
-          setError('Unable to refresh portfolio data. Showing latest cached snapshot.');
+          setError('Unable to refresh portfolio data.');
+          if (activeTab === 'positions') {
+            setSummary(null);
+            setPositions([]);
+          } else if (activeTab === 'orders') {
+            setOrders([]);
+          } else if (activeTab === 'trades') {
+            setTrades([]);
+          } else if (activeTab === 'balances') {
+            setBalances([]);
+          }
         }
       } finally {
         if (!cancelled) {
@@ -195,6 +241,12 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
   return (
     <div className="space-y-4">
       {summary && <PortfolioSummaryStrip summary={summary} />}
+
+      {equityLoading ? (
+        <div className={`h-[520px] w-full rounded-3xl ${SURFACE} animate-pulse`} />
+      ) : (
+        <PortfolioValuePerformancePanel series={equitySeries} />
+      )}
 
       <div className={`overflow-hidden rounded-2xl ${SURFACE}`}>
         <PortfolioTabs activeTab={activeTab} onChange={(tab) => setActiveTab(tab)} />
@@ -358,7 +410,7 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
                         {balance.unrealizedPnl != null ? formatCurrency(balance.unrealizedPnl, 0) : '—'}
                       </td>
                       <td className="px-3 py-2">
-                        <Sparkline data={[0.4, 0.45, 0.48, 0.46, 0.5, 0.52, 0.55, 0.54, 0.56]} />
+                        <Sparkline data={balance.trend ?? []} />
                       </td>
                     </tr>
                   ))}

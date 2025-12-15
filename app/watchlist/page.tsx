@@ -10,6 +10,7 @@ type QuoteMap = Record<string, Quote | null>;
 type TableRow = {
   symbol: string;
   name: string;
+  live: number | null;
   bidSize: number | null;
   bid: number | null;
   ask: number | null;
@@ -42,9 +43,15 @@ function formatPercent(value: number | null | undefined) {
   return `${sign}${safe.toFixed(2)}%`;
 }
 
-function buildTableRow(row: WatchlistRow, company: CompanyMap[string], quote?: Quote | null): TableRow {
+function buildTableRow(
+  row: WatchlistRow,
+  company: CompanyMap[string],
+  quote?: Quote | null,
+  livePrice?: number | null,
+): TableRow {
   const bid = null;
   const ask = null;
+  const live = livePrice ?? row.live ?? quote?.price ?? null;
   const last = quote?.price ?? row.forecast.T_hat_median ?? null;
   const change = quote?.change ?? null;
   const changePct = quote?.changePct ?? null;
@@ -57,6 +64,7 @@ function buildTableRow(row: WatchlistRow, company: CompanyMap[string], quote?: Q
   return {
     symbol: row.symbol,
     name: company?.name || row.symbol,
+    live,
     bidSize,
     bid,
     ask,
@@ -72,8 +80,8 @@ function buildTableRow(row: WatchlistRow, company: CompanyMap[string], quote?: Q
 function TrendArrow({ positive }: { positive: boolean }) {
   return (
     <div
-      className={`flex h-8 w-8 items-center justify-center rounded-md ${
-        positive ? 'bg-emerald-900/30 text-emerald-400' : 'bg-rose-900/25 text-rose-400'
+      className={`flex h-9 w-9 items-center justify-center rounded-full ${
+        positive ? 'bg-emerald-900/40 text-emerald-300' : 'bg-rose-900/35 text-rose-300'
       }`}
     >
       <span className="text-lg">{positive ? '↑' : '↓'}</span>
@@ -105,7 +113,6 @@ function DetailPanel({ row, company }: { row: TableRow | null; company?: Company
         <div>
           <p className="text-[11px] uppercase tracking-wide text-slate-400">{company?.name || row.symbol}</p>
           <h2 className="text-3xl font-semibold text-slate-100">{row.symbol}</h2>
-          <p className="text-xs text-slate-500">Realtime price: non-consolidated</p>
         </div>
         <div className="text-right">
           <div className="text-4xl font-semibold text-emerald-400">{formatNumber(row.last)}</div>
@@ -153,38 +160,50 @@ export default function WatchlistPage() {
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [companyMap, setCompanyMap] = useState<CompanyMap>({});
   const [quotes, setQuotes] = useState<QuoteMap>({});
+  const [liveBySymbol, setLiveBySymbol] = useState<Record<string, number | null>>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const STORAGE_KEY = 'watchlist:columns';
 
   const allColumns = [
-    { id: 'symbol', label: 'Financial Instrument' },
-    { id: 'name', label: 'Company Name' },
-    { id: 'bidSize', label: 'Bid Size' },
-    { id: 'bid', label: 'Bid' },
+    { id: 'symbol', label: 'Ticker' },
+    { id: 'trend', label: 'Trend' },
+    { id: 'last', label: 'Last' },
     { id: 'ask', label: 'Ask' },
     { id: 'askSize', label: 'Ask Size' },
-    { id: 'last', label: 'Last' },
-    { id: 'spread', label: 'Spread' },
+    { id: 'bid', label: 'Bid' },
+    { id: 'bidSize', label: 'Bid Size' },
     { id: 'change', label: 'Change' },
     { id: 'changePct', label: 'Change %' },
-    { id: 'trend', label: 'Trend' },
+    { id: 'name', label: 'Company Name' },
+    { id: 'spread', label: 'Spread' },
   ];
   const totalColumns = allColumns.length;
 
-  const [selectedColumns, setSelectedColumns] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return allColumns.map((c) => c.id);
+  // To avoid hydration mismatches, start with the base column order on the server,
+  // then apply any saved preferences after mount.
+  const [selectedColumns, setSelectedColumns] = useState<string[]>(() =>
+    allColumns.map((c) => c.id)
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const base = allColumns.map((c) => c.id);
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as string[];
-        if (Array.isArray(parsed) && parsed.length) return parsed;
+        if (Array.isArray(parsed)) {
+          const filtered = base.filter((id) => parsed.includes(id));
+          setSelectedColumns(filtered.length ? filtered : base);
+          return;
+        }
       }
     } catch {
       /* ignore */
     }
-    return allColumns.map((c) => c.id);
-  });
+    setSelectedColumns(base);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -232,24 +251,43 @@ export default function WatchlistPage() {
     const symbols = Array.from(new Set(rows.map((r) => r.symbol))).filter(Boolean);
     if (!symbols.length) return;
 
-    const entries = await Promise.all(
-      symbols.map(async (symbol) => {
+    const entries: [string, Quote | null][] = [];
+    let index = 0;
+    const maxConcurrent = 4;
+
+    const worker = async () => {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const current = index;
+        index += 1;
+        if (current >= symbols.length) return;
+        const symbol = symbols[current];
         try {
           const res = await fetch(`/api/quotes/${encodeURIComponent(symbol)}`, { cache: 'no-store' });
           if (!res.ok) throw new Error('Quote fetch failed');
           const quote = (await res.json()) as Quote;
-          return [symbol, quote] as const;
+          entries.push([symbol, quote]);
         } catch (err) {
           console.warn('Failed to load quote for', symbol, err);
-          return [symbol, null] as const;
+          entries.push([symbol, null]);
         }
-      })
-    );
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(maxConcurrent, symbols.length) }, () => worker()));
 
     setQuotes((prev) => {
       const next = { ...prev };
       entries.forEach(([symbol, quote]) => {
         next[symbol] = quote;
+      });
+      return next;
+    });
+
+    setLiveBySymbol((prev) => {
+      const next = { ...prev };
+      entries.forEach(([symbol, quote]) => {
+        next[symbol] = quote?.price ?? null;
       });
       return next;
     });
@@ -307,9 +345,20 @@ export default function WatchlistPage() {
     loadCompanies();
   }, [loadWatchlist, loadAlerts, loadCompanies]);
 
+  useEffect(() => {
+    if (!watchlistRows.length) return;
+    const id = setInterval(() => {
+      loadQuotesForRows(watchlistRows);
+    }, 5000);
+    return () => clearInterval(id);
+  }, [watchlistRows, loadQuotesForRows]);
+
   const tableRows: TableRow[] = useMemo(
-    () => watchlistRows.map((row) => buildTableRow(row, companyMap[row.symbol], quotes[row.symbol])),
-    [watchlistRows, companyMap, quotes]
+    () =>
+      watchlistRows.map((row) =>
+        buildTableRow(row, companyMap[row.symbol], quotes[row.symbol], liveBySymbol[row.symbol]),
+      ),
+    [watchlistRows, companyMap, quotes, liveBySymbol]
   );
 
   const selectedRow = useMemo(
@@ -332,6 +381,8 @@ export default function WatchlistPage() {
         return <span className="font-semibold text-slate-100">{row.symbol}</span>;
       case 'name':
         return <span className="text-slate-200">{row.name}</span>;
+      case 'live':
+        return <span className="font-semibold text-slate-100">{formatNumber(row.live)}</span>;
       case 'bidSize':
         return <span className="text-slate-200">{row.bidSize ?? '—'}</span>;
       case 'bid':

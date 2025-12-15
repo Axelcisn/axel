@@ -1,5 +1,10 @@
 export type PortfolioTab = 'positions' | 'orders' | 'trades' | 'balances';
 
+export type PortfolioRange = '1W' | 'MTD' | '1M' | '3M' | 'YTD' | '1Y' | 'ALL';
+
+export type PortfolioEquityPoint = { t: string; netLiq: number };
+export type PortfolioEquitySeries = PortfolioEquityPoint[];
+
 export interface PortfolioSummary {
   accountId: string;
   dailyPnl: number;
@@ -59,6 +64,7 @@ export interface PortfolioBalance {
   excessLiquidity: number;
   netLiquidation: number;
   unrealizedPnl?: number;
+  trend?: number[];
 }
 
 export interface PortfolioDataResponse {

@@ -1,34 +1,49 @@
-const compactCurrencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  notation: 'compact',
-  maximumFractionDigits: 1,
-  minimumFractionDigits: 1,
-});
-
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 2,
-  minimumFractionDigits: 2,
-});
+const compactCurrencyFormatters = new Map<string, Intl.NumberFormat>();
+const currencyFormatters = new Map<string, Intl.NumberFormat>();
 
 const numberFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
   minimumFractionDigits: 2,
 });
 
-export function formatCompactCurrency(value: number) {
-  return compactCurrencyFormatter.format(value);
+function getCompactCurrencyFormatter(currency: string) {
+  const cached = compactCurrencyFormatters.get(currency);
+  if (cached) return cached;
+
+  const formatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    notation: 'compact',
+    maximumFractionDigits: 1,
+    minimumFractionDigits: 1,
+  });
+
+  compactCurrencyFormatters.set(currency, formatter);
+  return formatter;
 }
 
-export function formatCurrency(value: number, decimals = 2) {
-  return new Intl.NumberFormat('en-US', {
+function getCurrencyFormatter(currency: string, decimals: number) {
+  const key = `${currency}-${decimals}`;
+  const cached = currencyFormatters.get(key);
+  if (cached) return cached;
+
+  const formatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency,
     maximumFractionDigits: decimals,
     minimumFractionDigits: decimals,
-  }).format(value);
+  });
+
+  currencyFormatters.set(key, formatter);
+  return formatter;
+}
+
+export function formatCompactCurrency(value: number, currency = 'USD') {
+  return getCompactCurrencyFormatter(currency).format(value);
+}
+
+export function formatCurrency(value: number, decimals = 2, currency = 'USD') {
+  return getCurrencyFormatter(currency, decimals).format(value);
 }
 
 export function formatNumber(value: number, decimals = 2) {

@@ -9,6 +9,18 @@ import {
   summarizeEwmaWalkerResults,
 } from "@/lib/volatility/ewmaWalker";
 
+function quantile(arr: number[], q: number): number {
+  if (!arr.length) return NaN;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (sorted[base + 1] !== undefined) {
+    return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+  }
+  return sorted[base];
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { symbol: string } }
@@ -21,6 +33,9 @@ export async function GET(
     const coverage = Number(sp.get("coverage") ?? "0.95");
     const shrinkFactor = Number(sp.get("shrinkFactor") ?? "0.5");
     const minTrainObs = Number(sp.get("minTrainObs") ?? "500");
+    const zEnterManual = Number(sp.get("zEnter") ?? "0.3");
+    const zModeParam = (sp.get("zMode") ?? "auto").toString().toLowerCase();
+    const zMode: "auto" | "manual" = zModeParam === "manual" ? "manual" : "auto";
 
     // Lambda grid
     const lambdaMin = Number(sp.get("lambdaMin") ?? "0.01");
@@ -47,6 +62,9 @@ export async function GET(
       avgWidth: number;               // biased
       neutralDirectionHitRate: number;
       neutralIntervalScore: number;
+      zEnterUsed: number;
+      shortOpportunityRate: number;
+      score: number;
     };
 
     const candidates: Candidate[] = [];
@@ -64,6 +82,9 @@ export async function GET(
 
     let testedCombos = 0;
     let skippedCombos = 0;
+
+    const minShortRate = 0.01;
+    const penaltyWeight = 1.0;
 
     // Brute force grid search
     for (let l = lambdaMin; l <= lambdaMax + 1e-9; l += lambdaStep) {
@@ -125,6 +146,45 @@ export async function GET(
 
         const summary = summarizeEwmaWalkerResults(walker);
         const hit = summary.directionHitRate;
+        const sqrtH = Math.sqrt(horizon);
+        const trainStart = reactionMap.meta.trainStart;
+        const trainEnd = reactionMap.meta.trainEnd;
+        const edgeSample = walker.points
+          .filter((p) => !trainStart || (p.date_t >= trainStart && p.date_t <= trainEnd))
+          .map((p) => {
+            const muBase = Math.log(p.y_hat_tp1 / p.S_t);
+            const sigmaH = p.sigma_t * sqrtH;
+            if (!Number.isFinite(muBase) || !Number.isFinite(sigmaH) || sigmaH <= 0) return NaN;
+            return muBase / sigmaH;
+          })
+          .filter((z): z is number => Number.isFinite(z));
+
+        const edgesForPenalty =
+          edgeSample.length > 0
+            ? edgeSample
+            : walker.points
+                .map((p) => {
+                  const muBase = Math.log(p.y_hat_tp1 / p.S_t);
+                  const sigmaH = p.sigma_t * sqrtH;
+                  if (!Number.isFinite(muBase) || !Number.isFinite(sigmaH) || sigmaH <= 0) return NaN;
+                  return muBase / sigmaH;
+                })
+                .filter((z): z is number => Number.isFinite(z));
+
+        const absEdges = edgesForPenalty.map((z) => Math.abs(z));
+        let zEnterUsed = zEnterManual;
+        if (zMode === "auto") {
+          const q = quantile(absEdges, 0.9);
+          if (Number.isFinite(q)) {
+            zEnterUsed = q;
+          }
+        }
+        const shortOpportunityRate =
+          edgesForPenalty.length > 0
+            ? edgesForPenalty.filter((z) => z <= -zEnterUsed).length / edgesForPenalty.length
+            : 0;
+        const shortPenalty = Math.max(0, minShortRate - shortOpportunityRate);
+        const score = hit - penaltyWeight * shortPenalty;
 
         testedCombos++;
 
@@ -141,6 +201,9 @@ export async function GET(
           avgWidth: summary.avgWidth,
           neutralDirectionHitRate: neutral.directionHitRate,
           neutralIntervalScore: neutral.intervalScore,
+          zEnterUsed,
+          shortOpportunityRate,
+          score,
         });
 
         if (testedCombos % 10 === 0) {
@@ -161,8 +224,11 @@ export async function GET(
       );
     }
 
-    // Sort descending by hit-rate
-    candidates.sort((a, b) => b.directionHitRate - a.directionHitRate);
+    // Sort descending by penalized score, then hit-rate as tie-breaker
+    candidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.directionHitRate - a.directionHitRate;
+    });
 
     // Keep top N (e.g. 10)
     const topCandidates = candidates.slice(0, 10);
@@ -180,7 +246,11 @@ export async function GET(
         }
       : null;
 
-    console.log(`  Best: λ=${best.lambda.toFixed(2)}, train=${(best.trainFraction * 100).toFixed(0)}%, hit=${(best.directionHitRate * 100).toFixed(2)}%`);
+    console.log(
+      `  Best: λ=${best.lambda.toFixed(2)}, train=${(best.trainFraction * 100).toFixed(
+        0
+      )}%, hit=${(best.directionHitRate * 100).toFixed(2)}%, shortOpp=${(best.shortOpportunityRate * 100).toFixed(2)}%, zEnter=${best.zEnterUsed.toFixed(3)}`
+    );
 
     return NextResponse.json({
       success: true,

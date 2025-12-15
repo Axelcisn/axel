@@ -411,8 +411,8 @@ export default function TrendSection({
 
           {/* Loading state */}
           {isLoadingAny && (
-            <div className={`text-center py-8 rounded-xl ${
-              isDarkMode ? 'bg-slate-900/40 text-slate-500' : 'bg-gray-50 text-gray-400'
+            <div className={`text-center py-8 rounded-xl border ${
+              isDarkMode ? 'bg-transparent text-slate-500 border-slate-800/50' : 'bg-transparent text-gray-500 border-gray-200'
             }`}>
               Loading trend data...
             </div>
@@ -454,7 +454,7 @@ export default function TrendSection({
                     v != null ? `$${v.toFixed(2)}` : '—';
 
                   return (
-                    <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-4 sm:p-5">
+                    <div className="rounded-2xl border border-slate-800 bg-transparent p-4 sm:p-5">
                       {/* Header Row 1: Title + Tooltip + Trend Badge */}
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex items-center gap-2.5">
@@ -735,7 +735,7 @@ export default function TrendSection({
                     - momentum.period (lookback)
                     - trendClassification.recentMomentum (EWMA-based recent return)
                 ═══════════════════════════════════════════════════════════════ */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-5 md:p-6">
+                <div className="rounded-2xl border border-slate-800 bg-transparent p-5 md:p-6">
                   {(() => {
                     const latestMomentum = momentum?.latest ?? null;
                     const momentumPct = latestMomentum ? latestMomentum.momentumPct * 100 : null;
@@ -1110,7 +1110,7 @@ export default function TrendSection({
                     - adx.latest.plusDI, minusDI
                     - adx.period
                 ═══════════════════════════════════════════════════════════════ */}
-                <div className="rounded-2xl border border-slate-800 bg-slate-950/40 p-5 md:p-6">
+                <div className="rounded-2xl border border-slate-800 bg-transparent p-5 md:p-6">
                   {(() => {
                     const adxValue = adx?.latest?.adx ?? null;
                     const adxRegime = adx?.regime ?? null;
@@ -1334,8 +1334,8 @@ export default function TrendSection({
 
           {/* Empty state */}
           {!isLoadingAny && !combinedError && (!ewmaPath || ewmaPath.length === 0) && (
-            <div className={`text-center py-8 rounded-xl ${
-              isDarkMode ? 'bg-slate-900/40 text-slate-500' : 'bg-gray-50 text-gray-400'
+            <div className={`text-center py-8 rounded-xl border ${
+              isDarkMode ? 'bg-transparent text-slate-500 border-slate-800/50' : 'bg-transparent text-gray-500 border-gray-200'
             }`}>
               No EWMA data available for trend analysis
             </div>
@@ -1345,10 +1345,10 @@ export default function TrendSection({
 
       {/* ML Tab Content */}
       {activeTab === 'ml' && (
-        <div className={`rounded-xl p-6 ${
+        <div className={`rounded-xl p-6 border ${
           isDarkMode 
-            ? 'bg-slate-900/60 border border-slate-700/50' 
-            : 'bg-gray-50 border border-gray-200'
+            ? 'bg-transparent border-slate-700/50' 
+            : 'bg-transparent border-gray-200'
         }`}>
           <div className="text-center">
             <h4 className={`text-lg font-semibold mb-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>
@@ -1369,10 +1369,10 @@ export default function TrendSection({
 
       {/* AI Tab Content */}
       {activeTab === 'ai' && (
-        <div className={`rounded-xl p-6 ${
+        <div className={`rounded-xl p-6 border ${
           isDarkMode 
-            ? 'bg-slate-900/60 border border-slate-700/50' 
-            : 'bg-gray-50 border border-gray-200'
+            ? 'bg-transparent border-slate-700/50' 
+            : 'bg-transparent border-gray-200'
         }`}>
           <div className="text-center">
             <h4 className={`text-lg font-semibold mb-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>
