@@ -449,21 +449,53 @@ interface PriceChartProps {
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
   t212ThresholdFrac: number;
   t212CostBps: number;
-  t212ZMode: "auto" | "manual";
+  t212ZMode: "auto" | "manual" | "optimize";
   t212SignalRule: "bps" | "z";
   t212ZEnter: number;
   t212ZExit: number;
   t212ZFlip: number;
+  t212ZDisplayThresholds?: {
+    enterLong: number;
+    enterShort: number;
+    exitLong: number;
+    exitShort: number;
+    flipLong: number;
+    flipShort: number;
+  } | null;
+  t212ZOptimized?: {
+    thresholds: {
+      enterLong: number;
+      enterShort: number;
+      exitLong: number;
+      exitShort: number;
+      flipLong: number;
+      flipShort: number;
+    };
+    quantiles: { enter: number; exit: number; flip: number };
+    meanScore: number;
+    folds: number;
+    avgTradeCount: number;
+    avgShortOppCount: number;
+    totalShortEntries?: number;
+    applyRecommended: boolean;
+    baselineScore: number;
+    bestScore: number;
+    reason?: string;
+  } | null;
+  isOptimizingZThresholds?: boolean;
+  t212ZOptimizeError?: string | null;
+  onApplyOptimizedZThresholds?: () => void;
   onChangeT212InitialEquity?: (v: number) => void;
   onChangeT212Leverage?: (v: number) => void;
   onChangeT212PositionFraction?: (v: number) => void;
   onChangeT212ThresholdPct?: (v: number) => void;
   onChangeT212CostBps?: (v: number) => void;
-  onChangeT212ZMode?: (v: "auto" | "manual") => void;
+  onChangeT212ZMode?: (v: "auto" | "manual" | "optimize") => void;
   onChangeT212SignalRule?: (v: "bps" | "z") => void;
   onChangeT212ZEnter?: (v: number) => void;
   onChangeT212ZExit?: (v: number) => void;
   onChangeT212ZFlip?: (v: number) => void;
+  onOptimizeZThresholds?: () => void;
   hasMaxRun?: boolean;
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
@@ -532,6 +564,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   t212ZEnter,
   t212ZExit,
   t212ZFlip,
+  t212ZDisplayThresholds,
+  t212ZOptimized,
+  isOptimizingZThresholds,
+  t212ZOptimizeError,
+  onApplyOptimizedZThresholds,
   onChangeT212InitialEquity,
   onChangeT212Leverage,
   onChangeT212PositionFraction,
@@ -542,6 +579,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onChangeT212ZEnter,
   onChangeT212ZExit,
   onChangeT212ZFlip,
+  onOptimizeZThresholds,
   tradeOverlays,
   t212AccountHistory,
   activeT212RunId,
@@ -645,6 +683,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [zEnterInput, setZEnterInput] = useState<string>(() => `${t212ZEnter}`);
   const [zExitInput, setZExitInput] = useState<string>(() => `${t212ZExit}`);
   const [zFlipInput, setZFlipInput] = useState<string>(() => `${t212ZFlip}`);
+  const [confirmApplyOptimized, setConfirmApplyOptimized] = useState(false);
 
   useEffect(() => {
     setEquityInput(`${t212InitialEquity}`);
@@ -673,6 +712,29 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   useEffect(() => {
     setZFlipInput(`${t212ZFlip}`);
   }, [t212ZFlip]);
+
+  useEffect(() => {
+    setConfirmApplyOptimized(false);
+  }, [t212ZOptimized, t212ZMode]);
+
+  useEffect(() => {
+    if (!confirmApplyOptimized) return;
+    const timer = setTimeout(() => setConfirmApplyOptimized(false), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmApplyOptimized]);
+
+  const handleZModeSelect = useCallback(
+    (mode: "auto" | "manual" | "optimize") => {
+      if (mode === "optimize") {
+        if (onOptimizeZThresholds) {
+          onOptimizeZThresholds();
+        }
+      } else {
+        onChangeT212ZMode?.(mode);
+      }
+    },
+    [onChangeT212ZMode, onOptimizeZThresholds]
+  );
 
   const commitInitialEquity = useCallback(
     (val: string) => {
@@ -773,6 +835,63 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     },
     [onChangeT212ZFlip, t212ZFlip]
   );
+
+  const formatScoreDisplay = useCallback((value: number) => {
+    const isFiniteScore = Number.isFinite(value);
+    return {
+      text: isFiniteScore ? value.toFixed(3) : "—",
+      title: isFiniteScore ? undefined : "Undefined (0 drawdown or invalid denominator)",
+    };
+  }, []);
+
+  const handleApplyOptimizedClick = useCallback(() => {
+    if (!t212ZOptimized || !onApplyOptimizedZThresholds || isOptimizingZThresholds) return;
+    const { thresholds, applyRecommended } = t212ZOptimized;
+    const orderingValid =
+      thresholds.exitLong < thresholds.enterLong &&
+      thresholds.enterLong < thresholds.flipLong &&
+      thresholds.exitShort < thresholds.enterShort &&
+      thresholds.enterShort < thresholds.flipShort;
+    if (!orderingValid) return;
+
+    if (!applyRecommended && !confirmApplyOptimized) {
+      setConfirmApplyOptimized(true);
+      return;
+    }
+
+    onApplyOptimizedZThresholds();
+    setConfirmApplyOptimized(false);
+  }, [confirmApplyOptimized, isOptimizingZThresholds, onApplyOptimizedZThresholds, t212ZOptimized]);
+
+  const optimizedOrderingValid = useMemo(() => {
+    if (!t212ZOptimized) return false;
+    const { thresholds } = t212ZOptimized;
+    return (
+      thresholds.exitLong < thresholds.enterLong &&
+      thresholds.enterLong < thresholds.flipLong &&
+      thresholds.exitShort < thresholds.enterShort &&
+      thresholds.enterShort < thresholds.flipShort
+    );
+  }, [t212ZOptimized]);
+
+  const optimizedBaselineScore = useMemo(
+    () => (t212ZOptimized ? formatScoreDisplay(t212ZOptimized.baselineScore) : null),
+    [formatScoreDisplay, t212ZOptimized]
+  );
+  const optimizedBestScore = useMemo(
+    () => (t212ZOptimized ? formatScoreDisplay(t212ZOptimized.bestScore) : null),
+    [formatScoreDisplay, t212ZOptimized]
+  );
+
+  const optimizedApplyLabel = useMemo(() => {
+    if (!t212ZOptimized) return "Apply";
+    if (t212ZOptimized.applyRecommended) return "Apply recommended";
+    return confirmApplyOptimized ? "Click again to apply" : "Apply anyway";
+  }, [confirmApplyOptimized, t212ZOptimized]);
+
+  const optimizedApplyDisabled =
+    !t212ZOptimized || !optimizedOrderingValid || isOptimizingZThresholds || !onApplyOptimizedZThresholds;
+
   const [showSimRangeMenu, setShowSimRangeMenu] = useState(false);
   const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(visibleWindow?.start ?? "");
   const [customSimRangeEnd, setCustomSimRangeEnd] = useState<string>(visibleWindow?.end ?? "");
@@ -6014,25 +6133,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           </div>
                           <div className="flex items-center justify-between gap-4">
                             <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Signal</span>
-                            <div className="flex items-center gap-2">
-                              {(['bps', 'z'] as const).map((rule) => (
-                                <button
-                                  key={rule}
-                                  onClick={() => onChangeT212SignalRule?.(rule)}
-                                  className={`
-                                    px-3 py-1 rounded-full text-[10px] font-semibold transition-colors
-                                    ${t212SignalRule === rule
-                                      ? isDarkMode
-                                        ? 'bg-amber-500 text-slate-900'
-                                        : 'bg-amber-500 text-white'
-                                      : isDarkMode
-                                        ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
-                                  `}
-                                >
-                                  {rule.toUpperCase()}
-                                </button>
-                              ))}
+                            <div className={`px-3 py-1 rounded-full text-[10px] font-semibold ${
+                              isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              Z
                             </div>
                           </div>
 
@@ -6076,95 +6180,248 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Z thresholds</span>
                                 <div className="flex items-center gap-2">
-                                  {(['auto', 'manual'] as const).map((mode) => (
-                                    <button
-                                      key={mode}
-                                      onClick={() => onChangeT212ZMode?.(mode)}
-                                      className={`
-                                        px-3 py-1 rounded-full text-[10px] font-semibold transition-colors
-                                        ${t212ZMode === mode
-                                          ? isDarkMode
-                                            ? 'bg-amber-500 text-slate-900'
-                                            : 'bg-amber-500 text-white'
-                                          : isDarkMode
-                                            ? 'bg-slate-700 text-slate-200 hover:bg-slate-600'
-                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
-                                      `}
-                                    >
-                                      {mode === 'auto' ? 'Auto' : 'Manual'}
-                                    </button>
-                                  ))}
+                                  <button
+                                    onClick={() => handleZModeSelect('optimize')}
+                                    className={`
+                                      px-3 py-1 rounded-full text-[10px] font-semibold transition-colors
+                                      ${isDarkMode ? 'bg-amber-500 text-slate-900' : 'bg-amber-500 text-white'}
+                                    `}
+                                  >
+                                    Optimize
+                                  </button>
                                 </div>
                               </div>
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z enter</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={5}
-                                  step={0.05}
-                                  value={zEnterInput}
-                                  onChange={(e) => setZEnterInput(e.target.value)}
-                                  onBlur={(e) => commitZEnter(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      commitZEnter((e.target as HTMLInputElement).value);
-                                    }
-                                  }}
-                                  disabled={t212ZMode === 'auto'}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-amber-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                  } ${t212ZMode === 'auto' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                />
+                                {t212ZMode === 'manual' ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={5}
+                                    step={0.05}
+                                    value={zEnterInput}
+                                    onChange={(e) => setZEnterInput(e.target.value)}
+                                    onBlur={(e) => commitZEnter(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        commitZEnter((e.target as HTMLInputElement).value);
+                                      }
+                                    }}
+                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                      isDarkMode 
+                                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                    }`}
+                                  />
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
+                                    <span className="font-mono tabular-nums text-right">
+                                      {t212ZDisplayThresholds
+                                        ? `${t212ZDisplayThresholds.enterLong.toFixed(3)} / ${t212ZDisplayThresholds.enterShort.toFixed(3)}`
+                                        : '—'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z exit</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={5}
-                                  step={0.05}
-                                  value={zExitInput}
-                                  onChange={(e) => setZExitInput(e.target.value)}
-                                  onBlur={(e) => commitZExit(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      commitZExit((e.target as HTMLInputElement).value);
-                                    }
-                                  }}
-                                  disabled={t212ZMode === 'auto'}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-amber-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                  } ${t212ZMode === 'auto' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                />
+                                {t212ZMode === 'manual' ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={5}
+                                    step={0.05}
+                                    value={zExitInput}
+                                    onChange={(e) => setZExitInput(e.target.value)}
+                                    onBlur={(e) => commitZExit(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        commitZExit((e.target as HTMLInputElement).value);
+                                      }
+                                    }}
+                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                      isDarkMode 
+                                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                    }`}
+                                  />
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
+                                    <span className="font-mono tabular-nums text-right">
+                                      {t212ZDisplayThresholds
+                                        ? `${t212ZDisplayThresholds.exitLong.toFixed(3)} / ${t212ZDisplayThresholds.exitShort.toFixed(3)}`
+                                        : '—'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z flip</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={5}
-                                  step={0.05}
-                                  value={zFlipInput}
-                                  onChange={(e) => setZFlipInput(e.target.value)}
-                                  onBlur={(e) => commitZFlip(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      commitZFlip((e.target as HTMLInputElement).value);
-                                    }
-                                  }}
-                                  disabled={t212ZMode === 'auto'}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-amber-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                  } ${t212ZMode === 'auto' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                />
+                                {t212ZMode === 'manual' ? (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={5}
+                                    step={0.05}
+                                    value={zFlipInput}
+                                    onChange={(e) => setZFlipInput(e.target.value)}
+                                    onBlur={(e) => commitZFlip(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        commitZFlip((e.target as HTMLInputElement).value);
+                                      }
+                                    }}
+                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                      isDarkMode 
+                                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                    }`}
+                                  />
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
+                                    <span className="font-mono tabular-nums text-right">
+                                      {t212ZDisplayThresholds
+                                        ? `${t212ZDisplayThresholds.flipLong.toFixed(3)} / ${t212ZDisplayThresholds.flipShort.toFixed(3)}`
+                                        : '—'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
+                              <div className="mt-2 space-y-1 text-[11px]">
+                                {t212ZMode === 'optimize' && isOptimizingZThresholds && (
+                                  <div className={`${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>Optimizing z thresholds…</div>
+                                )}
+                                {t212ZOptimizeError && (
+                                  <div className="text-rose-500">{t212ZOptimizeError}</div>
+                                )}
+                              </div>
+                              {t212ZMode === 'optimize' && t212ZOptimized && (
+                                <div
+                                  className={`mt-3 rounded-lg border p-3 space-y-2 ${
+                                    isDarkMode
+                                      ? 'border-slate-700/70 bg-slate-900/60'
+                                      : 'border-gray-200 bg-white/70'
+                                  }`}
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="text-[11px] font-semibold">WFO Optimize</div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span
+                                        className={`
+                                          px-2 py-0.5 rounded-full text-[10px] font-semibold
+                                          ${optimizedOrderingValid
+                                            ? isDarkMode
+                                              ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                            : isDarkMode
+                                              ? 'bg-rose-500/20 text-rose-200 border border-rose-400/40'
+                                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                          }
+                                        `}
+                                        title="Checks exit < enter < flip on long and short sides."
+                                      >
+                                        {optimizedOrderingValid ? "Ordering OK" : "Ordering invalid"}
+                                      </span>
+                                      <span
+                                        className={`
+                                          px-2 py-0.5 rounded-full text-[10px] font-semibold
+                                          ${t212ZOptimized.applyRecommended
+                                            ? isDarkMode
+                                              ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                            : isDarkMode
+                                              ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
+                                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                          }
+                                        `}
+                                      >
+                                        {t212ZOptimized.applyRecommended ? "Recommended" : "Not recommended"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className={isDarkMode ? "text-[10px] text-slate-500" : "text-[10px] text-gray-600"}>
+                                    Thresholds shown above.
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Baseline score</span>
+                                      <span className="font-mono" title={optimizedBaselineScore?.title}>
+                                        {optimizedBaselineScore?.text ?? "—"}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Best score</span>
+                                      <span className="font-mono" title={optimizedBestScore?.title}>
+                                        {optimizedBestScore?.text ?? "—"}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2 sm:col-span-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Decision</span>
+                                      <span className="font-mono text-right">
+                                        {t212ZOptimized.applyRecommended ? "applyRecommended=true" : "applyRecommended=false"} · {t212ZOptimized.reason ?? "—"}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Quantiles</span>
+                                      <span className="font-mono text-right">
+                                        {`qE ${t212ZOptimized.quantiles.enter.toFixed(2)} / qX ${t212ZOptimized.quantiles.exit.toFixed(2)} / qF ${t212ZOptimized.quantiles.flip.toFixed(2)}`}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Folds</span>
+                                      <span className="font-mono text-right">{t212ZOptimized.folds}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Avg trades</span>
+                                      <span className="font-mono text-right">{t212ZOptimized.avgTradeCount.toFixed(1)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Avg short opp</span>
+                                      <span className="font-mono text-right">{t212ZOptimized.avgShortOppCount.toFixed(1)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Total short entries</span>
+                                      <span className="font-mono text-right">
+                                        {t212ZOptimized.totalShortEntries != null ? t212ZOptimized.totalShortEntries : "—"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {!t212ZOptimized.applyRecommended && (
+                                    <div className={isDarkMode ? "text-amber-200 text-[11px]" : "text-amber-700 text-[11px]"}>
+                                      Applying anyway overrides Auto thresholds for this ticker.
+                                    </div>
+                                  )}
+                                  {confirmApplyOptimized && !t212ZOptimized.applyRecommended && (
+                                    <div className={isDarkMode ? "text-amber-200 text-[11px]" : "text-amber-700 text-[11px]"}>
+                                      Click again to confirm apply.
+                                    </div>
+                                  )}
+                                  <div className="flex justify-end">
+                                    <button
+                                      type="button"
+                                      disabled={optimizedApplyDisabled}
+                                      onClick={handleApplyOptimizedClick}
+                                      className={`
+                                        px-3 py-1 rounded-full text-[11px] font-semibold transition-colors
+                                        ${optimizedApplyDisabled
+                                          ? isDarkMode
+                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                          : t212ZOptimized.applyRecommended
+                                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                            : 'bg-amber-500 text-white hover:bg-amber-600'
+                                        }
+                                      `}
+                                      title={!optimizedOrderingValid ? "Ordering must satisfy exit < enter < flip" : undefined}
+                                    >
+                                      {optimizedApplyLabel}
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
@@ -6174,6 +6431,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
               </div>
             </div>
+
+{/* Optimized badges removed in favor of inline values above */}
 
           </div>
         )}

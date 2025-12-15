@@ -21,7 +21,9 @@ export async function saveTargetSpec(input: TargetSpec): Promise<TargetSpec> {
   // This would need to be handled via an API endpoint that stores data elsewhere
   // (like a database or external storage service)
   
-  console.warn('saveTargetSpec: Writing to static files not supported in production');
+  if (process.env.NODE_ENV === 'development') {
+    console.warn('saveTargetSpec: Writing to static files not supported in production');
+  }
   
   // Add updated timestamp for consistency
   const targetSpec: TargetSpec = {

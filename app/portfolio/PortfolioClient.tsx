@@ -35,6 +35,13 @@ interface PortfolioClientProps {
 }
 
 const stickyHeader = `${HEADER_BG} backdrop-blur text-[12px] font-semibold uppercase tracking-wide text-white/70 border-b ${DIVIDER}`;
+const ignoredErrors = ['ibkr bridge not configured'];
+
+function normalizeError(message: string | null | undefined): string | null {
+  if (!message) return null;
+  const lower = message.toLowerCase();
+  return ignoredErrors.some((token) => lower.includes(token)) ? null : message;
+}
 
 export default function PortfolioClient({ initialData }: PortfolioClientProps) {
   const [activeTab, setActiveTab] = useState<PortfolioTab>('positions');
@@ -58,7 +65,7 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
     trades: false,
     balances: false,
   });
-  const [error, setError] = useState<string | null>(initialData?.error ?? null);
+  const [error, setError] = useState<string | null>(normalizeError(initialData?.error));
   const [equityLoading, setEquityLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -115,7 +122,7 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
         const data = await fetchPortfolioData(activeTab);
         if (cancelled) return;
 
-        setError(data.error ?? null);
+        setError(normalizeError(data.error));
 
         if (activeTab === 'positions') {
           setSummary(data.summary ?? null);
@@ -129,7 +136,7 @@ export default function PortfolioClient({ initialData }: PortfolioClientProps) {
         }
       } catch (err) {
         if (!cancelled) {
-          setError('Unable to refresh portfolio data.');
+          setError(normalizeError('Unable to refresh portfolio data.'));
           if (activeTab === 'positions') {
             setSummary(null);
             setPositions([]);

@@ -446,6 +446,27 @@ export default function TimingPage({ params }: TimingPageProps) {
     buckets: ReactionBucketSummary[];
   };
 
+  type ZOptimizeResult = {
+    thresholds: {
+      enterLong: number;
+      enterShort: number;
+      exitLong: number;
+      exitShort: number;
+      flipLong: number;
+      flipShort: number;
+    };
+    quantiles: { enter: number; exit: number; flip: number };
+    meanScore: number;
+    folds: number;
+    avgTradeCount: number;
+    avgShortOppCount: number;
+    totalShortEntries?: number;
+    applyRecommended: boolean;
+    baselineScore: number;
+    bestScore: number;
+    reason?: string;
+  };
+
   const [reactionMapSummary, setReactionMapSummary] = useState<ReactionMapSummary | null>(null);
   const [isLoadingReaction, setIsLoadingReaction] = useState(false);
   const [reactionError, setReactionError] = useState<string | null>(null);
@@ -567,11 +588,15 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
   const [t212ThresholdFrac, setT212ThresholdFrac] = useState<number>(() => estimateDefaultThresholdPct(simCostDefaults));
   const [t212CostBps, setT212CostBps] = useState<number>(0);
-  const [t212SignalRule, setT212SignalRule] = useState<"bps" | "z">("bps");
-  const [t212ZMode, setT212ZMode] = useState<"auto" | "manual">("auto");
+  const [t212SignalRule, setT212SignalRule] = useState<"bps" | "z">("z");
+  const [t212ZMode, setT212ZMode] = useState<"auto" | "manual" | "optimize">("optimize");
   const [t212ZEnter, setT212ZEnter] = useState(0.3);
   const [t212ZExit, setT212ZExit] = useState(0.1);
   const [t212ZFlip, setT212ZFlip] = useState(0.6);
+  const [t212ZOptimizeResult, setT212ZOptimizeResult] = useState<ZOptimizeResult | null>(null);
+  const [isOptimizingZThresholds, setIsOptimizingZThresholds] = useState(false);
+  const [t212ZOptimizeError, setT212ZOptimizeError] = useState<string | null>(null);
+  const [t212ZDisplayThresholds, setT212ZDisplayThresholds] = useState<ZOptimizeResult["thresholds"] | null>(null);
   const [t212DailyLongSwap, setT212DailyLongSwap] = useState(0);  // can tune later
   const [t212DailyShortSwap, setT212DailyShortSwap] = useState(0);
   const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
@@ -678,6 +703,25 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     setSimCompareCustom(null);
     setSimComparePreset("chart");
   }, [params.ticker]);
+
+  useEffect(() => {
+    setT212ZOptimizeResult(null);
+    setT212ZOptimizeError(null);
+    setIsOptimizingZThresholds(false);
+  }, [params.ticker]);
+
+  useEffect(() => {
+    if (t212ZMode === "manual") {
+      setT212ZDisplayThresholds({
+        enterLong: t212ZEnter,
+        enterShort: t212ZEnter,
+        exitLong: t212ZExit,
+        exitShort: t212ZExit,
+        flipLong: t212ZFlip,
+        flipShort: t212ZFlip,
+      });
+    }
+  }, [t212ZMode, t212ZEnter, t212ZExit, t212ZFlip]);
   const hasMaxRun = useMemo(
     () => t212Runs.some((r) => r.id === "ewma-biased-max" || r.id === "ewma-biased-max-trend"),
     [t212Runs]
@@ -2342,6 +2386,112 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     }
   }, [params?.ticker, h, coverage, reactionMinTrainObs, t212ZEnter, t212ZMode]);
 
+  const runZThresholdOptimization = useCallback(async () => {
+    if (!params?.ticker) return;
+    try {
+      setIsOptimizingZThresholds(true);
+      setT212ZOptimizeError(null);
+      setT212ZOptimizeResult(null);
+
+      const query = new URLSearchParams({
+        h: String(h),
+        lambda: reactionLambda.toString(),
+        coverage: coverage.toString(),
+        trainFraction: reactionTrainFraction.toString(),
+        minTrainObs: reactionMinTrainObs.toString(),
+        trainLenBars: "252",
+        valLenBars: "63",
+        stepLenBars: "63",
+        costBps: t212CostBps.toString(),
+        initialEquity: t212InitialEquity.toString(),
+        leverage: t212Leverage.toString(),
+        positionFraction: t212PositionFraction.toString(),
+      });
+
+      const res = await fetch(
+        `/api/volatility/z-threshold-optimize/${encodeURIComponent(params.ticker)}?${query.toString()}`
+      );
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Z threshold optimize API error ${res.status}`);
+      }
+
+      const json = await res.json();
+      if (!json.success || !json.best) {
+        throw new Error(json.error || "Failed to optimize z thresholds");
+      }
+
+      setT212ZOptimizeResult({
+        thresholds: json.best.thresholds,
+        quantiles: json.best.quantiles,
+        meanScore: json.best.meanScore,
+        folds: json.best.folds,
+        avgTradeCount: json.best.avgTradeCount,
+        avgShortOppCount: json.best.avgShortOppCount,
+        totalShortEntries: json.best.totalShortEntries,
+        applyRecommended: json.best.applyRecommended,
+        baselineScore: json.best.baselineScore,
+        bestScore: json.best.bestScore,
+        reason: json.best.reason,
+      });
+      setT212ZDisplayThresholds(json.best.thresholds);
+      setT212ZMode("optimize");
+    } catch (err: any) {
+      console.error("[Z-OPTIMIZE] error", err);
+      setT212ZOptimizeError(err?.message || "Failed to optimize z thresholds.");
+      setT212ZMode("auto");
+    } finally {
+      setIsOptimizingZThresholds(false);
+    }
+  }, [
+    params?.ticker,
+    h,
+    coverage,
+    reactionLambda,
+    reactionTrainFraction,
+    reactionMinTrainObs,
+    t212CostBps,
+    t212InitialEquity,
+    t212Leverage,
+    t212PositionFraction,
+  ]);
+
+  useEffect(() => {
+    if (
+      t212ZMode === "optimize" &&
+      !isOptimizingZThresholds &&
+      (!t212ZOptimizeResult || !t212ZDisplayThresholds)
+    ) {
+      runZThresholdOptimization();
+    }
+  }, [
+    t212ZMode,
+    t212ZOptimizeResult,
+    t212ZDisplayThresholds,
+    isOptimizingZThresholds,
+    runZThresholdOptimization,
+  ]);
+
+  useEffect(() => {
+    if (t212ZMode === "optimize") {
+      setT212ZOptimizeResult(null);
+      setT212ZDisplayThresholds(null);
+    }
+  }, [
+    t212ZMode,
+    params.ticker,
+    h,
+    coverage,
+    reactionLambda,
+    reactionTrainFraction,
+    reactionMinTrainObs,
+    t212CostBps,
+    t212InitialEquity,
+    t212Leverage,
+    t212PositionFraction,
+  ]);
+
   // Auto-run optimization on initial load when unbiased EWMA is ready
   const hasAutoOptimized = useRef(false);
   useEffect(() => {
@@ -2391,17 +2541,125 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     // Auto-reload is triggered by the useEffect watching reactionLambda
   }, [reactionOptimizationNeutral]);
 
+  const handleApplyOptimizedZThresholds = useCallback(() => {
+    if (t212ZOptimizeResult) {
+      setT212ZMode("optimize");
+      setT212ZDisplayThresholds(t212ZOptimizeResult.thresholds);
+    }
+  }, [t212ZOptimizeResult]);
+
+  useEffect(() => {
+    setT212SignalRule("z");
+    setT212ZMode("optimize");
+  }, [params.ticker]);
+
   // Trading212 CFD Simulation: Build bars from any EWMA path (Unbiased or Biased)
   type Trading212SimBarsOptions = {
     useTrendTilt?: boolean;
     trendWeight?: number | null;
     trendZByDate?: Map<string, number>;
     horizon?: number;
-    zMode?: "auto" | "manual";
+    zMode?: "auto" | "manual" | "optimize";
     signalRule?: "bps" | "z";
     zEnter?: number;
     zExit?: number;
     zFlip?: number;
+    optimizedThresholds?: ZOptimizeResult["thresholds"] | null;
+  };
+
+  const quantile = (arr: number[], q: number): number => {
+    if (!arr.length) return NaN;
+    const sorted = [...arr].sort((a, b) => a - b);
+    const pos = (sorted.length - 1) * q;
+    const base = Math.floor(pos);
+    const rest = pos - base;
+    if (sorted[base + 1] !== undefined) {
+      return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+    }
+    return sorted[base];
+  };
+
+  const computeAutoZThresholds = (
+    ewmaPathArg: EwmaWalkerPathPoint[],
+    canonicalRows: CanonicalRow[],
+    horizon: number,
+    fallbackEnter: number
+  ): {
+    enterLong: number;
+    enterShort: number;
+    exitLong: number;
+    exitShort: number;
+    flipLong: number;
+    flipShort: number;
+  } | null => {
+    const exitRatio = 0.3;
+    const flipRatio = 2.0;
+    const sqrtH = Math.sqrt(horizon);
+
+    const simStartDate = canonicalRows[0]?.date ?? null;
+    if (!simStartDate) {
+      const fallback = fallbackEnter;
+      return {
+        enterLong: fallback,
+        enterShort: fallback,
+        exitLong: fallback * exitRatio,
+        exitShort: fallback * exitRatio,
+        flipLong: fallback * flipRatio,
+        flipShort: fallback * flipRatio,
+      };
+    }
+
+    const calibPoints = ewmaPathArg
+      .filter((p) => p.date_tp1 < simStartDate)
+      .sort((a, b) => a.date_tp1.localeCompare(b.date_tp1));
+    const lastCalib = calibPoints.slice(-252);
+
+    const zEdges: number[] = [];
+    for (const p of lastCalib) {
+      const sigmaH = p.sigma_t * sqrtH;
+      const muBase = Math.log(p.y_hat_tp1 / p.S_t);
+      if (!Number.isFinite(muBase) || !Number.isFinite(sigmaH) || sigmaH <= 0) continue;
+      zEdges.push(muBase / sigmaH);
+    }
+
+    if (zEdges.length === 0) {
+      const fallback = fallbackEnter;
+      return {
+        enterLong: fallback,
+        enterShort: fallback,
+        exitLong: fallback * exitRatio,
+        exitShort: fallback * exitRatio,
+        flipLong: fallback * flipRatio,
+        flipShort: fallback * flipRatio,
+      };
+    }
+
+    const targetQ = 0.9;
+    const minSamples = 50;
+    const pos = zEdges.filter((z) => z > 0);
+    const neg = zEdges.filter((z) => z < 0).map((z) => -z);
+    const absVals = zEdges.map((z) => Math.abs(z));
+
+    const symEnter = quantile(absVals, targetQ);
+    const enterLong = pos.length >= minSamples ? quantile(pos, targetQ) : symEnter;
+    const enterShort = neg.length >= minSamples ? quantile(neg, targetQ) : symEnter;
+
+    const enterLongFinal = Number.isFinite(enterLong) ? enterLong : fallbackEnter;
+    const enterShortFinal = Number.isFinite(enterShort) ? enterShort : enterLongFinal;
+
+    const thresholds = {
+      enterLong: enterLongFinal,
+      enterShort: enterShortFinal,
+      exitLong: enterLongFinal * exitRatio,
+      exitShort: enterShortFinal * exitRatio,
+      flipLong: enterLongFinal * flipRatio,
+      flipShort: enterShortFinal * flipRatio,
+    };
+
+    if (!(thresholds.exitLong < thresholds.enterLong && thresholds.enterLong < thresholds.flipLong)) return null;
+    if (!(thresholds.exitShort < thresholds.enterShort && thresholds.enterShort < thresholds.flipShort)) return null;
+
+    return thresholds;
   };
 
   const buildTrading212SimBarsFromEwmaPath = useCallback((
@@ -2411,18 +2669,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     options?: Trading212SimBarsOptions
   ): Trading212SimBar[] => {
     if (!ewmaPathArg) return [];
-
-    const quantile = (arr: number[], q: number): number => {
-      if (!arr.length) return NaN;
-      const sorted = [...arr].sort((a, b) => a - b);
-      const pos = (sorted.length - 1) * q;
-      const base = Math.floor(pos);
-      const rest = pos - base;
-      if (sorted[base + 1] !== undefined) {
-        return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
-      }
-      return sorted[base];
-    };
 
     const useTrendTilt =
       !!options?.useTrendTilt &&
@@ -2439,6 +2685,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     const zEnter = options?.zEnter ?? 0.3;
     const zExit = options?.zExit ?? 0.1;
     const zFlip = options?.zFlip ?? 0.6;
+    const optimizedThresholds = options?.optimizedThresholds ?? null;
     const sqrtH = Math.sqrt(horizon);
 
     // Build lookup from target date to forecast
@@ -2446,79 +2693,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     ewmaPathArg.forEach((p) => {
       ewmaMap.set(p.date_tp1, p);
     });
-
-    const simStartDate = canonicalRows[0]?.date ?? null;
-
-    const computeAutoThresholds = (): {
-      enterLong: number;
-      enterShort: number;
-      exitLong: number;
-      exitShort: number;
-      flipLong: number;
-      flipShort: number;
-    } => {
-      const exitRatio = 0.3;
-      const flipRatio = 2.0;
-
-      if (!simStartDate) {
-        const fallback = zEnter;
-        return {
-          enterLong: fallback,
-          enterShort: fallback,
-          exitLong: fallback * exitRatio,
-          exitShort: fallback * exitRatio,
-          flipLong: fallback * flipRatio,
-          flipShort: fallback * flipRatio,
-        };
-      }
-
-      const calibPoints = ewmaPathArg
-        .filter((p) => p.date_tp1 < simStartDate)
-        .sort((a, b) => a.date_tp1.localeCompare(b.date_tp1));
-      const lastCalib = calibPoints.slice(-252);
-
-      const zEdges: number[] = [];
-      for (const p of lastCalib) {
-        const sigmaH = p.sigma_t * sqrtH;
-        const muBase = Math.log(p.y_hat_tp1 / p.S_t);
-        if (!Number.isFinite(muBase) || !Number.isFinite(sigmaH) || sigmaH <= 0) continue;
-        zEdges.push(muBase / sigmaH);
-      }
-
-      if (zEdges.length === 0) {
-        const fallback = zEnter;
-        return {
-          enterLong: fallback,
-          enterShort: fallback,
-          exitLong: fallback * exitRatio,
-          exitShort: fallback * exitRatio,
-          flipLong: fallback * flipRatio,
-          flipShort: fallback * flipRatio,
-        };
-      }
-
-      const targetQ = 0.9;
-      const minSamples = 50;
-      const pos = zEdges.filter((z) => z > 0);
-      const neg = zEdges.filter((z) => z < 0).map((z) => -z);
-      const absVals = zEdges.map((z) => Math.abs(z));
-
-      const symEnter = quantile(absVals, targetQ);
-      const enterLong = pos.length >= minSamples ? quantile(pos, targetQ) : symEnter;
-      const enterShort = neg.length >= minSamples ? quantile(neg, targetQ) : symEnter;
-
-      const enterLongFinal = Number.isFinite(enterLong) ? enterLong : zEnter;
-      const enterShortFinal = Number.isFinite(enterShort) ? enterShort : enterLongFinal;
-
-      return {
-        enterLong: enterLongFinal,
-        enterShort: enterShortFinal,
-        exitLong: enterLongFinal * exitRatio,
-        exitShort: enterShortFinal * exitRatio,
-        flipLong: enterLongFinal * flipRatio,
-        flipShort: enterShortFinal * flipRatio,
-      };
-    };
 
     const manualThresholds = {
       enterLong: zEnter,
@@ -2529,7 +2703,24 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       flipShort: zFlip,
     };
 
-    const thresholds = signalRule === "z" ? (zMode === "auto" ? computeAutoThresholds() : manualThresholds) : null;
+    let thresholds: typeof manualThresholds | null = null;
+    if (signalRule === "z") {
+      if (zMode === "auto") {
+        thresholds = computeAutoZThresholds(ewmaPathArg, canonicalRows, horizon, zEnter);
+      } else if (zMode === "manual") {
+        thresholds = manualThresholds;
+      } else if (zMode === "optimize") {
+        thresholds = optimizedThresholds ?? null;
+      }
+    }
+
+    if (signalRule === "z" && zMode === "optimize" && !thresholds) {
+      return [];
+    }
+
+    if (thresholds) {
+      setT212ZDisplayThresholds(thresholds);
+    }
 
     const bars: Trading212SimBar[] = [];
     let qPrev = 0; // -1 short, 0 flat, +1 long
@@ -2695,6 +2886,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           throw new Error('No canonical rows available for Trading212 sim.');
         }
 
+        if (t212SignalRule === "z" && t212ZMode === "optimize" && !t212ZOptimizeResult) {
+          throw new Error('Optimize z thresholds first to run the simulation.');
+        }
+
         const canUseTrendTilt =
           source === "biased" &&
           !!useTrendTilt &&
@@ -2742,6 +2937,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
             zEnter: t212ZEnter,
             zExit: t212ZExit,
             zFlip: t212ZFlip,
+            optimizedThresholds: t212ZOptimizeResult?.thresholds ?? null,
           }
         );
 
@@ -2853,6 +3049,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       t212ZEnter,
       t212ZExit,
       t212ZFlip,
+      t212ZOptimizeResult,
       reactionLambda,
       reactionTrainFraction,
       reactionOptimizationBest,
@@ -5836,6 +6033,11 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           t212ZEnter={t212ZEnter}
           t212ZExit={t212ZExit}
           t212ZFlip={t212ZFlip}
+          t212ZDisplayThresholds={t212ZDisplayThresholds}
+          t212ZOptimized={t212ZOptimizeResult}
+          isOptimizingZThresholds={isOptimizingZThresholds}
+          t212ZOptimizeError={t212ZOptimizeError}
+          onApplyOptimizedZThresholds={handleApplyOptimizedZThresholds}
           onChangeT212InitialEquity={setT212InitialEquity}
           onChangeT212Leverage={setT212Leverage}
           onChangeT212PositionFraction={setT212PositionFraction}
@@ -5846,6 +6048,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           onChangeT212ZEnter={setT212ZEnter}
           onChangeT212ZExit={setT212ZExit}
           onChangeT212ZFlip={setT212ZFlip}
+          onOptimizeZThresholds={runZThresholdOptimization}
         />
       </div>
       
