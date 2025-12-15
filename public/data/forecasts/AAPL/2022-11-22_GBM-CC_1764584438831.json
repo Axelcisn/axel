@@ -1,0 +1,52 @@
+{
+  "symbol": "AAPL",
+  "method": "GBM-CC",
+  "date_t": "2022-11-22",
+  "created_at": "2025-12-01T10:20:38.831Z",
+  "locked": true,
+  "y_hat": 150.2977761318052,
+  "horizonTrading": 3,
+  "target": {
+    "h": 3,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 252
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0.0006732271686049714,
+    "sigma_hat": 0.02870256345883901,
+    "mu_star_used": 0.0002613085940506313,
+    "window_start": "1980-12-15",
+    "window_end": "2022-11-22",
+    "n": 10574,
+    "sigma_forecast": 0.04971429821817905,
+    "sigma2_forecast": 0.0024715114473260404,
+    "critical_value": 1.96,
+    "window_span": {
+      "start": "1980-12-15",
+      "end": "2022-11-22"
+    }
+  },
+  "intervals": {
+    "L_h": 136.34364169161876,
+    "U_h": 165.680051008604,
+    "band_width_bp": 2151.6521748288174
+  },
+  "diagnostics": {
+    "method_source": "GBM",
+    "m_log": 5.01261850045389,
+    "s_scale": 0.04971429821817905
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "mu": 0.0006732271686049714,
+      "sigma": 0.02870256345883901,
+      "h": 3,
+      "coverage": 0.95
+    },
+    "regime_tag": null,
+    "conformal": null
+  }
+}

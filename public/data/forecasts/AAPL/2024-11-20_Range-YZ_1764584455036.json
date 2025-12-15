@@ -1,0 +1,52 @@
+{
+  "symbol": "AAPL",
+  "method": "Range-YZ",
+  "date_t": "2024-11-20",
+  "created_at": "2025-12-01T10:20:55.036Z",
+  "locked": true,
+  "y_hat": 229,
+  "target": {
+    "h": 3,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 22
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0,
+    "sigma_hat": 0.028092426763634142,
+    "mu_star_used": 0,
+    "window_start": "1980-12-15",
+    "window_end": "2024-11-20",
+    "n": 11075,
+    "sigma_forecast": 0.048657510462522056,
+    "sigma2_forecast": 0.0023675533244104435,
+    "critical_value": 1.96,
+    "window_span": {
+      "start": "1980-12-15",
+      "end": "2024-11-20"
+    }
+  },
+  "intervals": {
+    "L_h": 208.16963142870685,
+    "U_h": 251.91474683452964,
+    "band_width_bp": 2101.4167679306506
+  },
+  "diagnostics": {
+    "method_source": "Range-YZ",
+    "m_log": 5.43372200355424,
+    "s_scale": 0.048657510462522056,
+    "range_estimator": "YZ"
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "estimator": "YZ",
+      "avg_range": 0.0007891844414701479,
+      "h": 3,
+      "coverage": 0.95
+    },
+    "regime_tag": null,
+    "conformal": null
+  }
+}
