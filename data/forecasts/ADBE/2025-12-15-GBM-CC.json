@@ -1,0 +1,48 @@
+{
+  "symbol": "ADBE",
+  "date_t": "2025-12-15",
+  "method": "GBM-CC",
+  "y_hat": 351.1499938964844,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": -0.001144559827080948,
+    "sigma_hat": 0.021756718080668883,
+    "mu_star_used": 0,
+    "window_start": "2023-12-11",
+    "window_end": "2025-12-15",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 351.1499938964844,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 5.861213465223524,
+  "s_scale": 0.021756718080668883,
+  "L_h": 336.49089182353026,
+  "U_h": 366.4477143653801,
+  "band_width_bp": 890,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-16T11:44:35.377Z"
+}

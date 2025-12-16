@@ -32,6 +32,7 @@ import {
   Trading212AccountSnapshot,
   simulateTrading212Cfd,
 } from '@/lib/backtest/trading212Cfd';
+import { computeWindowSimFromBars, type WindowSimResult } from '@/lib/backtest/windowSim';
 import {
   fetchT212Trades,
   fetchT212PairedTrades,
@@ -477,8 +478,8 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [reactionTrainFraction, setReactionTrainFraction] = useState(0.7);
   const [reactionMinTrainObs, setReactionMinTrainObs] = useState(500);
 
-  // EWMA Optimization state (Maximize button)
-  type EwmaOptimizationCandidate = {
+  // Biased Max lambda-only optimization state
+  type EwmaOptimizationResult = {
     lambda: number;
     trainFraction: number;
     directionHitRate: number;
@@ -487,15 +488,10 @@ export default function TimingPage({ params }: TimingPageProps) {
     avgWidth: number;
     neutralDirectionHitRate: number;
     neutralIntervalScore: number;
+    zEnterUsed: number;
     shortOpportunityRate: number;
-    zEnterUsed?: number;
-    score?: number;
   };
-
-const [reactionOptimizationBest, setReactionOptimizationBest] = useState<EwmaOptimizationCandidate | null>(null);
-const [reactionOptimizationCandidates, setReactionOptimizationCandidates] = useState<EwmaOptimizationCandidate[]>([]);
-
-  // Neutral baseline for "Rank 0" row in optimization table
+  type EwmaOptimizationCandidate = EwmaOptimizationResult;
   type EwmaOptimizationNeutralSummary = {
     lambda: number;
     directionHitRate: number;
@@ -503,24 +499,57 @@ const [reactionOptimizationCandidates, setReactionOptimizationCandidates] = useS
     coverage: number;
     avgWidth: number;
   };
-const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
-  useState<EwmaOptimizationNeutralSummary | null>(null);
+  type BiasedMaxCalmarResult = {
+    lambdaStar: number;
+    calmarScore: number;
+    trainSpan: { start: string; end: string } | null;
+    updatedAt: string | null;
+    cacheHit?: boolean;
+    objective?: string | null;
+  };
+  const [biasedMaxObjective, setBiasedMaxObjective] = useState<"calmar">("calmar");
+  const [reactionOptimizationBest, setReactionOptimizationBest] = useState<EwmaOptimizationResult | null>(null);
+  const [, setReactionOptimizationCandidates] = useState<EwmaOptimizationResult[]>([]);
+  const [, setReactionOptimizationNeutral] = useState<EwmaOptimizationNeutralSummary | null>(null);
+  const [biasedMaxCalmarResult, setBiasedMaxCalmarResult] = useState<BiasedMaxCalmarResult | null>(null);
+  const [biasedMaxCalmarError, setBiasedMaxCalmarError] = useState<string | null>(null);
+  const [isLoadingBiasedMaxCalmar, setIsLoadingBiasedMaxCalmar] = useState(false);
+  const [t212CanonicalRows, setT212CanonicalRows] = useState<CanonicalRow[] | null>(null);
+  const derivedMaxTrainFraction = useMemo(() => {
+    if (!biasedMaxCalmarResult?.trainSpan) return null;
+    const rows = t212CanonicalRows;
+    if (!rows || rows.length === 0) return null;
+    const trainEnd = biasedMaxCalmarResult.trainSpan.end;
+    const cutoffIdx = rows.findIndex((r) => r.date > trainEnd);
+    const trainCount = cutoffIdx === -1 ? rows.length : cutoffIdx;
+    if (trainCount <= 0) return null;
+    const frac = trainCount / rows.length;
+    if (!Number.isFinite(frac)) return null;
+    return Math.min(0.99, Math.max(0.01, frac));
+  }, [biasedMaxCalmarResult?.trainSpan, t212CanonicalRows]);
+
   const getMaxEwmaConfig = useCallback(() => {
+    if (biasedMaxCalmarResult) {
+      return {
+        lambda: biasedMaxCalmarResult.lambdaStar,
+        trainFraction: derivedMaxTrainFraction ?? reactionTrainFraction,
+      };
+    }
     if (reactionOptimizationBest) {
       return {
         lambda: reactionOptimizationBest.lambda,
-        trainFraction: reactionOptimizationBest.trainFraction,
+        trainFraction: reactionTrainFraction,
       };
     }
     return {
       lambda: reactionLambda,
       trainFraction: reactionTrainFraction,
     };
-  }, [reactionOptimizationBest, reactionLambda, reactionTrainFraction]);
+  }, [biasedMaxCalmarResult, derivedMaxTrainFraction, reactionOptimizationBest, reactionLambda, reactionTrainFraction]);
 
   const [isOptimizingReaction, setIsOptimizingReaction] = useState(false);
   const [isReactionMaximized, setIsReactionMaximized] = useState(false);  // Track if Biased has been optimized
-  const [reactionOptimizeError, setReactionOptimizeError] = useState<string | null>(null);
+  const [, setReactionOptimizeError] = useState<string | null>(null);
   type BaseMode = 'unbiased' | 'biased' | 'max';
 
   interface SimulationMode {
@@ -582,7 +611,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   // Trading212 CFD Simulation state
   const [isCfdEnabled, setIsCfdEnabled] = useState(true);  // CFD simulation toggle
   
-  const [t212InitialEquity, setT212InitialEquity] = useState(5000);
+  const [t212InitialEquity, setT212InitialEquity] = useState(1000);
   const [t212Leverage, setT212Leverage] = useState(5);
   const [t212PositionFraction, setT212PositionFraction] = useState(0.25); // 25% default
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
@@ -601,7 +630,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   const [t212DailyShortSwap, setT212DailyShortSwap] = useState(0);
   const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
   const [t212Error, setT212Error] = useState<string | null>(null);
-  const [t212CanonicalRows, setT212CanonicalRows] = useState<CanonicalRow[] | null>(null);
   // Trading212 Simulation Runs - multiple scenarios for comparison
   type T212RunId =
     | "ewma-unbiased"
@@ -615,9 +643,14 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     label: string;
     signalSource: "unbiased" | "biased";
     result: Trading212SimulationResult;
+    bars: Trading212SimBar[];
+    configSnapshot: Trading212CfdConfig;
+    initialEquity: number;
+    windowResult?: WindowSimResult | null;
     lambda?: number;
     trainFraction?: number;
     trendTiltEnabled?: boolean;
+    strategyStartDate?: string | null;
   };
 
   type StrategyKey = "unbiased" | "biased" | "biased-max";
@@ -702,13 +735,48 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     setVisibleWindow(null);
     setSimCompareCustom(null);
     setSimComparePreset("chart");
+    setBiasedMaxCalmarResult(null);
+    setBiasedMaxCalmarError(null);
   }, [params.ticker]);
+
+  useEffect(() => {
+    setT212Runs((prev) =>
+      prev.map((run) => ({
+        ...run,
+        windowResult: visibleWindow
+          ? computeWindowSimFromBars(
+              run.bars,
+              visibleWindow,
+              run.initialEquity,
+              run.configSnapshot,
+              run.strategyStartDate ?? null
+            )
+          : null,
+      }))
+    );
+  }, [visibleWindow]);
 
   useEffect(() => {
     setT212ZOptimizeResult(null);
     setT212ZOptimizeError(null);
     setIsOptimizingZThresholds(false);
   }, [params.ticker]);
+
+  useEffect(() => {
+    setT212BaseRunsById((prev) => {
+      const next: Trading212BaseRunsById = { ...prev };
+      const replace = (id: BaseRunId) => {
+        const found = t212Runs.find((r) => r.id === id);
+        if (found) {
+          next[id] = found;
+        }
+      };
+      replace("ewma-unbiased");
+      replace("ewma-biased");
+      replace("ewma-biased-max");
+      return next;
+    });
+  }, [t212Runs]);
 
   useEffect(() => {
     if (t212ZMode === "manual") {
@@ -752,7 +820,9 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   );
   const summarizeRunStats = useCallback(
     (run: Trading212SimRun, window?: { start: string; end: string } | null): FilteredStats | null => {
-      const history = run.result.accountHistory;
+      const baseResult =
+        window && run.windowResult?.result ? run.windowResult.result : run.result;
+      const history = baseResult.accountHistory;
       if (!history || history.length === 0) {
         return null;
       }
@@ -828,18 +898,18 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         prevSide = side;
       }
 
-      const closedTradesCount = run.result.trades.filter(
+      const closedTradesCount = baseResult.trades.filter(
         (t) => t.entryDate >= first.date && t.entryDate <= last.date
       ).length;
       const tradeCount = Math.max(openedTrades, closedTradesCount);
 
       let stopOutEvents = 0;
-      if (Array.isArray(run.result.stopOutDates) && run.result.stopOutDates.length > 0) {
-        stopOutEvents = run.result.stopOutDates.filter(
+      if (Array.isArray(baseResult.stopOutDates) && baseResult.stopOutDates.length > 0) {
+        stopOutEvents = baseResult.stopOutDates.filter(
           (d) => d >= first.date && d <= last.date
         ).length;
       } else if (!window || (clampedWindow.start === runStart && clampedWindow.end === runEnd)) {
-        stopOutEvents = run.result.stopOutEvents ?? 0;
+        stopOutEvents = baseResult.stopOutEvents ?? 0;
       }
 
       return {
@@ -962,7 +1032,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         runId: run.id,
         label: run.label,
         color: runColors[run.id],
-        trades: run.result.trades,
+        trades: run.windowResult?.result?.trades ?? run.result.trades,
       }));
     
     // Include real trades overlay if available and enabled
@@ -981,15 +1051,23 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     return simOverlays;
   }, [t212Runs, t212VisibleRunIds, realTradesOverlay]);
 
-  // Get the account history for the currently visible T212 run (for equity chart)
-  const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
+  // Active run (solo mode) for equity chart
+  const t212ActiveRun = useMemo(() => {
     console.log("[INIT-ACCOUNT] activeRunId=", activeT212RunId, "visibleSet=", Array.from(t212VisibleRunIds), "t212Runs ids=", t212Runs.map((r) => r.id));
-    // Find the first visible run (we only show one at a time in solo mode)
-    const visibleRun = activeT212RunId
-      ? t212Runs.find((run) => run.id === activeT212RunId)
-      : t212Runs.find((run) => t212VisibleRunIds.has(run.id));
-    return visibleRun?.result.accountHistory ?? null;
+    return activeT212RunId
+      ? t212Runs.find((run) => run.id === activeT212RunId) ?? null
+      : t212Runs.find((run) => t212VisibleRunIds.has(run.id)) ?? null;
   }, [t212Runs, activeT212RunId, t212VisibleRunIds, simulationMode.baseMode]);
+
+  const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
+    const res = t212ActiveRun?.windowResult?.result ?? t212ActiveRun?.result ?? null;
+    return res?.accountHistory ?? null;
+  }, [t212ActiveRun]);
+
+  const t212ActiveTrades: Trading212Trade[] | null = useMemo(() => {
+    const res = t212ActiveRun?.windowResult?.result ?? t212ActiveRun?.result ?? null;
+    return res?.trades ?? null;
+  }, [t212ActiveRun]);
 
   // Keep visible run in sync with SimulationMode and available runs
   useEffect(() => {
@@ -1118,13 +1196,13 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           ? undefined
           : spec.key === "biased"
             ? run?.lambda ?? reactionLambda
-            : run?.lambda;
+            : run?.lambda ?? biasedMaxCalmarResult?.lambdaStar;
       const trainFraction =
         spec.key === "unbiased"
           ? undefined
           : spec.key === "biased"
             ? run?.trainFraction ?? reactionTrainFraction
-            : run?.trainFraction;
+            : run?.trainFraction ?? derivedMaxTrainFraction ?? undefined;
 
       const row = {
         id: spec.key,
@@ -1165,6 +1243,8 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     comparisonRunIds,
     reactionLambda,
     reactionTrainFraction,
+    biasedMaxCalmarResult,
+    derivedMaxTrainFraction,
     summarizeRunStats,
     t212BaseRunsById,
     visibleWindow,
@@ -2152,7 +2232,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
   // Load EWMA Biased (Max) Walker using the optimized config without mutating baseline params
   const loadEwmaBiasedMaxWalker = useCallback(async () => {
     if (!params?.ticker) return;
-    if (!reactionOptimizationBest) return;
+    if (!biasedMaxCalmarResult) return;
 
     try {
       setIsLoadingEwmaBiasedMax(true);
@@ -2163,9 +2243,9 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         lambda: maxCfg.lambda.toString(),
         coverage: coverage.toString(), // main coverage
         h: String(h),
-        trainFraction: maxCfg.trainFraction.toString(),
         minTrainObs: reactionMinTrainObs.toString(),
         shrinkFactor: "0.5",
+        trainFraction: (maxCfg.trainFraction ?? reactionTrainFraction).toString(),
       });
 
       const res = await fetch(
@@ -2221,7 +2301,11 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         });
       }
 
-      setEwmaBiasedMaxPath(mappedPath);
+      const rangeStart = visibleWindow?.start ?? null;
+      const filteredPath =
+        rangeStart != null ? mappedPath.filter((p) => p.date_tp1 >= rangeStart) : mappedPath;
+
+      setEwmaBiasedMaxPath(filteredPath);
     } catch (err: any) {
       console.error("[EWMA Biased Max] loadEwmaBiasedMaxWalker error", err);
       setEwmaBiasedMaxError(err?.message || "Failed to load biased EWMA (Max).");
@@ -2230,17 +2314,17 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     } finally {
       setIsLoadingEwmaBiasedMax(false);
     }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionOptimizationBest, getMaxEwmaConfig]);
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionTrainFraction, getMaxEwmaConfig, visibleWindow?.start, biasedMaxCalmarResult]);
 
   // Auto-load/refresh max path when optimizer results exist; clear when not available
   useEffect(() => {
-    if (reactionOptimizationBest) {
+    if (biasedMaxCalmarResult) {
       loadEwmaBiasedMaxWalker();
     } else {
       setEwmaBiasedMaxSummary(null);
       setEwmaBiasedMaxPath(null);
     }
-  }, [reactionOptimizationBest, loadEwmaBiasedMaxWalker]);
+  }, [biasedMaxCalmarResult, loadEwmaBiasedMaxWalker]);
 
   // Load EWMA Reaction Map (manual trigger only)
   const loadReactionMap = useCallback(async () => {
@@ -2457,6 +2541,75 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     t212PositionFraction,
   ]);
 
+  const fetchBiasedMaxCalmar = useCallback(async () => {
+    if (!params?.ticker) return;
+    const rangeStart = visibleWindow?.start;
+    if (!rangeStart) return;
+    if (biasedMaxObjective !== "calmar") return;
+
+    try {
+      setIsLoadingBiasedMaxCalmar(true);
+      setBiasedMaxCalmarError(null);
+
+      const query = new URLSearchParams({
+        rangeStart,
+        h: String(h),
+        coverage: coverage.toString(),
+        equity: t212InitialEquity.toString(),
+        leverage: t212Leverage.toString(),
+        posFrac: t212PositionFraction.toString(),
+        costBps: t212CostBps.toString(),
+        signalRule: "z",
+        objective: biasedMaxObjective,
+      });
+
+      const res = await fetch(
+        `/api/volatility/ewma-lambda-calmar/${encodeURIComponent(params.ticker)}?${query.toString()}`
+      );
+      const json = await res.json();
+      if (!res.ok || !json?.success) {
+        const msg = json?.error || `Lambda Calmar API error ${res.status}`;
+        throw new Error(msg);
+      }
+
+      setBiasedMaxCalmarResult({
+        lambdaStar: json.lambdaStar,
+        calmarScore: json.calmarScore,
+        trainSpan: json.trainSpan ?? null,
+        updatedAt: json.updatedAt ?? null,
+        cacheHit: json.cacheHit ?? false,
+        objective: json.objective ?? "calmar",
+      });
+
+      if (!t212CanonicalRows) {
+        const hist = await fetch(`/api/history/${encodeURIComponent(params.ticker)}`);
+        if (hist.ok) {
+          const data = await hist.json();
+          if (data?.rows) {
+            setT212CanonicalRows(data.rows as CanonicalRow[]);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error("[Lambda Calmar] fetch error", err);
+      setBiasedMaxCalmarError(err?.message || "Failed to compute λ* (Calmar).");
+      setBiasedMaxCalmarResult(null);
+    } finally {
+      setIsLoadingBiasedMaxCalmar(false);
+    }
+  }, [
+    params?.ticker,
+    visibleWindow?.start,
+    h,
+    coverage,
+    t212InitialEquity,
+    t212Leverage,
+    t212PositionFraction,
+    t212CostBps,
+    t212CanonicalRows,
+    biasedMaxObjective,
+  ]);
+
   useEffect(() => {
     if (
       t212ZMode === "optimize" &&
@@ -2472,6 +2625,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     isOptimizingZThresholds,
     runZThresholdOptimization,
   ]);
+
+  useEffect(() => {
+    fetchBiasedMaxCalmar();
+  }, [fetchBiasedMaxCalmar]);
 
   useEffect(() => {
     if (t212ZMode === "optimize") {
@@ -2515,7 +2672,6 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     // If we already have optimization results, apply them and show overlay
     if (reactionOptimizationBest) {
       setReactionLambda(reactionOptimizationBest.lambda);
-      setReactionTrainFraction(reactionOptimizationBest.trainFraction);
       setIsReactionMaximized(true);
       biasedEverLoaded.current = true;
     } else {
@@ -2526,20 +2682,13 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
 
   // Click handlers for optimization table rows
   const handleApplyOptimizationCandidate = useCallback(
-    (candidate: EwmaOptimizationCandidate) => {
-      setReactionLambda(candidate.lambda);
-      setReactionTrainFraction(candidate.trainFraction);
-      // Auto-reload is triggered by the useEffect watching these state variables
-    },
+    (_candidate: any) => {},
     []
   );
 
   const handleApplyOptimizationNeutral = useCallback(() => {
-    if (!reactionOptimizationNeutral) return;
-    // Only λ matters for neutral; keep current Train%
-    setReactionLambda(reactionOptimizationNeutral.lambda);
-    // Auto-reload is triggered by the useEffect watching reactionLambda
-  }, [reactionOptimizationNeutral]);
+    return;
+  }, []);
 
   const handleApplyOptimizedZThresholds = useCallback(() => {
     if (t212ZOptimizeResult) {
@@ -2824,6 +2973,8 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       setIsRunningT212Sim(true);
 
       try {
+        const isMaxRun = runId === "ewma-biased-max" || runId === "ewma-biased-max-trend";
+
         // Fetch canonical rows if not cached
         let rows = t212CanonicalRows;
         if (!rows) {
@@ -2854,9 +3005,10 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           return;
         }
 
-        // Filter canonical rows to start at Reaction Map Test start (if available)
+        // Filter canonical rows to start at strategy start (max uses rangeStart; biased uses reaction testStart)
         const simStartDate = (() => {
           const candidates = [
+            isMaxRun ? visibleWindow?.start ?? null : null,
             reactionMapSummary?.testStart,
             rows[0]?.date ?? null,
           ].filter(Boolean) as string[];
@@ -2945,6 +3097,8 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           throw new Error('No overlapping bars between canonical data and EWMA path');
         }
 
+        const strategyStartDate = simStartDate;
+
         const config: Trading212CfdConfig = {
           leverage: t212Leverage,
           fxFeeRate: 0.005,
@@ -2957,6 +3111,15 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         };
 
         const result = simulateTrading212Cfd(bars, t212InitialEquity, config);
+        const windowResult = visibleWindow
+          ? computeWindowSimFromBars(
+              bars,
+              visibleWindow,
+              t212InitialEquity,
+              config,
+              strategyStartDate
+            )
+          : null;
 
         // Debug: Log sim run stored
         console.log("[T212] Sim run stored", {
@@ -2973,17 +3136,16 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
         });
 
         // Store the run in our collection
-        // For max runs, use optimizer best values when available; otherwise use current state
-        const isMaxRun = runId === "ewma-biased-max" || runId === "ewma-biased-max-trend";
+        // For max runs, use calmar-optimized values when available; otherwise fall back
         const storedLambda = opts?.lambdaOverride != null
           ? opts.lambdaOverride
-          : isMaxRun && reactionOptimizationBest
-            ? reactionOptimizationBest.lambda
+          : isMaxRun
+            ? biasedMaxCalmarResult?.lambdaStar ?? reactionOptimizationBest?.lambda ?? reactionLambda
             : reactionLambda;
         const storedTrainFraction = opts?.trainFractionOverride != null
           ? opts.trainFractionOverride
-          : isMaxRun && reactionOptimizationBest
-            ? reactionOptimizationBest.trainFraction
+          : isMaxRun
+            ? derivedMaxTrainFraction ?? reactionTrainFraction
             : reactionTrainFraction;
         const signalSource: Trading212SimRun['signalSource'] = source;
         const runRecord: Trading212SimRun = {
@@ -2991,9 +3153,14 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           label,
           signalSource,
           result,
+          bars,
+          configSnapshot: config,
+          initialEquity: t212InitialEquity,
+          windowResult,
           lambda: storedLambda,
           trainFraction: storedTrainFraction,
           trendTiltEnabled: canUseTrendTilt,
+          strategyStartDate,
         };
         setT212Runs((prev) => {
           const other = prev.filter((r) => r.id !== runId);
@@ -3059,6 +3226,9 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
       trendLongWindow,
       comparisonRunIds,
       summarizeRunStats,
+      visibleWindow,
+      biasedMaxCalmarResult,
+      derivedMaxTrainFraction,
     ]
   );
 
@@ -3169,6 +3339,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     if (!ewmaPath || ewmaPath.length === 0) return;
     if (!ewmaBiasedPath || ewmaBiasedPath.length === 0) return;
     if (!reactionMapSummary) return;
+    if (!biasedMaxCalmarResult || !ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0) return;
 
     const maxConfig = getMaxEwmaConfig();
     const specs: Array<{
@@ -3214,6 +3385,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
     ewmaBiasedPath,
     ewmaBiasedMaxPath,
     reactionMapSummary,
+    biasedMaxCalmarResult,
     getMaxEwmaConfig,
     runTrading212SimForSource,
     h,
@@ -5964,6 +6136,7 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
           onLoadEwmaBiasedMax={handleLoadBiasedMaxClick}
           isLoadingEwmaBiased={isLoadingEwmaBiased}
           isLoadingEwmaBiasedMax={isLoadingEwmaBiasedMax}
+          onSelectBiasedMaxObjective={setBiasedMaxObjective}
           ewmaReactionMapDropdown={{
             reactionLambda,
             setReactionLambda,
@@ -6194,125 +6367,67 @@ const [reactionOptimizationNeutral, setReactionOptimizationNeutral] =
             </div>
 
             {/* Right Column: Optimization Results */}
-            <div className={`rounded-xl p-4 border ${
-              isDarkMode 
-                ? 'bg-transparent border-slate-700/50' 
-                : 'bg-transparent border-gray-200'
-            }`}>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className={`text-sm font-medium ${
-                  isDarkMode ? 'text-slate-300' : 'text-gray-700'
-                }`}>Optimization Candidates</h4>
-                {reactionOptimizationBest && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 font-medium">
-                    Best: {(reactionOptimizationBest.directionHitRate * 100).toFixed(1)}%
-                  </span>
-                )}
+            <div className="space-y-4">
+              <div className={`rounded-xl p-4 border ${
+                isDarkMode 
+                  ? 'bg-transparent border-slate-700/50' 
+                  : 'bg-transparent border-gray-200'
+              }`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className={`text-sm font-medium ${
+                    isDarkMode ? 'text-slate-300' : 'text-gray-700'
+                  }`}>Optimization Candidates</h4>
+                  {isLoadingBiasedMaxCalmar && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-100 font-medium">
+                      Loading…
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className={isDarkMode ? 'text-slate-400' : 'text-gray-600'}>Objective</span>
+                    <span className="font-semibold">Calmar Ratio</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
+                      <div className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>λ*</div>
+                      <div className="font-mono text-lg">
+                        {biasedMaxCalmarResult ? biasedMaxCalmarResult.lambdaStar.toFixed(2) : "—"}
+                      </div>
+                    </div>
+                    <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
+                      <div className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Calmar</div>
+                      <div className="font-mono text-lg">
+                        {biasedMaxCalmarResult ? biasedMaxCalmarResult.calmarScore.toFixed(4) : "—"}
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
+                    <div className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Train span</div>
+                    <div className="font-mono text-sm leading-tight">
+                      {biasedMaxCalmarResult?.trainSpan
+                        ? `${biasedMaxCalmarResult.trainSpan.start} → ${biasedMaxCalmarResult.trainSpan.end}`
+                        : "—"}
+                    </div>
+                  </div>
+                  <div className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-600'}`}>
+                    Training ends at rangeStart-1.{" "}
+                    {biasedMaxCalmarResult?.updatedAt && (
+                      <span>
+                        Updated {new Date(biasedMaxCalmarResult.updatedAt).toLocaleString()}
+                        {biasedMaxCalmarResult.cacheHit ? " (cache)" : ""}
+                      </span>
+                    )}
+                  </div>
+                  {biasedMaxCalmarError && (
+                    <div className="text-[11px] text-rose-400">
+                      {biasedMaxCalmarError}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {reactionOptimizationCandidates.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className={`w-full text-[11px] ${isDarkMode ? 'text-slate-300' : 'text-gray-700'}`}>
-                    <thead className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'}`}>
-                      <tr className={`border-b ${isDarkMode ? 'border-slate-700/70' : 'border-gray-200'}`}>
-                        <th className="py-1.5 pr-2 text-left font-medium">Rank</th>
-                        <th className="py-1.5 px-2 text-right font-medium">λ</th>
-                        <th className="py-1.5 px-2 text-right font-medium">Train%</th>
-                        <th className="py-1.5 px-2 text-right font-medium">Hit%</th>
-                        <th className="py-1.5 px-2 text-right font-medium">Cov%</th>
-                        <th className="py-1.5 pl-2 text-right font-medium">Int. score</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* Neutral baseline row */}
-                      {reactionOptimizationNeutral && (
-                        <tr
-                          className="cursor-pointer transition-colors rounded-lg hover:bg-sky-500/20"
-                          onClick={handleApplyOptimizationNeutral}
-                        >
-                          <td className={`py-2 pl-2 pr-2 rounded-l-lg ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Neutral</td>
-                          <td className="py-2 px-2 text-right font-mono">
-                            {reactionOptimizationNeutral.lambda.toFixed(2)}
-                          </td>
-                          <td className={`py-2 px-2 text-right ${isDarkMode ? 'text-slate-600' : 'text-gray-400'}`}>
-                            —
-                          </td>
-                          <td className="py-2 px-2 text-right font-mono">
-                            {(reactionOptimizationNeutral.directionHitRate * 100).toFixed(1)}%
-                          </td>
-                          <td className="py-2 px-2 text-right font-mono">
-                            {(reactionOptimizationNeutral.coverage * 100).toFixed(1)}%
-                          </td>
-                          <td className="py-2 pl-2 pr-2 text-right font-mono rounded-r-lg">
-                            {reactionOptimizationNeutral.intervalScore.toFixed(3)}
-                          </td>
-                        </tr>
-                      )}
-                      {/* Ranked candidates */}
-                      {reactionOptimizationCandidates.slice(0, 4).map((c, idx) => {
-                        const isBest =
-                          reactionOptimizationBest &&
-                          c.lambda === reactionOptimizationBest.lambda &&
-                          c.trainFraction === reactionOptimizationBest.trainFraction;
-
-                        // Delta vs neutral
-                        const hitDelta = (c.directionHitRate - c.neutralDirectionHitRate) * 100;
-                        const isDeltaPositive = hitDelta > 0;
-                        const intScoreDelta = c.intervalScore - c.neutralIntervalScore;
-                        const isIntDeltaBetter = intScoreDelta < 0; // lower is better
-
-                        return (
-                          <tr
-                            key={`${c.lambda}-${c.trainFraction}`}
-                            className={`cursor-pointer transition-colors rounded-lg hover:bg-sky-500/20 ${isBest ? 'text-amber-400 bg-amber-500/20' : ''}`}
-                            onClick={() => handleApplyOptimizationCandidate(c)}
-                          >
-                            <td className="py-2 pl-2 pr-2 rounded-l-lg">{idx + 1}</td>
-                            <td className="py-2 px-2 text-right font-mono">
-                              {c.lambda.toFixed(2)}
-                            </td>
-                            <td className="py-2 px-2 text-right font-mono">
-                              {(c.trainFraction * 100).toFixed(0)}%
-                            </td>
-                            <td className="py-2 px-2 text-right font-mono">
-                              {(c.directionHitRate * 100).toFixed(1)}%
-                              <span
-                                className={`ml-1 text-[9px] ${isDeltaPositive ? 'text-emerald-400' : 'text-rose-400'}`}
-                                title="vs neutral"
-                              >
-                                {isDeltaPositive ? '+' : ''}{hitDelta.toFixed(1)}
-                              </span>
-                            </td>
-                            <td className="py-2 px-2 text-right font-mono">
-                              {(c.coverage * 100).toFixed(1)}%
-                            </td>
-                            <td className="py-2 pl-2 pr-2 text-right font-mono rounded-r-lg">
-                              {c.intervalScore.toFixed(3)}
-                              <span
-                                className={`ml-1 text-[9px] ${isIntDeltaBetter ? 'text-emerald-400' : 'text-rose-400'}`}
-                                title="vs neutral"
-                              >
-                                {intScoreDelta >= 0 ? '+' : ''}{intScoreDelta.toFixed(3)}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className={`text-center py-6 text-xs ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>
-                  Click &quot;Maximize&quot; to find optimal λ / Train% combinations
-                </div>
-              )}
-
-              {/* Optimization error */}
-              {reactionOptimizeError && (
-                <div className="mt-2 text-[11px] text-red-400">
-                  {reactionOptimizeError}
-                </div>
-              )}
             </div>
           </div>
         ) : !isLoadingReaction && !reactionError && (

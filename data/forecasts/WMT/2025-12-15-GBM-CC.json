@@ -1,0 +1,48 @@
+{
+  "symbol": "WMT",
+  "date_t": "2025-12-15",
+  "method": "GBM-CC",
+  "y_hat": 116.79000091552734,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.0017094507480658971,
+    "sigma_hat": 0.013536814696390263,
+    "mu_star_used": 0,
+    "window_start": "2023-12-11",
+    "window_end": "2025-12-15",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 116.79000091552734,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 4.760377458129565,
+  "s_scale": 0.013536814696390263,
+  "L_h": 113.7321120586693,
+  "U_h": 119.93010651919198,
+  "band_width_bp": 545,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-16T12:10:53.735Z"
+}

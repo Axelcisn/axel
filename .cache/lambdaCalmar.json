@@ -1,0 +1,634 @@
+{
+  "ASML|2025-11-14|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.75,
+    "calmarScore": -0.9746530468352993,
+    "trainSpan": {
+      "start": "1995-03-15",
+      "end": "2025-11-13"
+    },
+    "updatedAt": "2025-12-16T12:12:26.097Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.9969746347815633,
+        "returnPct": -0.9901000079843133,
+        "maxDrawdown": 0.9931045118326844
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.9978926808740318,
+        "returnPct": -0.9916531105386296,
+        "maxDrawdown": 0.993747253131532
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.9969318598395026,
+        "returnPct": -0.9899859005966715,
+        "maxDrawdown": 0.9930326639937564
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9960746161280587,
+        "returnPct": -0.9885347516465735,
+        "maxDrawdown": 0.9924304220191915
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.99442758611916,
+        "returnPct": -0.9846920886402528,
+        "maxDrawdown": 0.9902099483011118
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.9746530468352993,
+        "returnPct": -0.9532812346565332,
+        "maxDrawdown": 0.9780723897102047
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.981841417450489,
+        "returnPct": -0.9645992248068282,
+        "maxDrawdown": 0.9824389230916405
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9803847315909348,
+        "returnPct": -0.9589528414930497,
+        "maxDrawdown": 0.9781393065321344
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.985806884003751,
+        "returnPct": -0.962318912285913,
+        "maxDrawdown": 0.9761738611294293
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9759941631181245,
+        "returnPct": -0.9595409943890678,
+        "maxDrawdown": 0.9831421443377368
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9911555911923484,
+        "returnPct": -0.9879859439193899,
+        "maxDrawdown": 0.9968020689172066
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "ASML|2025-06-17|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.75,
+    "calmarScore": -0.980452043482918,
+    "trainSpan": {
+      "start": "1995-03-15",
+      "end": "2025-06-16"
+    },
+    "updatedAt": "2025-12-16T12:14:17.764Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.9974408948491233,
+        "returnPct": -0.9900272636003541,
+        "maxDrawdown": 0.9925673478127336
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.9980684412089398,
+        "returnPct": -0.9917712439060485,
+        "maxDrawdown": 0.9936906157504954
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.9984545380396675,
+        "returnPct": -0.9917503202552894,
+        "maxDrawdown": 0.9932854050645701
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9975528173307256,
+        "returnPct": -0.9900016847679656,
+        "maxDrawdown": 0.9924303431040719
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.9966383490230603,
+        "returnPct": -0.9868811391183515,
+        "maxDrawdown": 0.9902098791258904
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.980452043482918,
+        "returnPct": -0.958952939146052,
+        "maxDrawdown": 0.9780722530186244
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.9850783018154583,
+        "returnPct": -0.9677792046670768,
+        "maxDrawdown": 0.9824388608331946
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9860425131921491,
+        "returnPct": -0.9644868528830357,
+        "maxDrawdown": 0.9781392181161332
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.9930525132846209,
+        "returnPct": -0.9728693050433486,
+        "maxDrawdown": 0.9796755881775937
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9828421266307508,
+        "returnPct": -0.9670833193681934,
+        "maxDrawdown": 0.983966084851715
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9925565739529898,
+        "returnPct": -0.989382434682486,
+        "maxDrawdown": 0.9968020570778526
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "ZBRA|2025-09-15|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.99,
+    "calmarScore": -0.9332843385092925,
+    "trainSpan": {
+      "start": "1991-08-15",
+      "end": "2025-09-12"
+    },
+    "updatedAt": "2025-12-16T12:14:23.039Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.978753751884155,
+        "returnPct": -0.9449181589360759,
+        "maxDrawdown": 0.9654299226103157
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.9837173050899365,
+        "returnPct": -0.9237895799595527,
+        "maxDrawdown": 0.9390803386091648
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.974880647117158,
+        "returnPct": -0.9257349001608123,
+        "maxDrawdown": 0.9495879345828889
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9384202239969094,
+        "returnPct": -0.8742493136871317,
+        "maxDrawdown": 0.9316181507294656
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.9758809917811498,
+        "returnPct": -0.9393370348966118,
+        "maxDrawdown": 0.9625528551203368
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.9742162934414392,
+        "returnPct": -0.946312526446236,
+        "maxDrawdown": 0.9713577290966541
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.9854316355332433,
+        "returnPct": -0.960256076020796,
+        "maxDrawdown": 0.9744522515772247
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9779027428466547,
+        "returnPct": -0.9268425961537131,
+        "maxDrawdown": 0.9477860686387825
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.9673584981310973,
+        "returnPct": -0.9206776006129802,
+        "maxDrawdown": 0.9517439526211813
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9753642459444056,
+        "returnPct": -0.9500853768940606,
+        "maxDrawdown": 0.9740826371732865
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9332843385092925,
+        "returnPct": -0.8748823336158944,
+        "maxDrawdown": 0.9374231383902982
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "ODFL|2025-09-16|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.85,
+    "calmarScore": -0.9946715251398721,
+    "trainSpan": {
+      "start": "1991-10-24",
+      "end": "2025-09-15"
+    },
+    "updatedAt": "2025-12-16T12:15:24.698Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.9983686596911697,
+        "returnPct": -0.9970220805483573,
+        "maxDrawdown": 0.9986512205388849
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.9979206092642342,
+        "returnPct": -0.9957483387598639,
+        "maxDrawdown": 0.9978232030842895
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.9973014515522709,
+        "returnPct": -0.9941778428857699,
+        "maxDrawdown": 0.996867939316002
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9978518305890655,
+        "returnPct": -0.9957075288729921,
+        "maxDrawdown": 0.9978510820441071
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.9984020813917561,
+        "returnPct": -0.9963599628684942,
+        "maxDrawdown": 0.9979546131149734
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.9972346752989206,
+        "returnPct": -0.9927891006265317,
+        "maxDrawdown": 0.9955420977804884
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.9951700138814252,
+        "returnPct": -0.9915226337119746,
+        "maxDrawdown": 0.9963349175331109
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9946715251398721,
+        "returnPct": -0.9912054016288241,
+        "maxDrawdown": 0.9965153083973519
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.9982314899833734,
+        "returnPct": -0.9955862242234197,
+        "maxDrawdown": 0.9973500477729892
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9994383559451268,
+        "returnPct": -0.9980200721748026,
+        "maxDrawdown": 0.9985809192113876
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9992872662406226,
+        "returnPct": -0.9984300756646574,
+        "maxDrawdown": 0.9991421980396188
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "PAYX|2025-09-15|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.5,
+    "calmarScore": -0.9388705243229589,
+    "trainSpan": {
+      "start": "1983-08-26",
+      "end": "2025-09-12"
+    },
+    "updatedAt": "2025-12-16T12:15:54.490Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.9388705243229589,
+        "returnPct": -0.9259961340930638,
+        "maxDrawdown": 0.9862873634901052
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.9716510285736624,
+        "returnPct": -0.9639083747635886,
+        "maxDrawdown": 0.9920314458767777
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.9681289538704243,
+        "returnPct": -0.9604821639526455,
+        "maxDrawdown": 0.9921014758548351
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9637689091912878,
+        "returnPct": -0.9535965619034938,
+        "maxDrawdown": 0.9894452423285477
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.9775914765578583,
+        "returnPct": -0.9676256318425893,
+        "maxDrawdown": 0.9898057164426606
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.9813535989192216,
+        "returnPct": -0.9722170665859355,
+        "maxDrawdown": 0.9906898671963417
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.9738222703699209,
+        "returnPct": -0.9610619754755743,
+        "maxDrawdown": 0.9868966902045695
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9750192929706227,
+        "returnPct": -0.9592399058817875,
+        "maxDrawdown": 0.9838163334791462
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.9695338385044103,
+        "returnPct": -0.9564132920888347,
+        "maxDrawdown": 0.9864671598922063
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9810302482106908,
+        "returnPct": -0.9725208344338231,
+        "maxDrawdown": 0.9913260434197741
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9909416807641552,
+        "returnPct": -0.9844026215808318,
+        "maxDrawdown": 0.9934011664760323
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "KR|2025-09-16|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.5,
+    "calmarScore": -0.5930697968463217,
+    "trainSpan": {
+      "start": "1970-01-02",
+      "end": "2025-09-15"
+    },
+    "updatedAt": "2025-12-16T12:16:32.431Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.5930697968463217,
+        "returnPct": -0.5328042977316767,
+        "maxDrawdown": 0.8983837999589429
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.757509452460697,
+        "returnPct": -0.705861355650973,
+        "maxDrawdown": 0.9318185447825764
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.8297270760116637,
+        "returnPct": -0.7792702678942095,
+        "maxDrawdown": 0.9391886686885159
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9082294944514158,
+        "returnPct": -0.8716492040775146,
+        "maxDrawdown": 0.9597235163608112
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.9302331877091561,
+        "returnPct": -0.899072187804025,
+        "maxDrawdown": 0.9665019477730418
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.9348425724404292,
+        "returnPct": -0.8879499385425765,
+        "maxDrawdown": 0.9498390046834962
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.8920967056023016,
+        "returnPct": -0.841225372633571,
+        "maxDrawdown": 0.9429755399282809
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9446889395183086,
+        "returnPct": -0.9046029193440177,
+        "maxDrawdown": 0.9575669635819697
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.9593348601073995,
+        "returnPct": -0.9276474975497531,
+        "maxDrawdown": 0.966969445315373
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9651083501100818,
+        "returnPct": -0.9401961615772932,
+        "maxDrawdown": 0.9741871588511829
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9862982621222811,
+        "returnPct": -0.9667768484419021,
+        "maxDrawdown": 0.9802073932094603
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "CMI|2025-09-16|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.6,
+    "calmarScore": 3.852740636142745,
+    "trainSpan": {
+      "start": "1973-02-21",
+      "end": "2025-09-15"
+    },
+    "updatedAt": "2025-12-16T12:17:02.984Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": 2.161668474878962,
+        "returnPct": 1.8382820716278667,
+        "maxDrawdown": 0.8503996301888047
+      },
+      {
+        "lambda": 0.55,
+        "calmar": 2.013470831273638,
+        "returnPct": 1.6635688833459175,
+        "maxDrawdown": 0.8262195098667574
+      },
+      {
+        "lambda": 0.6,
+        "calmar": 3.852740636142745,
+        "returnPct": 3.0714565271293752,
+        "maxDrawdown": 0.7972134169416685
+      },
+      {
+        "lambda": 0.65,
+        "calmar": 3.767366960585732,
+        "returnPct": 3.066421891152661,
+        "maxDrawdown": 0.8139429801327102
+      },
+      {
+        "lambda": 0.7,
+        "calmar": 2.1117057425208396,
+        "returnPct": 1.8211593249716795,
+        "maxDrawdown": 0.8624115037910909
+      },
+      {
+        "lambda": 0.75,
+        "calmar": 2.059613305074084,
+        "returnPct": 1.7943708827287432,
+        "maxDrawdown": 0.8712173679923862
+      },
+      {
+        "lambda": 0.8,
+        "calmar": 2.1768200413464442,
+        "returnPct": 1.888921350795036,
+        "maxDrawdown": 0.8677434583093363
+      },
+      {
+        "lambda": 0.85,
+        "calmar": 1.3396208315886406,
+        "returnPct": 1.0840837461552488,
+        "maxDrawdown": 0.8092467066741912
+      },
+      {
+        "lambda": 0.9,
+        "calmar": 0.14584452257578964,
+        "returnPct": 0.12337322777529547,
+        "maxDrawdown": 0.845922943120358
+      },
+      {
+        "lambda": 0.95,
+        "calmar": 0.12422399502951399,
+        "returnPct": 0.10425828414295535,
+        "maxDrawdown": 0.8392765352473566
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.20457558898825043,
+        "returnPct": -0.15840037036470256,
+        "maxDrawdown": 0.7742877395494147
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  },
+  "ASML|2025-01-02|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z": {
+    "lambdaStar": 0.75,
+    "calmarScore": -0.9850024711978923,
+    "trainSpan": {
+      "start": "1995-03-15",
+      "end": "2024-12-31"
+    },
+    "updatedAt": "2025-12-16T13:05:28.742Z",
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.9991079842938445,
+        "returnPct": -0.9914989121383584,
+        "maxDrawdown": 0.9923841343727584
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.9992492497753833,
+        "returnPct": -0.9928365605809926,
+        "maxDrawdown": 0.9935824928606829
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.9993647491906661,
+        "returnPct": -0.9925136027414826,
+        "maxDrawdown": 0.9931444985879961
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.9984660027821197,
+        "returnPct": -0.990908079054686,
+        "maxDrawdown": 0.9924304646263625
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.9980515994726836,
+        "returnPct": -0.9882806951208577,
+        "maxDrawdown": 0.9902100208476312
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.9850024711978923,
+        "returnPct": -0.9634038371583288,
+        "maxDrawdown": 0.9780725077640702
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.9886343972587537,
+        "returnPct": -0.9712730992379993,
+        "maxDrawdown": 0.9824391119013327
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.9914079835465464,
+        "returnPct": -0.9686370202121999,
+        "maxDrawdown": 0.977031692590483
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.9981502083043919,
+        "returnPct": -0.97663768436477,
+        "maxDrawdown": 0.9784476086257936
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9903810018305929,
+        "returnPct": -0.9745013787255705,
+        "maxDrawdown": 0.9839661472951613
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9945028031661627,
+        "returnPct": -0.9913224660788599,
+        "maxDrawdown": 0.9968020833353333
+      }
+    ],
+    "cacheHit": false,
+    "objective": "calmar"
+  }
+}

@@ -25,6 +25,7 @@ import {
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
 import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
 import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
+import { applyActivityMaskToEquitySeries, computeTradeActivityWindow } from "@/lib/backtest/equityActivity";
 import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
 import type { MomentumScorePoint } from "@/lib/indicators/momentum";
 import type { AdxPoint } from "@/lib/indicators/adx";
@@ -435,6 +436,7 @@ interface PriceChartProps {
   onLoadEwmaBiasedMax?: () => void;
   isLoadingEwmaBiased?: boolean;
   isLoadingEwmaBiasedMax?: boolean;
+  onSelectBiasedMaxObjective?: (obj: "calmar") => void;
   ewmaReactionMapDropdown?: EwmaReactionMapDropdownProps;  // Dropdown controls for (⋯) button
   horizonCoverage?: HorizonCoverageProps;
   tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
@@ -552,6 +554,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onLoadEwmaBiasedMax,
   isLoadingEwmaBiased,
   isLoadingEwmaBiasedMax,
+  onSelectBiasedMaxObjective,
   ewmaReactionMapDropdown,
   horizonCoverage,
   t212InitialEquity,
@@ -669,9 +672,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Model Settings dropdown state (⋯ button next to Model)
   const [showModelSettingsDropdown, setShowModelSettingsDropdown] = useState(false);
   const modelSettingsDropdownRef = useRef<HTMLDivElement>(null);
-  
+
   // Simulation Settings dropdown state
   const [showSimulationSettingsDropdown, setShowSimulationSettingsDropdown] = useState(false);
+  const [showBiasedMaxObjectiveMenu, setShowBiasedMaxObjectiveMenu] = useState(false);
   const simulationSettingsDropdownRef = useRef<HTMLDivElement>(null);
   const simRangeDropdownRef = useRef<HTMLDivElement>(null);
   const simRangeButtonRef = useRef<HTMLButtonElement>(null);
@@ -716,6 +720,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   useEffect(() => {
     setConfirmApplyOptimized(false);
   }, [t212ZOptimized, t212ZMode]);
+
+  useEffect(() => {
+    if (simulationMode.baseMode !== "max") {
+      setShowBiasedMaxObjectiveMenu(false);
+    }
+  }, [simulationMode.baseMode]);
 
   useEffect(() => {
     if (!confirmApplyOptimized) return;
@@ -2910,38 +2920,63 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Dedicated Simulation equity series, sourced directly from t212AccountHistory (decoupled from EWMA/price data)
   const simulationEquityData = useMemo(() => {
     const history = windowedAccountHistory.history;
+    const { activityStartDate, activityEndDate } = computeTradeActivityWindow(
+      history,
+      windowedAccountHistory.prevSideBefore ?? null
+    );
     if (syncedDates.length === 0) return [];
 
-    const equityMap = new Map<string, number>();
+    const snapshotMap = new Map<string, Trading212AccountSnapshot>();
     if (history && history.length > 0) {
       history.forEach((pt) => {
         const date = pt.date ? normalizeDateString(pt.date) : null;
-        if (date && typeof pt.equity === "number" && Number.isFinite(pt.equity)) {
-          equityMap.set(date, pt.equity);
+        if (date) {
+          snapshotMap.set(date, pt);
         }
       });
     }
 
     let lastEquity: number | null = null;
+    let lastMarginUsed: number | null = null;
+    let lastFreeMargin: number | null = null;
 
     const aligned = syncedDates.map((date, idx) => {
-      const direct = equityMap.get(date) ?? null;
-      const equity = direct != null ? direct : lastEquity;
-      const prevEquity =
-        idx > 0 ? equityMap.get(syncedDates[idx - 1]) ?? lastEquity : equity;
+      const snap = snapshotMap.get(date);
+      const equity = snap?.equity != null ? snap.equity : lastEquity;
+      const marginUsed =
+        snap?.marginUsed != null
+          ? snap.marginUsed
+          : lastMarginUsed != null
+            ? lastMarginUsed
+            : 0;
+      const freeMargin =
+        snap?.freeMargin != null
+          ? snap.freeMargin
+          : equity != null
+            ? equity - marginUsed
+            : lastFreeMargin;
+      const prevEquity = idx > 0 ? lastEquity : equity;
       const equityDelta =
         equity != null && prevEquity != null ? equity - prevEquity : null;
       if (equity != null) {
         lastEquity = equity;
       }
+      if (marginUsed != null) {
+        lastMarginUsed = marginUsed;
+      }
+      if (freeMargin != null) {
+        lastFreeMargin = freeMargin;
+      }
       return {
         date,
         equity,
         equityDelta,
+        marginUsed,
+        freeMargin,
       };
     });
 
-    return aligned;
+    return applyActivityMaskToEquitySeries(aligned, activityStartDate, activityEndDate);
   }, [syncedDates, windowedAccountHistory]);
   const simViewLength = simulationEquityData.length;
   type SimTickStyle = "md" | "mmyy" | "yyyy";
@@ -5975,24 +6010,59 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   >
                     Biased
                   </button>
-                  <button
-                    type="button"
-                    className={`
-                      px-3 py-1 text-xs rounded-full transition-colors font-medium
-                      ${!hasMaxRun
-                        ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
-                        : simulationMode.baseMode === 'max'
-                          ? 'bg-sky-500 text-white'
-                          : isDarkMode 
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }
-                    `}
-                    disabled={!hasMaxRun}
-                    onClick={() => hasMaxRun && onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend })}
-                  >
-                    Biased (Max)
-                  </button>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className={`
+                        px-3 py-1 text-xs rounded-full transition-colors font-medium
+                        ${!hasMaxRun
+                          ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
+                          : simulationMode.baseMode === 'max'
+                            ? 'bg-sky-500 text-white'
+                            : isDarkMode 
+                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }
+                      `}
+                      disabled={!hasMaxRun}
+                      onClick={() => {
+                        if (!hasMaxRun) return;
+                        setShowBiasedMaxObjectiveMenu((prev) => !prev);
+                      }}
+                    >
+                      Biased (Max) ▾
+                    </button>
+                    {showBiasedMaxObjectiveMenu && hasMaxRun && (
+                      <div
+                        className={`
+                          absolute top-8 left-0 z-50 min-w-[180px] rounded-lg border shadow-xl p-3
+                          ${isDarkMode ? 'bg-slate-900 text-slate-100 border-slate-700' : 'bg-white text-gray-800 border-gray-200'}
+                        `}
+                      >
+                        <div className="text-[11px] font-semibold mb-2">Objective</div>
+                        <button
+                          className={`w-full text-left rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                            isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-gray-100'
+                          }`}
+                          onClick={() => {
+                            onSelectBiasedMaxObjective?.("calmar");
+                            onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend });
+                            setShowBiasedMaxObjectiveMenu(false);
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span>Calmar Ratio</span>
+                            <span
+                              className="text-[10px] text-slate-400"
+                              title={`Calmar = Return / MaxDrawdown\nReturn = finalEquity/initialEquity - 1\nIf MaxDrawdown = 0, score = Return`}
+                            >
+                              ⓘ
+                            </span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() =>
@@ -6299,42 +6369,39 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                 )}
                               </div>
                               {t212ZMode === 'optimize' && t212ZOptimized && (
-                                <div
-                                  className={`mt-3 rounded-lg border p-3 space-y-2 ${
-                                    isDarkMode
-                                      ? 'border-slate-700/70 bg-slate-900/60'
-                                      : 'border-gray-200 bg-white/70'
-                                  }`}
-                                >
-                                  <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="text-[11px] font-semibold">WFO Optimize</div>
-                                    <div className="flex flex-wrap items-center gap-2">
+                                <div className="mt-2 space-y-2">
+                                  {/* Header */}
+                                  <div className={`space-y-1 pb-1.5 pt-2 border-t ${isDarkMode ? 'border-slate-700/30' : 'border-gray-300/30'}`}>
+                                    <div className={`text-[11px] font-semibold ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>
+                                      WFO Optimize
+                                    </div>
+                                    <div className="flex flex-col gap-0.5">
                                       <span
                                         className={`
-                                          px-2 py-0.5 rounded-full text-[10px] font-semibold
+                                          px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
                                           ${optimizedOrderingValid
                                             ? isDarkMode
-                                              ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
-                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                              ? 'bg-emerald-500/20 text-emerald-300'
+                                              : 'bg-emerald-50 text-emerald-700'
                                             : isDarkMode
-                                              ? 'bg-rose-500/20 text-rose-200 border border-rose-400/40'
-                                              : 'bg-rose-50 text-rose-700 border border-rose-200'
+                                              ? 'bg-rose-500/20 text-rose-300'
+                                              : 'bg-rose-50 text-rose-700'
                                           }
                                         `}
                                         title="Checks exit < enter < flip on long and short sides."
                                       >
-                                        {optimizedOrderingValid ? "Ordering OK" : "Ordering invalid"}
+                                        {optimizedOrderingValid ? "Ordering OK" : "Invalid"}
                                       </span>
                                       <span
                                         className={`
-                                          px-2 py-0.5 rounded-full text-[10px] font-semibold
+                                          px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
                                           ${t212ZOptimized.applyRecommended
                                             ? isDarkMode
-                                              ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-500/40'
-                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                              ? 'bg-emerald-500/20 text-emerald-300'
+                                              : 'bg-emerald-50 text-emerald-700'
                                             : isDarkMode
-                                              ? 'bg-amber-500/20 text-amber-200 border border-amber-500/40'
-                                              : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                              ? 'bg-amber-500/20 text-amber-300'
+                                              : 'bg-amber-50 text-amber-700'
                                           }
                                         `}
                                       >
@@ -6342,77 +6409,91 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                       </span>
                                     </div>
                                   </div>
-                                  <div className={isDarkMode ? "text-[10px] text-slate-500" : "text-[10px] text-gray-600"}>
-                                    Thresholds shown above.
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Baseline score</span>
-                                      <span className="font-mono" title={optimizedBaselineScore?.title}>
+
+                                  {/* Performance Scores */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-0.5 text-right">
+                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                                        Baseline score
+                                      </div>
+                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`} title={optimizedBaselineScore?.title}>
                                         {optimizedBaselineScore?.text ?? "—"}
-                                      </span>
+                                      </div>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Best score</span>
-                                      <span className="font-mono" title={optimizedBestScore?.title}>
+                                    <div className="space-y-0.5 text-right">
+                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                                        Best score
+                                      </div>
+                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`} title={optimizedBestScore?.title}>
                                         {optimizedBestScore?.text ?? "—"}
-                                      </span>
+                                      </div>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2 sm:col-span-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Decision</span>
-                                      <span className="font-mono text-right">
-                                        {t212ZOptimized.applyRecommended ? "applyRecommended=true" : "applyRecommended=false"} · {t212ZOptimized.reason ?? "—"}
-                                      </span>
+                                  </div>
+
+                                  {/* Quantiles */}
+                                  <div className="grid grid-cols-3 gap-2 pt-1.5 border-t border-slate-700/30">
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>qE</div>
+                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.quantiles.enter.toFixed(2)}</div>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Quantiles</span>
-                                      <span className="font-mono text-right">
-                                        {`qE ${t212ZOptimized.quantiles.enter.toFixed(2)} / qX ${t212ZOptimized.quantiles.exit.toFixed(2)} / qF ${t212ZOptimized.quantiles.flip.toFixed(2)}`}
-                                      </span>
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>qX</div>
+                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.quantiles.exit.toFixed(2)}</div>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Folds</span>
-                                      <span className="font-mono text-right">{t212ZOptimized.folds}</span>
+                                    <div className="flex flex-col items-center gap-0.5">
+                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>qF</div>
+                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.quantiles.flip.toFixed(2)}</div>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Avg trades</span>
-                                      <span className="font-mono text-right">{t212ZOptimized.avgTradeCount.toFixed(1)}</span>
+                                  </div>
+
+                                  {/* Statistics */}
+                                  <div className="space-y-0.5">
+                                    <div className="flex justify-between items-center">
+                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Folds</span>
+                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.folds}</span>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Avg short opp</span>
-                                      <span className="font-mono text-right">{t212ZOptimized.avgShortOppCount.toFixed(1)}</span>
+                                    <div className="flex justify-between items-center">
+                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Avg trades</span>
+                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.avgTradeCount.toFixed(1)}</span>
                                     </div>
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className={isDarkMode ? "text-slate-400" : "text-gray-600"}>Total short entries</span>
-                                      <span className="font-mono text-right">
+                                    <div className="flex justify-between items-center">
+                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Avg short opp</span>
+                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.avgShortOppCount.toFixed(1)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Total short entries</span>
+                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>
                                         {t212ZOptimized.totalShortEntries != null ? t212ZOptimized.totalShortEntries : "—"}
                                       </span>
                                     </div>
                                   </div>
-                                  {!t212ZOptimized.applyRecommended && (
-                                    <div className={isDarkMode ? "text-amber-200 text-[11px]" : "text-amber-700 text-[11px]"}>
-                                      Applying anyway overrides Auto thresholds for this ticker.
-                                    </div>
-                                  )}
+
+                                  {/* Warnings */}
                                   {confirmApplyOptimized && !t212ZOptimized.applyRecommended && (
-                                    <div className={isDarkMode ? "text-amber-200 text-[11px]" : "text-amber-700 text-[11px]"}>
+                                    <div className={`text-[11px] pt-1 ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
                                       Click again to confirm apply.
                                     </div>
                                   )}
-                                  <div className="flex justify-end">
+
+                                  {/* Action Button */}
+                                  <div className="pt-1.5 border-t border-slate-700/30">
                                     <button
                                       type="button"
                                       disabled={optimizedApplyDisabled}
                                       onClick={handleApplyOptimizedClick}
                                       className={`
-                                        px-3 py-1 rounded-full text-[11px] font-semibold transition-colors
+                                        w-full px-4 py-2 rounded-lg text-xs font-medium transition-all
                                         ${optimizedApplyDisabled
                                           ? isDarkMode
-                                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                                            ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
                                             : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                           : t212ZOptimized.applyRecommended
-                                            ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                            : 'bg-amber-500 text-white hover:bg-amber-600'
+                                            ? isDarkMode
+                                              ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40'
+                                              : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                            : isDarkMode
+                                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40'
+                                              : 'bg-amber-500 text-white hover:bg-amber-600'
                                         }
                                       `}
                                       title={!optimizedOrderingValid ? "Ordering must satisfy exit < enter < flip" : undefined}
@@ -6821,12 +6902,29 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         content={() => {
                           if (!hoveredDate) return null;
                           const point = simulationEquityData.find((p) => p.date === hoveredDate);
-                          if (!point || point.equity == null) return null;
+                          if (!point) return null;
+                          if (point.equity == null) {
+                            return (
+                              <div className={`${TOOLTIP_CLASS} text-[11px]`}>
+                                No active position in this range.
+                              </div>
+                            );
+                          }
 
                           const deltaStr =
                             point.equityDelta != null
                               ? `${point.equityDelta >= 0 ? "+" : ""}${point.equityDelta.toFixed(2)}`
                               : "—";
+                          const usedMargin =
+                            point.marginUsed != null && Number.isFinite(point.marginUsed)
+                              ? point.marginUsed
+                              : null;
+                          const freeMargin =
+                            point.freeMargin != null && Number.isFinite(point.freeMargin)
+                              ? point.freeMargin
+                              : point.equity != null && usedMargin != null
+                                ? point.equity - usedMargin
+                                : null;
 
                           return (
                             <div className={`${TOOLTIP_CLASS} space-y-1.5`}>
@@ -6837,6 +6935,16 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                 <div className={`${TOOLTIP_MUTED_CLASS}`}>
                                   Equity <span className="font-mono text-emerald-400 font-semibold">${point.equity.toFixed(2)}</span>
                                 </div>
+                                {freeMargin != null && (
+                                  <div className={`${TOOLTIP_MUTED_CLASS}`}>
+                                    Free margin <span className="font-mono">${freeMargin.toFixed(2)}</span>
+                                  </div>
+                                )}
+                                {usedMargin != null && (
+                                  <div className={`${TOOLTIP_MUTED_CLASS}`}>
+                                    Used margin <span className="font-mono">${usedMargin.toFixed(2)}</span>
+                                  </div>
+                                )}
                                 <div className={`${TOOLTIP_MUTED_CLASS}`}>
                                   Δ Day{" "}
                                   <span
@@ -6909,7 +7017,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         dot={simShowDots ? { r: simViewLength <= 10 ? 3 : 2 } : false}
                         activeDot={simShowDots ? { r: 4, strokeWidth: 2, fill: isDarkMode ? "#38bdf8" : "#0ea5e9", stroke: isDarkMode ? "#0f172a" : "#f8fafc" } : false}
                         isAnimationActive={false}
-                        connectNulls
+                        connectNulls={false}
                       />
                     </ComposedChart>
                   </ResponsiveContainer>

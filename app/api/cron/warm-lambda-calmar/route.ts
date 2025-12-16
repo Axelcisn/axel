@@ -1,0 +1,89 @@
+import { NextRequest, NextResponse } from "next/server";
+import { CRON_LAMBDA_CALMAR_UNIVERSE } from "@/lib/config/cronUniverse";
+import { ensureCanonicalOrHistory } from "@/lib/storage/canonical";
+import { optimizeEwmaLambdaCalmar } from "@/lib/volatility/ewmaLambdaCalmar";
+import {
+  buildLambdaCalmarCacheKey,
+  setLambdaCalmarCache,
+} from "@/lib/cache/lambdaCalmarCache";
+
+// Schedule weekly Monday 16:10 ET (documented only; wire in deployment scheduler separately).
+
+export async function GET(req: NextRequest) {
+  try {
+    const params = req.nextUrl.searchParams;
+    const batch = Number(params.get("batch") ?? "0");
+    const batchSize = Number(params.get("batchSize") ?? "10");
+    const horizon = Number(params.get("h") ?? "1");
+    const coverage = Number(params.get("coverage") ?? "0.95");
+    const initialEquity = Number(params.get("equity") ?? "1000");
+    const leverage = Number(params.get("leverage") ?? "5");
+    const posFrac = Number(params.get("posFrac") ?? "0.25");
+    const costBps = Number(params.get("costBps") ?? "0");
+    const signalRule = "z";
+    const objective = "calmar";
+
+    const start = batch * batchSize;
+    const end = start + batchSize;
+    const symbols = CRON_LAMBDA_CALMAR_UNIVERSE.slice(start, end);
+
+    const offsets = [21, 63, 126, 252];
+
+    const results: Array<{ symbol: string; rangeStart: string; cacheKey: string }> = [];
+
+    for (const symbol of symbols) {
+      try {
+        const { rows } = await ensureCanonicalOrHistory(symbol, { interval: "1d", minRows: 260 });
+        const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+        const lastIdx = sorted.length - 1;
+        const rangeStarts = new Set<string>();
+        for (const off of offsets) {
+          const idx = Math.max(0, lastIdx - off);
+          const date = sorted[idx]?.date;
+          if (date) rangeStarts.add(date);
+        }
+
+        for (const rangeStart of Array.from(rangeStarts)) {
+          const res = await optimizeEwmaLambdaCalmar({
+            symbol,
+            rangeStart,
+            horizon,
+            coverage,
+            initialEquity,
+            leverage,
+            positionFraction: posFrac,
+            costBps,
+            signalRule,
+          });
+          const cacheKey = buildLambdaCalmarCacheKey({
+            symbol,
+            rangeStart,
+            h: horizon,
+            coverage,
+            objective,
+            costBps,
+            leverage,
+            posFrac,
+            signalRule,
+          });
+          await setLambdaCalmarCache(cacheKey, { ...res, cacheHit: false, objective });
+          results.push({ symbol, rangeStart, cacheKey });
+        }
+      } catch (err) {
+        console.warn("[warm-lambda-calmar] failed for", symbol, err);
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      batch,
+      batchSize,
+      symbols,
+      warmed: results.length,
+    });
+  } catch (err) {
+    console.error("[warm-lambda-calmar] error", err);
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json({ success: false, error: msg }, { status: 500 });
+  }
+}

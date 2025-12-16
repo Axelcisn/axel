@@ -49,9 +49,10 @@ export interface Trading212CfdPosition {
 export interface Trading212AccountSnapshot {
   date: string;
   price: number;
-  equity: number;            // Total Funds = freeCash + unrealised P&L
+  equity: number;            // True equity = freeCash + marginUsed + unrealised P&L
   freeCash: number;
   marginUsed: number;
+  freeMargin: number;        // Equity - marginUsed (i.e., freeCash + unrealised P&L)
   marginStatus: number;      // 0–100%, per Trading212 formula
   unrealisedPnl: number;
   realisedPnl: number;
@@ -196,8 +197,11 @@ export function simulateTrading212Cfd(
         position.side === "long" ? diff * position.quantity : -diff * position.quantity;
     }
 
-    // 2) Update equity
-    equity = freeCash + unrealisedPnl;
+    // Margin used by the current position (if any)
+    marginUsed = position ? position.margin : 0;
+
+    // 2) Update equity (true equity includes locked margin)
+    equity = freeCash + marginUsed + unrealisedPnl;
 
     // 3) Recompute margin status and check stop-out / margin call
     let marginStatus = computeMarginStatus(equity, marginUsed);
@@ -265,10 +269,12 @@ export function simulateTrading212Cfd(
       freeCash += swapFee;
       realisedPnl += swapFee;
       swapFeesAccrued += swapFee;
-      equity += swapFee;
 
       // Accumulate per-position swap
       position.swapFees += swapFee;
+
+      // Recompute equity after applying swap to free cash
+      equity = freeCash + marginUsed + unrealisedPnl;
     }
 
     // 5) Decide action based on signal and current position
@@ -384,8 +390,8 @@ export function simulateTrading212Cfd(
       const diff = price - position.entryPrice;
       unrealisedPnl =
         position.side === "long" ? diff * position.quantity : -diff * position.quantity;
-      equity = freeCash + unrealisedPnl;
       marginUsed = position.margin;
+      equity = freeCash + marginUsed + unrealisedPnl;
     } else {
       unrealisedPnl = 0;
       marginUsed = 0;
@@ -393,6 +399,7 @@ export function simulateTrading212Cfd(
     }
 
     marginStatus = computeMarginStatus(equity, marginUsed);
+    const freeMargin = equity - marginUsed;
 
     history.push({
       date: bar.date,
@@ -400,6 +407,7 @@ export function simulateTrading212Cfd(
       equity,
       freeCash,
       marginUsed,
+      freeMargin,
       marginStatus,
       unrealisedPnl,
       realisedPnl,
