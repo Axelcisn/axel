@@ -1,0 +1,18 @@
+# Exclude large data files from Vercel deployment
+data/canonical/*.json
+data/audit/*.json
+data/uploads/*.xlsx
+
+# Keep forecast data (smaller files)
+!data/forecasts/**/*.json
+
+# Exclude cache files
+.cache/
+
+# Exclude test and script files
+scripts/smoke-*.ts
+tests/
+
+# Exclude development files
+*.md
+!README.md
