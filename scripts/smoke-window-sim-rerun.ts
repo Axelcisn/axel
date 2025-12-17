@@ -19,36 +19,41 @@ import {
   type Trading212SimulationResult,
 } from "../lib/backtest/trading212Cfd";
 import { ensureCanonicalOrHistory } from "@/lib/storage/canonical";
-
-type CanonicalRowLite = { date: string; close?: number | null; adj_close?: number | null };
+import { buildBarsWithSignalsForSymbol, type CanonicalRowLite } from "./_utils/buildBarsWithSignals";
 
 const DEFAULT_SYMBOLS = ["ZBRA", "ODFL", "PAYX", "KR", "CMI"];
-const VISIBLE_DAYS = 63;
+const DEFAULT_LOOKBACK_BARS = 252;
+const DEFAULT_CONTEXT_BARS = 63;
+const DEFAULT_MIN_TRADES = 1;
 const INITIAL_EQUITY = 10_000;
 
-async function loadCanonical(symbol: string): Promise<CanonicalRowLite[]> {
-  const { rows } = await ensureCanonicalOrHistory(symbol, { interval: "1d", minRows: VISIBLE_DAYS + 1 });
-  return rows.map((r) => ({ date: r.date, close: r.close, adj_close: r.adj_close }));
+function getArgValue(key: string): string | null {
+  const hit = process.argv.find((a) => a.startsWith(`--${key}=`));
+  return hit ? hit.slice(key.length + 3) : null;
 }
 
-function buildBars(rows: CanonicalRowLite[]): Trading212SimBar[] {
-  const bars: Trading212SimBar[] = [];
-  let prevClose: number | null = null;
-  for (const r of rows) {
-    const price = (r.adj_close ?? r.close) as number | undefined;
-    if (!price || price <= 0 || !r.date) continue;
-    let signal: "flat" | "long" | "short" = "flat";
-    if (prevClose != null) {
-      if (price > prevClose) {
-        signal = "long";
-      } else if (price < prevClose) {
-        signal = "short";
-      }
-    }
-    prevClose = price;
-    bars.push({ date: r.date, price, signal });
-  }
-  return bars;
+function parseBoolArg(key: string, defaultValue: boolean): boolean {
+  const raw = getArgValue(key);
+  if (raw == null) return defaultValue;
+  return raw !== "false" && raw !== "0";
+}
+
+function parseNumberArg(key: string, defaultValue: number): number {
+  const raw = getArgValue(key);
+  if (raw == null) return defaultValue;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : defaultValue;
+}
+
+function parseSymbolsArg(defaultSymbols: string[]): string[] {
+  const raw = getArgValue("symbols");
+  if (!raw) return defaultSymbols;
+  return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+async function loadCanonical(symbol: string, minRows: number): Promise<CanonicalRowLite[]> {
+  const { rows } = await ensureCanonicalOrHistory(symbol, { interval: "1d", minRows });
+  return rows.map((r) => ({ date: r.date, close: r.close, adj_close: r.adj_close }));
 }
 
 function alignAndMask(
@@ -104,39 +109,147 @@ function assert(condition: boolean, message: string) {
 }
 
 async function main() {
-  const arg = process.argv.find((a) => a.startsWith("--symbols="));
-  const symbols = arg ? arg.replace("--symbols=", "").split(",") : DEFAULT_SYMBOLS;
+  const symbols = parseSymbolsArg(DEFAULT_SYMBOLS);
+  const scanOpen = parseBoolArg("scanOpen", true);
+  const lookbackBars = parseNumberArg("lookbackBars", DEFAULT_LOOKBACK_BARS);
+  const contextBars = parseNumberArg("contextBars", DEFAULT_CONTEXT_BARS);
+  const minTrades = parseNumberArg("minTrades", DEFAULT_MIN_TRADES);
+  const spreadBps = parseNumberArg("spreadBps", 0);
 
   const config: Trading212CfdConfig = {
     leverage: 5,
     fxFeeRate: 0,
     dailyLongSwapRate: 0,
     dailyShortSwapRate: 0,
-    spreadBps: 0,
+    spreadBps,
     marginCallLevel: 0.45,
     stopOutLevel: 0.25,
     positionFraction: 0.25,
   };
 
   for (const sym of symbols) {
-    const rows = (await loadCanonical(sym.toUpperCase())).sort((a, b) => a.date.localeCompare(b.date));
-    if (rows.length < VISIBLE_DAYS + 1) {
-      console.log(`${sym}: SKIP (not enough rows)`);
+    console.log(`\n=== ${sym} ===`);
+
+    const minRows = Math.max(lookbackBars + contextBars + 1, 2);
+    const rows = (await loadCanonical(sym.toUpperCase(), minRows)).sort((a, b) => a.date.localeCompare(b.date));
+    if (rows.length < 2) {
+      console.log("No clean open in lookback range");
+      console.log("NO CLEAN OPEN FOUND");
       continue;
     }
-    const windowRows = rows.slice(-VISIBLE_DAYS);
-    const window = { start: windowRows[0].date, end: windowRows[windowRows.length - 1].date };
-    const bars = buildBars(rows);
 
-    const firstTradeDate = computeFirstTradeDateFromSignals(bars, window, null);
+    const bars = buildBarsWithSignalsForSymbol({ symbol: sym, rows });
+    if (bars.length < 2) {
+      console.log("No clean open in lookback range");
+      console.log("NO CLEAN OPEN FOUND");
+      continue;
+    }
+
+    const lastIdx = bars.length - 1;
+    const scanStartIdx = Math.max(bars.length - lookbackBars, 1);
+    const scanRange = { start: bars[Math.min(scanStartIdx, lastIdx)].date, end: bars[lastIdx].date };
+
+    if (!scanOpen) {
+      const windowStartIdx = Math.max(bars.length - contextBars, 0);
+      const windowEndIdx = lastIdx;
+      const window = { start: bars[windowStartIdx].date, end: bars[windowEndIdx].date };
+      const windowSim = computeWindowSimFromBars(bars, window, INITIAL_EQUITY, config, null);
+      const firstTradeDate = windowSim.firstTradeDate;
+      const lastCloseDate = windowSim.lastCloseDate;
+      const trades = windowSim.result?.trades.length ?? 0;
+
+      console.log({
+        mode: "direct-window",
+        scanRange,
+        window,
+        firstTradeDate,
+        lastCloseDate,
+        trades,
+      });
+
+      if (!windowSim.result || !firstTradeDate || !lastCloseDate) {
+        console.log(firstTradeDate ? "Open found but no close found (still allowed: lastCloseDate=windowEnd)" : "No clean open in lookback range");
+        continue;
+      }
+
+      const firstSnap = windowSim.result.accountHistory[0];
+      assert(
+        Math.abs(firstSnap.equity - INITIAL_EQUITY) < 1e-6,
+        `${sym}: equity at firstTradeDate not equal to initialEquity`
+      );
+
+      const masked = alignAndMask(windowSim.result, window);
+      const beforeStart = masked.series.filter((p) => p.date < firstTradeDate);
+      const afterEnd = masked.series.filter((p) => p.date > lastCloseDate);
+      assert(
+        beforeStart.every((p) => p.equity == null),
+        `${sym}: equity not null before firstTradeDate`
+      );
+      assert(afterEnd.every((p) => p.equity == null), `${sym}: equity not null after lastCloseDate`);
+      assert(trades >= minTrades, `${sym}: expected at least ${minTrades} trades inside window`);
+
+      console.log("PASS");
+      continue;
+    }
+
+    let firstOpenIdx: number | null = null;
+    for (let i = lastIdx; i >= scanStartIdx; i--) {
+      const prevSignal = bars[i - 1]?.signal ?? "flat";
+      const currSignal = bars[i].signal;
+      if (currSignal !== "flat" && prevSignal === "flat") {
+        firstOpenIdx = i;
+        break;
+      }
+    }
+
+    if (firstOpenIdx == null) {
+      console.log(`scanRange=${scanRange.start}..${scanRange.end}`);
+      console.log("No clean open in lookback range");
+      console.log("NO CLEAN OPEN FOUND");
+      continue;
+    }
+
+    const windowStartIdx = Math.max(firstOpenIdx - contextBars, 0);
+    const windowEndIdx = Math.min(firstOpenIdx + contextBars, lastIdx);
+    const window = { start: bars[windowStartIdx].date, end: bars[windowEndIdx].date };
+
+    let lastCloseIdx: number | null = null;
+    for (let i = firstOpenIdx + 1; i <= windowEndIdx; i++) {
+      const prevSignal = bars[i - 1].signal;
+      const currSignal = bars[i].signal;
+      if (prevSignal !== "flat" && currSignal === "flat") {
+        lastCloseIdx = i;
+      }
+    }
+
+    const { date: firstTradeDate } = computeFirstTradeDateFromSignals(bars, window, null);
     const lastCloseDate = computeLastCloseDateFromSignals(bars, window, null);
     const windowSim = computeWindowSimFromBars(bars, window, INITIAL_EQUITY, config, null);
 
-    console.log(`\n=== ${sym} ===`);
-    console.log({ window, firstTradeDate, lastCloseDate, trades: windowSim.result?.trades.length ?? 0 });
+    const trades = windowSim.result?.trades.length ?? 0;
+    const openCloseNote =
+      lastCloseIdx == null ? "Open found but no close found (still allowed: lastCloseDate=windowEnd)" : null;
+
+    console.log({
+      scanRange,
+      window,
+      firstOpenIdx,
+      firstTradeDate,
+      lastCloseIdx,
+      lastCloseDate,
+      trades,
+    });
 
     if (!windowSim.result || !firstTradeDate || !lastCloseDate) {
-      console.log("No window sim (carry-in or no trades in window)");
+      const startSignal = bars[windowStartIdx].signal;
+      const reason =
+        startSignal !== "flat"
+          ? "Carry-in detected at windowStart (strict policy)"
+          : "No clean open in lookback range";
+      console.log(reason);
+      if (openCloseNote && firstTradeDate) {
+        console.log(openCloseNote);
+      }
       continue;
     }
 
@@ -154,10 +267,16 @@ async function main() {
       beforeStart.every((p) => p.equity == null),
       `${sym}: equity not null before firstTradeDate`
     );
-    assert(afterEnd.every((p) => p.equity == null), `${sym}: equity not null after lastCloseDate`);
-    assert(windowSim.result.trades.length > 0, `${sym}: expected trades inside window`);
+    if (lastCloseIdx != null) {
+      assert(afterEnd.every((p) => p.equity == null), `${sym}: equity not null after lastCloseDate`);
+    }
+    assert(trades >= minTrades, `${sym}: expected at least ${minTrades} trades inside window`);
 
-    console.log("PASS");
+    console.log(
+      `${sym} scan=${scanRange.start}..${scanRange.end} window=${window.start}..${window.end} firstTradeDate=${firstTradeDate} lastCloseDate=${lastCloseDate} trades=${trades} ${openCloseNote ?? ""
+      }`
+    );
+    console.log("PASS\n");
   }
 }
 

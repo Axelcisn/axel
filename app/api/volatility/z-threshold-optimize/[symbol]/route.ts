@@ -40,6 +40,11 @@ export async function GET(
     const leverageRaw = Number(sp.get("leverage") ?? "5");
     const positionFractionRaw = Number(sp.get("positionFraction") ?? "0.25");
     const spreadBpsRaw = Number(sp.get("costBps") ?? "0");
+    const minFlatPctRaw = Number(sp.get("minFlatPct") ?? "2");
+    const minClosesRaw = Number(sp.get("minCloses") ?? "1");
+    const maxFlipPctRaw = sp.get("maxFlipPct");
+    const flipGammaRaw = Number(sp.get("flipGamma") ?? "0.0");
+    const tradeEtaRaw = Number(sp.get("tradeEta") ?? "0.0");
 
     const parseList = (key: string, fallback: number[]) => {
       const raw = sp.get(key);
@@ -108,6 +113,13 @@ export async function GET(
       quantilesFlip,
       tradingConfig,
       initialEquity: Number.isFinite(initialEquityRaw) && initialEquityRaw > 0 ? initialEquityRaw : 5000,
+      minFlatPct: Number.isFinite(minFlatPctRaw) ? minFlatPctRaw : 2,
+      minCloses: Number.isFinite(minClosesRaw) ? minClosesRaw : 1,
+      maxFlipPct: maxFlipPctRaw != null ? Number(maxFlipPctRaw) : null,
+      scorePenalty: {
+        flipGamma: Number.isFinite(flipGammaRaw) ? flipGammaRaw : 0,
+        tradeEta: Number.isFinite(tradeEtaRaw) ? tradeEtaRaw : 0,
+      },
     });
 
     return NextResponse.json({

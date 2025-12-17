@@ -500,12 +500,16 @@ export default function TimingPage({ params }: TimingPageProps) {
     avgWidth: number;
   };
   type BiasedMaxCalmarResult = {
-    lambdaStar: number;
+    lambdaStar: number | null;
     calmarScore: number;
     trainSpan: { start: string; end: string } | null;
     updatedAt: string | null;
     cacheHit?: boolean;
     objective?: string | null;
+    note?: string | null;
+    noTrade?: boolean;
+    rangeStartUsed?: string | null;
+    trainEndUsed?: string | null;
   };
   const [biasedMaxObjective, setBiasedMaxObjective] = useState<"calmar">("calmar");
   const [reactionOptimizationBest, setReactionOptimizationBest] = useState<EwmaOptimizationResult | null>(null);
@@ -530,6 +534,9 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const getMaxEwmaConfig = useCallback(() => {
     if (biasedMaxCalmarResult) {
+      if (biasedMaxCalmarResult.lambdaStar == null) {
+        return null;
+      }
       return {
         lambda: biasedMaxCalmarResult.lambdaStar,
         trainFraction: derivedMaxTrainFraction ?? reactionTrainFraction,
@@ -617,6 +624,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
   const [t212ThresholdFrac, setT212ThresholdFrac] = useState<number>(() => estimateDefaultThresholdPct(simCostDefaults));
   const [t212CostBps, setT212CostBps] = useState<number>(0);
+  const [ewmaShrinkK, setEwmaShrinkK] = useState<number>(0.5);
   const [t212SignalRule, setT212SignalRule] = useState<"bps" | "z">("z");
   const [t212ZMode, setT212ZMode] = useState<"auto" | "manual" | "optimize">("optimize");
   const [t212ZEnter, setT212ZEnter] = useState(0.3);
@@ -682,7 +690,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   interface SimulationStrategySummary {
     id: StrategyKey;
     label: string;
-    lambda?: number;
+    lambda?: number | null;
     trainFraction?: number;
     returnPct: number;
     maxDrawdown: number;
@@ -2146,7 +2154,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         h: String(h),
         trainFraction: reactionTrainFraction.toString(),
         minTrainObs: reactionMinTrainObs.toString(),
-        shrinkFactor: "0.5",
+        shrinkFactor: ewmaShrinkK.toString(),
       });
 
       const res = await fetch(
@@ -2220,7 +2228,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingEwmaBiased(false);
     }
-  }, [params?.ticker, h, reactionLambda, coverage, reactionTrainFraction, reactionMinTrainObs]);
+  }, [params?.ticker, h, reactionLambda, coverage, reactionTrainFraction, reactionMinTrainObs, ewmaShrinkK]);
 
   // Auto-refresh biased EWMA when horizon/coverage changes (only if it was previously loaded)
   useEffect(() => {
@@ -2239,12 +2247,18 @@ export default function TimingPage({ params }: TimingPageProps) {
       setEwmaBiasedMaxError(null);
 
       const maxCfg = getMaxEwmaConfig();
+      if (!maxCfg || maxCfg.lambda == null) {
+        setEwmaBiasedMaxSummary(null);
+        setEwmaBiasedMaxPath([]);
+        setIsLoadingEwmaBiasedMax(false);
+        return;
+      }
       const query = new URLSearchParams({
         lambda: maxCfg.lambda.toString(),
         coverage: coverage.toString(), // main coverage
         h: String(h),
         minTrainObs: reactionMinTrainObs.toString(),
-        shrinkFactor: "0.5",
+        shrinkFactor: ewmaShrinkK.toString(),
         trainFraction: (maxCfg.trainFraction ?? reactionTrainFraction).toString(),
       });
 
@@ -2314,7 +2328,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingEwmaBiasedMax(false);
     }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionTrainFraction, getMaxEwmaConfig, visibleWindow?.start, biasedMaxCalmarResult]);
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionTrainFraction, getMaxEwmaConfig, visibleWindow?.start, biasedMaxCalmarResult, ewmaShrinkK]);
 
   // Auto-load/refresh max path when optimizer results exist; clear when not available
   useEffect(() => {
@@ -2412,7 +2426,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       const query = new URLSearchParams({
         h: String(h),
         coverage: coverage.toString(),
-        shrinkFactor: "0.5",
+        shrinkFactor: ewmaShrinkK.toString(),
         minTrainObs: reactionMinTrainObs.toString(),
         zMode: t212ZMode,
         zEnter: t212ZEnter.toString(),
@@ -2468,7 +2482,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsOptimizingReaction(false);
     }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs, t212ZEnter, t212ZMode]);
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, t212ZEnter, t212ZMode, ewmaShrinkK]);
 
   const runZThresholdOptimization = useCallback(async () => {
     if (!params?.ticker) return;
@@ -2490,6 +2504,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         initialEquity: t212InitialEquity.toString(),
         leverage: t212Leverage.toString(),
         positionFraction: t212PositionFraction.toString(),
+        shrinkFactor: ewmaShrinkK.toString(),
       });
 
       const res = await fetch(
@@ -2524,7 +2539,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } catch (err: any) {
       console.error("[Z-OPTIMIZE] error", err);
       setT212ZOptimizeError(err?.message || "Failed to optimize z thresholds.");
-      setT212ZMode("auto");
+      setT212ZMode("optimize");
     } finally {
       setIsOptimizingZThresholds(false);
     }
@@ -2539,6 +2554,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     t212InitialEquity,
     t212Leverage,
     t212PositionFraction,
+    ewmaShrinkK,
   ]);
 
   const fetchBiasedMaxCalmar = useCallback(async () => {
@@ -2559,6 +2575,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         leverage: t212Leverage.toString(),
         posFrac: t212PositionFraction.toString(),
         costBps: t212CostBps.toString(),
+        shrinkFactor: ewmaShrinkK.toString(),
         signalRule: "z",
         objective: biasedMaxObjective,
       });
@@ -2579,6 +2596,10 @@ export default function TimingPage({ params }: TimingPageProps) {
         updatedAt: json.updatedAt ?? null,
         cacheHit: json.cacheHit ?? false,
         objective: json.objective ?? "calmar",
+        note: json.note ?? null,
+        noTrade: json.noTrade ?? false,
+        rangeStartUsed: json.rangeStartUsed ?? rangeStart,
+        trainEndUsed: json.trainEndUsed ?? json.trainSpan?.end ?? null,
       });
 
       if (!t212CanonicalRows) {
@@ -2606,6 +2627,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     t212Leverage,
     t212PositionFraction,
     t212CostBps,
+    ewmaShrinkK,
     t212CanonicalRows,
     biasedMaxObjective,
   ]);
@@ -2614,6 +2636,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     if (
       t212ZMode === "optimize" &&
       !isOptimizingZThresholds &&
+      !t212ZOptimizeError &&
       (!t212ZOptimizeResult || !t212ZDisplayThresholds)
     ) {
       runZThresholdOptimization();
@@ -2623,6 +2646,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     t212ZOptimizeResult,
     t212ZDisplayThresholds,
     isOptimizingZThresholds,
+    t212ZOptimizeError,
     runZThresholdOptimization,
   ]);
 
@@ -2647,6 +2671,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     t212InitialEquity,
     t212Leverage,
     t212PositionFraction,
+    ewmaShrinkK,
   ]);
 
   // Auto-run optimization on initial load when unbiased EWMA is ready
@@ -2974,6 +2999,7 @@ export default function TimingPage({ params }: TimingPageProps) {
 
       try {
         const isMaxRun = runId === "ewma-biased-max" || runId === "ewma-biased-max-trend";
+        const isNoTradeBaseline = isMaxRun && biasedMaxCalmarResult?.lambdaStar == null;
 
         // Fetch canonical rows if not cached
         let rows = t212CanonicalRows;
@@ -2995,7 +3021,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         const ewmaPathForSim =
           opts?.ewmaPathOverride ?? (source === "biased" ? ewmaBiasedPath : ewmaPath);
 
-        if (!ewmaPathForSim || ewmaPathForSim.length === 0) {
+        if (!isNoTradeBaseline && (!ewmaPathForSim || ewmaPathForSim.length === 0)) {
           setT212Error(
             source === "biased"
               ? 'Need EWMA Biased path to run sim. Click "Biased" button first.'
@@ -3038,7 +3064,12 @@ export default function TimingPage({ params }: TimingPageProps) {
           throw new Error('No canonical rows available for Trading212 sim.');
         }
 
-        if (t212SignalRule === "z" && t212ZMode === "optimize" && !t212ZOptimizeResult) {
+        if (
+          t212SignalRule === "z" &&
+          t212ZMode === "optimize" &&
+          !t212ZOptimizeResult &&
+          !isNoTradeBaseline
+        ) {
           throw new Error('Optimize z thresholds first to run the simulation.');
         }
 
@@ -3075,23 +3106,34 @@ export default function TimingPage({ params }: TimingPageProps) {
           }
         }
 
-        const bars = buildTrading212SimBarsFromEwmaPath(
-          rowsForSim,
-          ewmaPathForSim,
-          t212ThresholdFrac,
-          {
-            useTrendTilt: canUseTrendTilt,
-            trendWeight: canUseTrendTilt ? trendWeight! : null,
-            trendZByDate,
-            horizon: h,
-            zMode: t212ZMode,
-            signalRule: t212SignalRule,
-            zEnter: t212ZEnter,
-            zExit: t212ZExit,
-            zFlip: t212ZFlip,
-            optimizedThresholds: t212ZOptimizeResult?.thresholds ?? null,
-          }
-        );
+        const bars = isNoTradeBaseline
+          ? rowsForSim
+              .filter((row) => {
+                const price = row.adj_close ?? row.close;
+                return price != null && price > 0 && !!row.date;
+              })
+              .map((row) => ({
+                date: row.date,
+                price: (row.adj_close ?? row.close) as number,
+                signal: "flat" as const,
+              }))
+          : buildTrading212SimBarsFromEwmaPath(
+              rowsForSim,
+              ewmaPathForSim,
+              t212ThresholdFrac,
+              {
+                useTrendTilt: canUseTrendTilt,
+                trendWeight: canUseTrendTilt ? trendWeight! : null,
+                trendZByDate,
+                horizon: h,
+                zMode: t212ZMode,
+                signalRule: t212SignalRule,
+                zEnter: t212ZEnter,
+                zExit: t212ZExit,
+                zFlip: t212ZFlip,
+                optimizedThresholds: t212ZOptimizeResult?.thresholds ?? null,
+              }
+            );
 
         if (bars.length === 0) {
           throw new Error('No overlapping bars between canonical data and EWMA path');
@@ -3140,7 +3182,9 @@ export default function TimingPage({ params }: TimingPageProps) {
         const storedLambda = opts?.lambdaOverride != null
           ? opts.lambdaOverride
           : isMaxRun
-            ? biasedMaxCalmarResult?.lambdaStar ?? reactionOptimizationBest?.lambda ?? reactionLambda
+            ? isNoTradeBaseline
+              ? null
+              : biasedMaxCalmarResult?.lambdaStar ?? reactionOptimizationBest?.lambda ?? reactionLambda
             : reactionLambda;
         const storedTrainFraction = opts?.trainFractionOverride != null
           ? opts.trainFractionOverride
@@ -3157,7 +3201,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           configSnapshot: config,
           initialEquity: t212InitialEquity,
           windowResult,
-          lambda: storedLambda,
+          lambda: storedLambda ?? undefined,
           trainFraction: storedTrainFraction,
           trendTiltEnabled: canUseTrendTilt,
           strategyStartDate,
@@ -3328,6 +3372,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     t212ZEnter,
     t212ZExit,
     t212ZFlip,
+    ewmaShrinkK,
     trendShortWindow,
     trendLongWindow,
     trendMomentumPeriod,
@@ -3340,9 +3385,11 @@ export default function TimingPage({ params }: TimingPageProps) {
     if (!ewmaPath || ewmaPath.length === 0) return;
     if (!ewmaBiasedPath || ewmaBiasedPath.length === 0) return;
     if (!reactionMapSummary) return;
-    if (!biasedMaxCalmarResult || !ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0) return;
+    if (!biasedMaxCalmarResult) return;
 
     const maxConfig = getMaxEwmaConfig();
+    const isNoTradeMax = biasedMaxCalmarResult.lambdaStar == null;
+    if (!isNoTradeMax && (!ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0)) return;
     const specs: Array<{
       source: "unbiased" | "biased";
       runId: T212RunId;
@@ -3356,10 +3403,10 @@ export default function TimingPage({ params }: TimingPageProps) {
         source: "biased",
         runId: "ewma-biased-max",
         label: "EWMA Biased (Max)",
-        ewmaPathOverride: ewmaBiasedMaxPath ?? null,
+        ewmaPathOverride: isNoTradeMax ? null : ewmaBiasedMaxPath ?? null,
         opts: {
-          lambdaOverride: maxConfig.lambda,
-          trainFractionOverride: maxConfig.trainFraction,
+          lambdaOverride: maxConfig?.lambda ?? null,
+          trainFractionOverride: maxConfig?.trainFraction ?? null,
         },
       },
     ];
@@ -3367,7 +3414,11 @@ export default function TimingPage({ params }: TimingPageProps) {
     (async () => {
       console.log("[T212 Auto-Run] Seeding baseline sims", specs.map((s) => s.runId));
       for (const spec of specs) {
-        if (spec.runId === "ewma-biased-max" && (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)) {
+        if (
+          spec.runId === "ewma-biased-max" &&
+          !isNoTradeMax &&
+          (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)
+        ) {
           continue;
         }
         await runTrading212SimForSource(spec.source, spec.runId, spec.label, {
@@ -3411,15 +3462,17 @@ export default function TimingPage({ params }: TimingPageProps) {
     if (!reactionMapSummary) return;
 
     const maxConfig = getMaxEwmaConfig();
+    const isNoTradeMax = biasedMaxCalmarResult?.lambdaStar == null;
+    if (!isNoTradeMax && (!ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0)) return;
     const specs: Array<{ runId: T212RunId; label: string; opts?: RunTrading212SimOptions; ewmaPathOverride?: EwmaWalkerPathPoint[] | null }> = [
       { runId: "ewma-biased-trend", label: "EWMA Biased + Trend", ewmaPathOverride: ewmaBiasedPath ?? null },
       {
         runId: "ewma-biased-max-trend",
         label: "EWMA Biased (Max) + Trend",
-        ewmaPathOverride: ewmaBiasedMaxPath ?? null,
+        ewmaPathOverride: isNoTradeMax ? null : ewmaBiasedMaxPath ?? null,
         opts: {
-          lambdaOverride: maxConfig.lambda,
-          trainFractionOverride: maxConfig.trainFraction,
+          lambdaOverride: maxConfig?.lambda ?? null,
+          trainFractionOverride: maxConfig?.trainFraction ?? null,
         },
       },
     ];
@@ -3432,7 +3485,11 @@ export default function TimingPage({ params }: TimingPageProps) {
         effectiveTrendWeight
       );
       for (const spec of specs) {
-        if (spec.runId === "ewma-biased-max-trend" && (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)) {
+        if (
+          spec.runId === "ewma-biased-max-trend" &&
+          !isNoTradeMax &&
+          (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)
+        ) {
           continue;
         }
         await runTrading212SimForSource("biased", spec.runId, spec.label, {
@@ -3451,6 +3508,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     ewmaBiasedPath,
     ewmaBiasedMaxPath,
     reactionMapSummary,
+    biasedMaxCalmarResult,
     getMaxEwmaConfig,
     effectiveTrendWeight,
     runTrading212SimForSource,
@@ -6203,11 +6261,9 @@ export default function TimingPage({ params }: TimingPageProps) {
           t212PositionFraction={t212PositionFraction}
           t212ThresholdFrac={t212ThresholdFrac}
           t212CostBps={t212CostBps}
+          ewmaShrinkK={ewmaShrinkK}
           t212ZMode={t212ZMode}
           t212SignalRule={t212SignalRule}
-          t212ZEnter={t212ZEnter}
-          t212ZExit={t212ZExit}
-          t212ZFlip={t212ZFlip}
           t212ZDisplayThresholds={t212ZDisplayThresholds}
           t212ZOptimized={t212ZOptimizeResult}
           isOptimizingZThresholds={isOptimizingZThresholds}
@@ -6218,11 +6274,7 @@ export default function TimingPage({ params }: TimingPageProps) {
           onChangeT212PositionFraction={setT212PositionFraction}
           onChangeT212ThresholdPct={setT212ThresholdFrac}
           onChangeT212CostBps={setT212CostBps}
-          onChangeT212ZMode={setT212ZMode}
-          onChangeT212SignalRule={setT212SignalRule}
-          onChangeT212ZEnter={setT212ZEnter}
-          onChangeT212ZExit={setT212ZExit}
-          onChangeT212ZFlip={setT212ZFlip}
+          onChangeEwmaShrinkK={setEwmaShrinkK}
           onOptimizeZThresholds={runZThresholdOptimization}
         />
       </div>
@@ -6378,7 +6430,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                 <div className="flex items-center justify-between mb-3">
                   <h4 className={`text-sm font-medium ${
                     isDarkMode ? 'text-slate-300' : 'text-gray-700'
-                  }`}>Optimization Candidates</h4>
+                  }`}>Optimization Result</h4>
                   {isLoadingBiasedMaxCalmar && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-100 font-medium">
                       Loading…
@@ -6395,7 +6447,11 @@ export default function TimingPage({ params }: TimingPageProps) {
                     <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
                       <div className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>λ*</div>
                       <div className="font-mono text-lg">
-                        {biasedMaxCalmarResult ? biasedMaxCalmarResult.lambdaStar.toFixed(2) : "—"}
+                        {biasedMaxCalmarResult
+                          ? biasedMaxCalmarResult.lambdaStar == null
+                            ? "— (no-trade)"
+                            : biasedMaxCalmarResult.lambdaStar.toFixed(2)
+                          : "—"}
                       </div>
                     </div>
                     <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
@@ -6413,8 +6469,20 @@ export default function TimingPage({ params }: TimingPageProps) {
                         : "—"}
                     </div>
                   </div>
+                  <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
+                    <div className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Range start used</div>
+                    <div className="font-mono text-sm leading-tight">
+                      {biasedMaxCalmarResult?.rangeStartUsed ?? "—"}
+                    </div>
+                  </div>
+                  <div className={`rounded-lg p-3 ${isDarkMode ? 'bg-slate-900/60 text-slate-100' : 'bg-gray-50 text-gray-800'}`}>
+                    <div className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Train end used</div>
+                    <div className="font-mono text-sm leading-tight">
+                      {biasedMaxCalmarResult?.trainEndUsed ?? biasedMaxCalmarResult?.trainSpan?.end ?? "—"}
+                    </div>
+                  </div>
                   <div className={`text-[11px] ${isDarkMode ? 'text-slate-400' : 'text-gray-600'}`}>
-                    Training ends at rangeStart-1.{" "}
+                    Training ends at the last trading day before rangeStart.{" "}
                     {biasedMaxCalmarResult?.updatedAt && (
                       <span>
                         Updated {new Date(biasedMaxCalmarResult.updatedAt).toLocaleString()}
@@ -6422,6 +6490,11 @@ export default function TimingPage({ params }: TimingPageProps) {
                       </span>
                     )}
                   </div>
+                  {biasedMaxCalmarResult?.note && (
+                    <div className={`text-[11px] ${isDarkMode ? 'text-amber-200' : 'text-amber-700'}`}>
+                      {biasedMaxCalmarResult.note}
+                    </div>
+                  )}
                   {biasedMaxCalmarError && (
                     <div className="text-[11px] text-rose-400">
                       {biasedMaxCalmarError}

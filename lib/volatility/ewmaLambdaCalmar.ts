@@ -23,23 +23,34 @@ export interface EwmaLambdaCalmarParams {
   leverage?: number;
   positionFraction?: number;
   costBps?: number;
+  shrinkFactor?: number;
   signalRule?: "z";
   zEnter?: number;
   zExit?: number;
   zFlip?: number;
+  trainingData?: CalmarTrainingData;
 }
 
 export interface EwmaLambdaCalmarResult {
-  lambdaStar: number;
+  lambdaStar: number | null;
   calmarScore: number;
   trainSpan: { start: string; end: string };
   updatedAt: string;
+  note?: string | null;
+  noTrade?: boolean;
   grid: Array<{
     lambda: number;
     calmar: number;
     returnPct: number;
     maxDrawdown: number;
   }>;
+}
+
+export interface CalmarTrainingData {
+  cleanRows: CanonicalRow[];
+  trainRows: CanonicalRow[];
+  trainStart: string;
+  trainEnd: string;
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -93,6 +104,26 @@ function summarizeBucketReturns(
       q90: quantile(sorted, 0.9),
     };
   });
+}
+
+export async function loadCalmarTrainingData(symbol: string, rangeStart: string): Promise<CalmarTrainingData> {
+  const { rows } = await ensureCanonicalOrHistory(symbol, { interval: "1d", minRows: 260 });
+  const cleanRows = rows
+    .filter((r) => {
+      const price = r.adj_close ?? r.close;
+      return r.date && price != null && price > 0;
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const trainRows = cleanRows.filter((r) => r.date < rangeStart);
+  if (trainRows.length === 0) {
+    throw new Error(`No historical data found before ${rangeStart}`);
+  }
+
+  const trainStart = trainRows[0].date;
+  const trainEnd = trainRows[trainRows.length - 1].date;
+
+  return { cleanRows, trainRows, trainStart, trainEnd };
 }
 
 function buildZSignalBars(
@@ -161,6 +192,7 @@ export async function optimizeEwmaLambdaCalmar(
   const leverage = params.leverage ?? 5;
   const positionFraction = params.positionFraction ?? 0.25;
   const costBps = params.costBps ?? 0;
+  const shrinkFactor = Math.min(1, Math.max(0, params.shrinkFactor ?? 0.5));
   const signalRule = params.signalRule ?? "z";
   const zEnter = params.zEnter ?? 0.3;
   const zExit = params.zExit ?? 0.1;
@@ -228,7 +260,7 @@ export async function optimizeEwmaLambdaCalmar(
       };
 
       const tiltConfig = buildEwmaTiltConfigFromReactionMap(reactionMap, {
-        shrinkFactor: 0.5,
+        shrinkFactor,
         horizon,
       });
 
@@ -283,12 +315,15 @@ export async function optimizeEwmaLambdaCalmar(
   }
 
   const best = gridResults.reduce((acc, cur) => (cur.calmar > acc.calmar ? cur : acc));
+  const useBaseline = best.calmar < 0;
 
   return {
-    lambdaStar: best.lambda,
-    calmarScore: best.calmar,
+    lambdaStar: useBaseline ? null : best.lambda,
+    calmarScore: useBaseline ? 0 : best.calmar,
     trainSpan: { start: trainStart, end: trainEnd },
     updatedAt: new Date().toISOString(),
+    note: useBaseline ? "No-trade baseline selected" : null,
+    noTrade: useBaseline,
     grid: gridResults,
   };
 }

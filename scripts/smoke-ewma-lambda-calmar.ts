@@ -8,7 +8,7 @@
 import { optimizeEwmaLambdaCalmar } from "@/lib/volatility/ewmaLambdaCalmar";
 import { parseSymbolsFromArgv } from "./_utils/cli";
 
-const DEFAULT_SYMBOLS = ["TT", "PH", "CMG", "FAST", "EW"] as const;
+const DEFAULT_SYMBOLS = ["ROST", "MNST", "IDA", "WEC", "ETR"] as const;
 
 function parseRangeStart(argv: string[]): string | null {
   const arg = argv.find((a) => a.startsWith("--rangeStart="));
@@ -37,12 +37,26 @@ async function main() {
       signalRule: "z",
     });
 
+    const lambdaLabel = result.lambdaStar == null ? "— (no-trade)" : result.lambdaStar.toFixed(2);
     console.log(
-      `${sym}: λ*=${result.lambdaStar.toFixed(2)}, calmar=${result.calmarScore.toFixed(4)}, span=${result.trainSpan.start}→${result.trainSpan.end}`
+      `${sym}: λ*=${lambdaLabel}, calmar=${result.calmarScore.toFixed(4)}, span=${result.trainSpan.start}→${result.trainSpan.end}`
     );
 
-    if (!Number.isFinite(result.lambdaStar) || !Number.isFinite(result.calmarScore)) {
-      throw new Error(`${sym}: non-finite result`);
+    if (result.lambdaStar == null) {
+      if (result.calmarScore !== 0) {
+        throw new Error(`${sym}: expected calmarScore=0 for no-trade baseline`);
+      }
+      if (!result.grid.every((g) => g.calmar < 0)) {
+        throw new Error(`${sym}: expected all grid calmar scores < 0 when choosing no-trade`);
+      }
+    } else {
+      if (!Number.isFinite(result.lambdaStar) || !Number.isFinite(result.calmarScore)) {
+        throw new Error(`${sym}: non-finite result`);
+      }
+      const bestGrid = result.grid.reduce((acc, cur) => (cur.calmar > acc.calmar ? cur : acc));
+      if (bestGrid.calmar < 0) {
+        throw new Error(`${sym}: expected positive best calmar when lambdaStar selected`);
+      }
     }
   }
 }

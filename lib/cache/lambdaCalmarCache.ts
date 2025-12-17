@@ -36,7 +36,7 @@ function writeLocalCache(data: Record<string, LambdaCalmarCacheValue>) {
 
 export function buildLambdaCalmarCacheKey(params: {
   symbol: string;
-  rangeStart: string;
+  trainEndUsed: string;
   h: number;
   coverage: number;
   objective: string;
@@ -44,11 +44,12 @@ export function buildLambdaCalmarCacheKey(params: {
   leverage: number;
   posFrac: number;
   signalRule: string;
+  shrinkFactor?: number;
 }): string {
-  const { symbol, rangeStart, h, coverage, objective, costBps, leverage, posFrac, signalRule } = params;
+  const { symbol, trainEndUsed, h, coverage, objective, costBps, leverage, posFrac, signalRule, shrinkFactor } = params;
   return [
     symbol.toUpperCase(),
-    rangeStart,
+    `trainEnd=${trainEndUsed}`,
     `h=${h}`,
     `cov=${coverage}`,
     `obj=${objective}`,
@@ -56,6 +57,7 @@ export function buildLambdaCalmarCacheKey(params: {
     `lev=${leverage}`,
     `pos=${posFrac}`,
     `sig=${signalRule}`,
+    `shrink=${shrinkFactor ?? 0.5}`,
   ].join("|");
 }
 

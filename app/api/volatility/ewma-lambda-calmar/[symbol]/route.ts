@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { optimizeEwmaLambdaCalmar } from "@/lib/volatility/ewmaLambdaCalmar";
+import { loadCalmarTrainingData, optimizeEwmaLambdaCalmar } from "@/lib/volatility/ewmaLambdaCalmar";
 import {
   buildLambdaCalmarCacheKey,
   getLambdaCalmarCache,
@@ -31,6 +31,7 @@ export async function GET(
     const leverage = Number(searchParams.get("leverage") ?? "5");
     const positionFraction = Number(searchParams.get("posFrac") ?? "0.25");
     const costBps = Number(searchParams.get("costBps") ?? "0");
+    const shrinkFactor = Number(searchParams.get("shrinkFactor") ?? "0.5");
     const signalRule = (searchParams.get("signalRule") ?? "z").toLowerCase();
     const objective = "calmar";
 
@@ -58,6 +59,12 @@ export async function GET(
         { status: 400 }
       );
     }
+    if (!Number.isFinite(shrinkFactor) || shrinkFactor < 0 || shrinkFactor > 1) {
+      return NextResponse.json(
+        { success: false, error: "shrinkFactor must be between 0 and 1" },
+        { status: 400 }
+      );
+    }
     if (signalRule !== "z") {
       return NextResponse.json(
         { success: false, error: "Only z signalRule is supported" },
@@ -65,9 +72,12 @@ export async function GET(
       );
     }
 
+    const trainingData = await loadCalmarTrainingData(symbol, rangeStart);
+    const trainEndUsed = trainingData.trainEnd;
+
     const cacheKey = buildLambdaCalmarCacheKey({
       symbol,
-      rangeStart,
+      trainEndUsed,
       h: horizon,
       coverage,
       objective,
@@ -75,11 +85,18 @@ export async function GET(
       leverage,
       posFrac: positionFraction,
       signalRule,
+      shrinkFactor,
     });
 
     const cached = await getLambdaCalmarCache(cacheKey);
     if (cached) {
-      return NextResponse.json({ success: true, ...cached, cacheHit: true });
+      return NextResponse.json({
+        success: true,
+        ...cached,
+        cacheHit: true,
+        rangeStartUsed: cached.rangeStartUsed ?? rangeStart,
+        trainEndUsed: cached.trainEndUsed ?? trainEndUsed,
+      });
     }
 
     const result = await optimizeEwmaLambdaCalmar({
@@ -91,10 +108,18 @@ export async function GET(
       leverage,
       positionFraction,
       costBps,
+      shrinkFactor,
       signalRule: "z",
+      trainingData,
     });
 
-    const payload = { ...result, cacheHit: false, objective };
+    const payload = {
+      ...result,
+      cacheHit: false,
+      objective,
+      rangeStartUsed: rangeStart,
+      trainEndUsed,
+    };
     await setLambdaCalmarCache(cacheKey, payload);
 
     return NextResponse.json({ success: true, ...payload });

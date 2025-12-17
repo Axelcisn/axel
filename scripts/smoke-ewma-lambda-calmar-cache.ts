@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { ensureCanonicalOrHistory } from "@/lib/storage/canonical";
 import { GET as lambdaCalmarGet } from "@/app/api/volatility/ewma-lambda-calmar/[symbol]/route";
 import { NextRequest } from "next/server";
@@ -31,19 +33,52 @@ async function callApi(symbol: string, rangeStart: string) {
   return json;
 }
 
+function getArgValue(key: string): string | null {
+  const hit = process.argv.find((a) => a.startsWith(`--${key}=`));
+  return hit ? hit.slice(key.length + 3) : null;
+}
+
+function parseBoolArg(key: string, defaultValue: boolean): boolean {
+  const raw = getArgValue(key);
+  if (raw == null) return defaultValue;
+  return raw !== "false" && raw !== "0";
+}
+
 async function main() {
   const symbolsArg = process.argv.find((a) => a.startsWith("--symbols="));
   const symbols = symbolsArg ? symbolsArg.replace("--symbols=", "").split(",") : DEFAULT_SYMBOLS;
+  const rangeStartOverride = getArgValue("rangeStart");
+  const clearDevCache = parseBoolArg("clearDevCache", true);
+
+  const cacheFile = path.join(process.cwd(), ".cache", "lambdaCalmar.json");
+  const hasRedis =
+    !!(process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL) &&
+    !!(process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN);
+
+  if (clearDevCache && !hasRedis) {
+    if (fs.existsSync(cacheFile)) {
+      fs.unlinkSync(cacheFile);
+      console.log(`Cleared local cache file at ${cacheFile}`);
+    } else {
+      console.log("Local cache already clean (filesystem backend)");
+    }
+  }
 
   for (const sym of symbols) {
     const symbol = sym.toUpperCase();
-    const rangeStart = await pickRangeStart(symbol);
+    const rangeStart = rangeStartOverride ?? (await pickRangeStart(symbol));
     const first = await callApi(symbol, rangeStart);
+    console.log(`${symbol} call1 cacheHit=${!!first.cacheHit}`);
     const second = await callApi(symbol, rangeStart);
+    console.log(`${symbol} call2 cacheHit=${!!second.cacheHit}`);
 
-    const msg = `${symbol} rs=${rangeStart} λ*=${first.lambdaStar.toFixed(2)} calmar=${first.calmarScore.toFixed(4)} cache1=${!!first.cacheHit} cache2=${!!second.cacheHit}`;
+    const lambdaLabel = first.lambdaStar == null ? "—" : first.lambdaStar.toFixed(2);
+    const msg = `${symbol} rs=${rangeStart} trainEndUsed=${first.trainEndUsed} λ*=${lambdaLabel} calmar=${first.calmarScore.toFixed(4)} cache1=${!!first.cacheHit} cache2=${!!second.cacheHit}`;
     console.log(msg);
 
+    if (first.cacheHit) {
+      throw new Error(`${symbol}: expected cache miss on first call`);
+    }
     if (first.lambdaStar !== second.lambdaStar || first.calmarScore !== second.calmarScore) {
       throw new Error(`${symbol}: cache result mismatch`);
     }

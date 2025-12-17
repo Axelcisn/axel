@@ -361,7 +361,7 @@ export interface Trading212TradeOverlay {
 export interface SimulationRunSummary {
   id: string; // StrategyKey
   label: string;
-  lambda?: number;
+  lambda?: number | null;
   trainFraction?: number;
   returnPct: number;
   maxDrawdown: number;
@@ -451,11 +451,9 @@ interface PriceChartProps {
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
   t212ThresholdFrac: number;
   t212CostBps: number;
+  ewmaShrinkK: number;
   t212ZMode: "auto" | "manual" | "optimize";
   t212SignalRule: "bps" | "z";
-  t212ZEnter: number;
-  t212ZExit: number;
-  t212ZFlip: number;
   t212ZDisplayThresholds?: {
     enterLong: number;
     enterShort: number;
@@ -492,11 +490,7 @@ interface PriceChartProps {
   onChangeT212PositionFraction?: (v: number) => void;
   onChangeT212ThresholdPct?: (v: number) => void;
   onChangeT212CostBps?: (v: number) => void;
-  onChangeT212ZMode?: (v: "auto" | "manual" | "optimize") => void;
-  onChangeT212SignalRule?: (v: "bps" | "z") => void;
-  onChangeT212ZEnter?: (v: number) => void;
-  onChangeT212ZExit?: (v: number) => void;
-  onChangeT212ZFlip?: (v: number) => void;
+  onChangeEwmaShrinkK?: (v: number) => void;
   onOptimizeZThresholds?: () => void;
   hasMaxRun?: boolean;
   trendWeight?: number | null;
@@ -562,11 +556,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   t212PositionFraction,
   t212ThresholdFrac,
   t212CostBps,
+  ewmaShrinkK,
   t212ZMode,
   t212SignalRule,
-  t212ZEnter,
-  t212ZExit,
-  t212ZFlip,
   t212ZDisplayThresholds,
   t212ZOptimized,
   isOptimizingZThresholds,
@@ -577,11 +569,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onChangeT212PositionFraction,
   onChangeT212ThresholdPct,
   onChangeT212CostBps,
-  onChangeT212ZMode,
-  onChangeT212SignalRule,
-  onChangeT212ZEnter,
-  onChangeT212ZExit,
-  onChangeT212ZFlip,
+  onChangeEwmaShrinkK,
   onOptimizeZThresholds,
   tradeOverlays,
   t212AccountHistory,
@@ -684,9 +672,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [positionPctInput, setPositionPctInput] = useState<string>(() => `${(t212PositionFraction ?? 0) * 100}`);
   const [thresholdInput, setThresholdInput] = useState<string>(() => `${t212ThresholdFrac * 10000}`);
   const [costInput, setCostInput] = useState<string>(() => `${t212CostBps}`);
-  const [zEnterInput, setZEnterInput] = useState<string>(() => `${t212ZEnter}`);
-  const [zExitInput, setZExitInput] = useState<string>(() => `${t212ZExit}`);
-  const [zFlipInput, setZFlipInput] = useState<string>(() => `${t212ZFlip}`);
+  const [shrinkKInput, setShrinkKInput] = useState<string>(() => `${ewmaShrinkK}`);
   const [confirmApplyOptimized, setConfirmApplyOptimized] = useState(false);
 
   useEffect(() => {
@@ -706,16 +692,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [t212CostBps]);
 
   useEffect(() => {
-    setZEnterInput(`${t212ZEnter}`);
-  }, [t212ZEnter]);
-
-  useEffect(() => {
-    setZExitInput(`${t212ZExit}`);
-  }, [t212ZExit]);
-
-  useEffect(() => {
-    setZFlipInput(`${t212ZFlip}`);
-  }, [t212ZFlip]);
+    setShrinkKInput(`${ewmaShrinkK}`);
+  }, [ewmaShrinkK]);
 
   useEffect(() => {
     setConfirmApplyOptimized(false);
@@ -732,19 +710,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const timer = setTimeout(() => setConfirmApplyOptimized(false), 4000);
     return () => clearTimeout(timer);
   }, [confirmApplyOptimized]);
-
-  const handleZModeSelect = useCallback(
-    (mode: "auto" | "manual" | "optimize") => {
-      if (mode === "optimize") {
-        if (onOptimizeZThresholds) {
-          onOptimizeZThresholds();
-        }
-      } else {
-        onChangeT212ZMode?.(mode);
-      }
-    },
-    [onChangeT212ZMode, onOptimizeZThresholds]
-  );
 
   const commitInitialEquity = useCallback(
     (val: string) => {
@@ -804,46 +769,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     [onChangeT212CostBps, t212CostBps]
   );
 
-  const commitZEnter = useCallback(
+  const commitShrinkK = useCallback(
     (val: string) => {
       const num = Number(val);
       if (!Number.isFinite(num)) {
-        setZEnterInput(`${t212ZEnter}`);
+        setShrinkKInput(`${ewmaShrinkK}`);
         return;
       }
-      const clamped = Math.max(0, Math.min(5, num));
-      onChangeT212ZEnter?.(clamped);
-      setZEnterInput(`${clamped}`);
+      const clamped = Math.max(0, Math.min(1, Math.round(num * 100) / 100));
+      onChangeEwmaShrinkK?.(clamped);
+      setShrinkKInput(`${clamped}`);
     },
-    [onChangeT212ZEnter, t212ZEnter]
-  );
-
-  const commitZExit = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num)) {
-        setZExitInput(`${t212ZExit}`);
-        return;
-      }
-      const clamped = Math.max(0, Math.min(5, num));
-      onChangeT212ZExit?.(clamped);
-      setZExitInput(`${clamped}`);
-    },
-    [onChangeT212ZExit, t212ZExit]
-  );
-
-  const commitZFlip = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num)) {
-        setZFlipInput(`${t212ZFlip}`);
-        return;
-      }
-      const clamped = Math.max(0, Math.min(5, num));
-      onChangeT212ZFlip?.(clamped);
-      setZFlipInput(`${clamped}`);
-    },
-    [onChangeT212ZFlip, t212ZFlip]
+    [ewmaShrinkK, onChangeEwmaShrinkK]
   );
 
   const formatScoreDisplay = useCallback((value: number) => {
@@ -2979,6 +2916,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return applyActivityMaskToEquitySeries(aligned, activityStartDate, activityEndDate);
   }, [syncedDates, windowedAccountHistory]);
   const simViewLength = simulationEquityData.length;
+  const carryInBlocksWindowSim = useMemo(() => {
+    if (!activeSimWindow) return false;
+    const prevSideBefore = windowedAccountHistory.prevSideBefore ?? null;
+    if (prevSideBefore == null) return false;
+    if (windowedAccountHistory.history.length === 0) return true;
+    let prevSide: Trading212AccountSnapshot["side"] | null = prevSideBefore;
+    for (const snap of windowedAccountHistory.history) {
+      const side = snap.side ?? null;
+      if (prevSide === null && side != null) {
+        return false;
+      }
+      prevSide = side;
+    }
+    return true;
+  }, [activeSimWindow, windowedAccountHistory]);
+  const equityFullyMasked = useMemo(
+    () => simulationEquityData.length > 0 && simulationEquityData.every((pt) => pt.equity == null),
+    [simulationEquityData]
+  );
+  const showCarryInNotice = carryInBlocksWindowSim && equityFullyMasked;
   type SimTickStyle = "md" | "mmyy" | "yyyy";
   const formatSimDate = useCallback((value: string, style: SimTickStyle) => {
     if (!value) return "";
@@ -5869,12 +5826,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           )}
                           <div className="flex items-start justify-between gap-4">
                             <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-1">
-                                <span
-                                  className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}
-                                  title="Entry spread cost. 0 = none."
-                                >
-                                  Cost
+                                <div className="flex items-center gap-1">
+                                  <span
+                                    className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}
+                                    title="Entry spread cost in basis points. 1 bp = 0.01%."
+                                  >
+                                  Cost (bps)
                                 </span>
                               </div>
                             </div>
@@ -5899,6 +5856,39 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                 }`}
                               />
                               <span className={isDarkMode ? "text-gray-400" : "text-gray-500"}>bps</span>
+                            </div>
+                          </div>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1">
+                                <span
+                                  className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}
+                                  title="Scales bucket drift: μ_bucket = k * mean_forward_return(bucket). Lower k = more conservative."
+                                >
+                                  Shrink k
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={0}
+                                max={1}
+                                step={0.05}
+                                value={shrinkKInput}
+                                onChange={(e) => setShrinkKInput(e.target.value)}
+                                onBlur={(e) => commitShrinkK(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    commitShrinkK((e.target as HTMLInputElement).value);
+                                  }
+                                }}
+                                className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-amber-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                }`}
+                              />
                             </div>
                           </div>
 
@@ -6251,7 +6241,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Z thresholds</span>
                                 <div className="flex items-center gap-2">
                                   <button
-                                    onClick={() => handleZModeSelect('optimize')}
+                                    onClick={() => onOptimizeZThresholds?.()}
                                     className={`
                                       px-3 py-1 rounded-full text-[10px] font-semibold transition-colors
                                       ${isDarkMode ? 'bg-amber-500 text-slate-900' : 'bg-amber-500 text-white'}
@@ -6263,102 +6253,36 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                               </div>
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z enter</span>
-                                {t212ZMode === 'manual' ? (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={5}
-                                    step={0.05}
-                                    value={zEnterInput}
-                                    onChange={(e) => setZEnterInput(e.target.value)}
-                                    onBlur={(e) => commitZEnter(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        commitZEnter((e.target as HTMLInputElement).value);
-                                      }
-                                    }}
-                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                      isDarkMode 
-                                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                    }`}
-                                  />
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
-                                    <span className="font-mono tabular-nums text-right">
-                                      {t212ZDisplayThresholds
-                                        ? `${t212ZDisplayThresholds.enterLong.toFixed(3)} / ${t212ZDisplayThresholds.enterShort.toFixed(3)}`
-                                        : '—'}
-                                    </span>
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
+                                  <span className="font-mono tabular-nums text-right">
+                                    {t212ZDisplayThresholds
+                                      ? `${t212ZDisplayThresholds.enterLong.toFixed(3)} / ${t212ZDisplayThresholds.enterShort.toFixed(3)}`
+                                      : '—'}
+                                  </span>
+                                </div>
                               </div>
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z exit</span>
-                                {t212ZMode === 'manual' ? (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={5}
-                                    step={0.05}
-                                    value={zExitInput}
-                                    onChange={(e) => setZExitInput(e.target.value)}
-                                    onBlur={(e) => commitZExit(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        commitZExit((e.target as HTMLInputElement).value);
-                                      }
-                                    }}
-                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                      isDarkMode 
-                                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                    }`}
-                                  />
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
-                                    <span className="font-mono tabular-nums text-right">
-                                      {t212ZDisplayThresholds
-                                        ? `${t212ZDisplayThresholds.exitLong.toFixed(3)} / ${t212ZDisplayThresholds.exitShort.toFixed(3)}`
-                                        : '—'}
-                                    </span>
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
+                                  <span className="font-mono tabular-nums text-right">
+                                    {t212ZDisplayThresholds
+                                      ? `${t212ZDisplayThresholds.exitLong.toFixed(3)} / ${t212ZDisplayThresholds.exitShort.toFixed(3)}`
+                                      : '—'}
+                                  </span>
+                                </div>
                               </div>
                               <div className="flex items-center justify-between gap-4">
                                 <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z flip</span>
-                                {t212ZMode === 'manual' ? (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={5}
-                                    step={0.05}
-                                    value={zFlipInput}
-                                    onChange={(e) => setZFlipInput(e.target.value)}
-                                    onBlur={(e) => commitZFlip(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        commitZFlip((e.target as HTMLInputElement).value);
-                                      }
-                                    }}
-                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                      isDarkMode 
-                                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                    }`}
-                                  />
-                                ) : (
-                                  <div className="flex items-center gap-2">
-                                    <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
-                                    <span className="font-mono tabular-nums text-right">
-                                      {t212ZDisplayThresholds
-                                        ? `${t212ZDisplayThresholds.flipLong.toFixed(3)} / ${t212ZDisplayThresholds.flipShort.toFixed(3)}`
-                                        : '—'}
-                                    </span>
-                                  </div>
-                                )}
+                                <div className="flex items-center gap-2">
+                                  <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
+                                  <span className="font-mono tabular-nums text-right">
+                                    {t212ZDisplayThresholds
+                                      ? `${t212ZDisplayThresholds.flipLong.toFixed(3)} / ${t212ZDisplayThresholds.flipShort.toFixed(3)}`
+                                      : '—'}
+                                  </span>
+                                </div>
                               </div>
                               <div className="mt-2 space-y-1 text-[11px]">
                                 {t212ZMode === 'optimize' && isOptimizingZThresholds && (
@@ -6844,6 +6768,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </div>
                 </div>
               </div>
+
+              {showCarryInNotice && (
+                <div
+                  className={`text-xs rounded-md px-3 py-2 border ${
+                    isDarkMode
+                      ? "border-amber-500/40 bg-amber-500/5 text-amber-200"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  No clean restart in this range (position already open at range start). Move the range start earlier or choose a period with a fresh entry.
+                </div>
+              )}
 
               {/* Equity Chart inside Overview tab */}
               <div className={chartFrameClasses}>

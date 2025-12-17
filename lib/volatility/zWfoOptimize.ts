@@ -35,6 +35,16 @@ export type ZFoldSummary = {
   shortOppCount: number;
   score: number;
   shortEntries?: number;
+  signalStats?: SignalStats;
+  constraints?: {
+    flatPct?: number;
+    minFlatPct?: number;
+    closes?: number;
+    minCloses?: number;
+    flips?: number;
+    flipPct?: number;
+    maxFlipPct?: number | null;
+  };
 };
 
 export type ZWfoResult = {
@@ -69,6 +79,13 @@ export type OptimizeZOptions = {
   quantilesFlip: number[];
   tradingConfig: Trading212CfdConfig;
   initialEquity: number;
+  minFlatPct?: number;
+  minCloses?: number;
+  maxFlipPct?: number | null;
+  scorePenalty?: {
+    flipGamma?: number;
+    tradeEta?: number;
+  };
 };
 
 type ZEdgePoint = {
@@ -76,6 +93,45 @@ type ZEdgePoint = {
   price: number;
   zEdge: number;
 };
+
+type SignalStats = {
+  flatPct: number;
+  flips: number;
+  opens: number;
+  closes: number;
+  tradeCount: number;
+};
+
+export function summarizeSignalStats(bars: Trading212SimBar[]): SignalStats {
+  if (!bars.length) {
+    return { flatPct: 0, flips: 0, opens: 0, closes: 0, tradeCount: 0 };
+  }
+  let flat = 0;
+  let flips = 0;
+  let opens = 0;
+  let closes = 0;
+  let tradeCount = 0;
+  let prev = bars[0].signal ?? "flat";
+  if (prev !== "flat") tradeCount++;
+  if (prev === "flat") flat++;
+  for (let i = 1; i < bars.length; i++) {
+    const cur = bars[i].signal ?? "flat";
+    if (cur === "flat") flat++;
+    if (prev !== cur) {
+      if (prev === "flat" && cur !== "flat") {
+        opens++;
+        tradeCount++;
+      } else if (prev !== "flat" && cur === "flat") {
+        closes++;
+      } else if (prev !== "flat" && cur !== "flat") {
+        flips++;
+      }
+    }
+    prev = cur;
+  }
+  const flatPct = (flat / bars.length) * 100;
+  return { flatPct, flips, opens, closes, tradeCount };
+}
 
 function computeAutoThresholds(zEdges: number[], fallbackEnter: number): ZHysteresisThresholds | null {
   if (!zEdges.length) return null;
@@ -289,7 +345,14 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     quantilesFlip,
     tradingConfig,
     initialEquity,
+    minFlatPct = 2,
+    minCloses = 1,
+    maxFlipPct = null,
+    scorePenalty,
   } = options;
+
+  const gamma = scorePenalty?.flipGamma ?? 0.0;
+  const eta = scorePenalty?.tradeEta ?? 0.0;
 
   const zSeries = computeZEdgeSeries(canonicalRows, ewmaPath, horizon, simStartDate);
   if (zSeries.length === 0) {
@@ -324,6 +387,13 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     const trainZ = train.map((p) => p.zEdge);
     const qPrevTrainEnd = computeEndState(trainZ, thresholds, 0);
     const { bars, shortOppCount, shortEntries } = buildBarsFromZEdges(val, thresholds, qPrevTrainEnd);
+    const sigStats = summarizeSignalStats(bars);
+
+    // Hard constraints on flat time, closes, flips (if provided)
+    const flipPct = bars.length ? (sigStats.flips / bars.length) * 100 : 0;
+    if (sigStats.flatPct < minFlatPct) return null;
+    if (sigStats.closes < minCloses) return null;
+    if (maxFlipPct != null && flipPct > maxFlipPct) return null;
 
     if (shortOppCount < expectedTail) return null;
     const simResult = simulateTrading212Cfd(bars, initialEquity, tradingConfig);
@@ -337,7 +407,13 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     const maxDrawdown = simResult.maxDrawdown ?? 0;
     const pf = profitFactor(simResult.trades);
     const maxDdPct = maxDrawdown;
-    const score = maxDdPct > 0 ? returnPct / maxDdPct : returnPct;
+    let score = maxDdPct > 0 ? returnPct / maxDdPct : returnPct;
+    if (gamma > 0) {
+      score -= gamma * sigStats.flips;
+    }
+    if (eta > 0) {
+      score -= eta * sigStats.tradeCount;
+    }
 
     return {
       foldStart: train[0].date,
@@ -353,6 +429,16 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
       shortOppCount,
       score,
       shortEntries,
+    signalStats: sigStats,
+    constraints: {
+      flatPct: sigStats.flatPct,
+      minFlatPct,
+      closes: sigStats.closes,
+      minCloses,
+      flips: sigStats.flips,
+      flipPct,
+      maxFlipPct,
+    },
     };
   };
 
@@ -456,11 +542,11 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
 
       if (validFolds === 0) continue;
 
-      const meanScore = scoreSum / validFolds;
-      const avgTradeCount = tradesSum / validFolds;
-      const avgShortOppCount = shortOppSum / validFolds;
+    const meanScore = scoreSum / validFolds;
+    const avgTradeCount = tradesSum / validFolds;
+    const avgShortOppCount = shortOppSum / validFolds;
 
-      const fullThresholds = deriveThresholds(
+    const fullThresholds = deriveThresholds(
         zSeries.map((p) => p.zEdge),
         qs
       );

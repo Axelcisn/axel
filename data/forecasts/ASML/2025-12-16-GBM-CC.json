@@ -1,0 +1,48 @@
+{
+  "symbol": "ASML",
+  "date_t": "2025-12-16",
+  "method": "GBM-CC",
+  "y_hat": 1076.050048828125,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.000830415585435129,
+    "sigma_hat": 0.026857172867154895,
+    "mu_star_used": 0,
+    "window_start": "2023-12-12",
+    "window_end": "2025-12-16",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 1076.050048828125,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 6.981052253420783,
+  "s_scale": 0.026857172867154895,
+  "L_h": 1020.8727338169391,
+  "U_h": 1134.2096514359846,
+  "band_width_bp": 1110,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-17T01:28:09.144Z"
+}

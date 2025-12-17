@@ -24,3 +24,10 @@ export function parseSymbolsFromArgv(argv: string[], defaults: string[]): string
   if (tokens.length === 0) return defaults;
   return tokens;
 }
+
+export function parseSymbolsFromArgs(
+  argv: string[],
+  opts: { defaultSymbols: string[] }
+): { symbols: string[] } {
+  return { symbols: parseSymbolsFromArgv(argv, opts.defaultSymbols) };
+}

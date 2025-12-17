@@ -36,8 +36,9 @@ async function main() {
     const trainPct =
       rows.length > 0 ? ((effectiveTrainEndIdx + 1) / rows.length) * 100 : NaN;
 
+    const lambdaLabel = res.lambdaStar == null ? "—" : res.lambdaStar.toFixed(2);
     console.log(
-      `${symbol} rangeStart=${rangeStart} λ*=${res.lambdaStar.toFixed(2)} calmar=${res.calmarScore.toFixed(
+      `${symbol} rangeStart=${rangeStart} λ*=${lambdaLabel} calmar=${res.calmarScore.toFixed(
         4
       )} trainPct=${Number.isFinite(trainPct) ? trainPct.toFixed(1) + "%" : "—"} objective=Calmar`
     );
