@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { alertsStore } from '@/lib/alerts/store';
 
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/alerts/fires - Lightweight endpoint to read fired alerts from logs
  * 

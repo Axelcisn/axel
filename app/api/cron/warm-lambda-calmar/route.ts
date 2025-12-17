@@ -9,6 +9,9 @@ import {
 
 // Schedule weekly Monday 16:10 ET (documented only; wire in deployment scheduler separately).
 
+export const dynamic = 'force-dynamic';
+export const maxDuration = 300; // 5 minutes for cron job
+
 export async function GET(req: NextRequest) {
   try {
     const params = req.nextUrl.searchParams;

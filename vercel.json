@@ -1,5 +1,11 @@
 {
   "crons": [
     { "path": "/api/cron/warm-lambda-calmar?batch=0&batchSize=10", "schedule": "10 21 * * 1" }
-  ]
+  ],
+  "functions": {
+    "api/**/*.js": {
+      "maxDuration": 60,
+      "excludeFiles": "data/**"
+    }
+  }
 }
