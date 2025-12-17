@@ -1057,7 +1057,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     return activeT212RunId
       ? t212Runs.find((run) => run.id === activeT212RunId) ?? null
       : t212Runs.find((run) => t212VisibleRunIds.has(run.id)) ?? null;
-  }, [t212Runs, activeT212RunId, t212VisibleRunIds, simulationMode.baseMode]);
+  }, [t212Runs, activeT212RunId, t212VisibleRunIds]);
 
   const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
     const res = t212ActiveRun?.windowResult?.result ?? t212ActiveRun?.result ?? null;
@@ -2728,7 +2728,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     return sorted[base];
   };
 
-  const computeAutoZThresholds = (
+  const computeAutoZThresholds = useCallback((
     ewmaPathArg: EwmaWalkerPathPoint[],
     canonicalRows: CanonicalRow[],
     horizon: number,
@@ -2809,7 +2809,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     if (!(thresholds.exitShort < thresholds.enterShort && thresholds.enterShort < thresholds.flipShort)) return null;
 
     return thresholds;
-  };
+  }, []);
 
   const buildTrading212SimBarsFromEwmaPath = useCallback((
     canonicalRows: CanonicalRow[],
@@ -2949,7 +2949,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
 
     return bars;
-  }, []);
+  }, [computeAutoZThresholds]);
 
   // Trading212 CFD Simulation: Reusable helper to run sim for a specific EWMA source
   interface RunTrading212SimOptions {
@@ -3331,6 +3331,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     trendShortWindow,
     trendLongWindow,
     trendMomentumPeriod,
+    t212Runs.length,
   ]);
 
   // Auto-run baseline T212 sims when data is ready (always without trend tilt)
@@ -4083,7 +4084,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     gbmWindow,
     gbmLambda,
     historyCount,
-    isInitialized,
     rvAvailable,
     serverTargetSpec,
     targetSpecResult,
@@ -4091,6 +4091,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     coverage, // Add coverage as dependency for effectiveCoverage fallback
     uploadResult, // Add uploadResult as dependency for effectiveTZ fallback
     recommendedModel,
+    params.ticker,
   ]);
 
   // Validation Gates Functions
@@ -4630,11 +4631,12 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [
     pipelineReady,
     isInitialized,
-    resolvedTargetSpec,
     historyCount,
     forecastStatus,
     runForecastPipeline,
-    baseForecast
+    baseForecast,
+    coverage,
+    h,
   ]);
 
   const saveTargetSpec = async () => {

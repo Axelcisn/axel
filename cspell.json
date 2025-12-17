@@ -148,7 +148,10 @@
     "ISIN",
     "FOREX",
     "FINRA",
-    "TOTV"
+    "TOTV",
+    "calib",
+    "Calib",
+    "mmyy"
   ],
   "flagWords": []
 }
