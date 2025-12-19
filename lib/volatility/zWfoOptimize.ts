@@ -47,6 +47,8 @@ export type ZFoldSummary = {
   };
 };
 
+export type ZWfoSelectionTier = "strict" | "bestEffort" | "fallbackAuto";
+
 export type ZWfoResult = {
   best: {
     thresholds: ZHysteresisThresholds;
@@ -60,6 +62,11 @@ export type ZWfoResult = {
     baselineScore: number;
     bestScore: number;
     reason?: string;
+    selectionTier: ZWfoSelectionTier;
+    strictPass: boolean;
+    recencyPass: boolean;
+    failedConstraints?: string[];
+    recency?: ZRecencyCheck;
   };
   foldSummaries: ZFoldSummary[];
   zEdgeSamples: number;
@@ -82,6 +89,11 @@ export type OptimizeZOptions = {
   minFlatPct?: number;
   minCloses?: number;
   maxFlipPct?: number | null;
+  minOpensInLast63?: number;
+  minFlatPctLast63?: number;
+  recencyBars63?: number;
+  recencyBars252?: number;
+  enforceRecency?: boolean;
   scorePenalty?: {
     flipGamma?: number;
     tradeEta?: number;
@@ -100,6 +112,24 @@ type SignalStats = {
   opens: number;
   closes: number;
   tradeCount: number;
+};
+
+export type ZRecencyWindowStats = SignalStats & {
+  bars: number;
+  window: number;
+};
+
+export type ZRecencyCheck = {
+  recent: ZRecencyWindowStats;
+  tail: ZRecencyWindowStats;
+  constraints: {
+    minOpensInLast63: number;
+    minFlatPctLast63: number;
+    bars63: number;
+    bars252: number;
+    enforceRecency: boolean;
+  };
+  passed: boolean;
 };
 
 export function summarizeSignalStats(bars: Trading212SimBar[]): SignalStats {
@@ -175,6 +205,17 @@ function quantile(values: number[], q: number): number {
     return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
   }
   return sorted[base];
+}
+
+function computeRecencyWindowStats(bars: Trading212SimBar[], window: number): ZRecencyWindowStats {
+  const effectiveWindow = Math.max(0, Math.floor(window));
+  const slice = effectiveWindow > 0 ? bars.slice(-effectiveWindow) : bars;
+  const stats = summarizeSignalStats(slice);
+  return {
+    ...stats,
+    bars: slice.length,
+    window: effectiveWindow,
+  };
 }
 
 function deriveThresholds(zEdges: number[], qs: ZQuantiles): ZHysteresisThresholds | null {
@@ -348,11 +389,21 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     minFlatPct = 2,
     minCloses = 1,
     maxFlipPct = null,
+    minOpensInLast63 = 1,
+    minFlatPctLast63 = 1,
+    recencyBars63 = 63,
+    recencyBars252 = 252,
+    enforceRecency = true,
     scorePenalty,
   } = options;
 
   const gamma = scorePenalty?.flipGamma ?? 0.0;
   const eta = scorePenalty?.tradeEta ?? 0.0;
+  const recencyWindow63 = Number.isFinite(recencyBars63) && recencyBars63 > 0 ? Math.floor(recencyBars63) : 63;
+  const recencyWindow252 = Number.isFinite(recencyBars252) && recencyBars252 > 0 ? Math.floor(recencyBars252) : 252;
+  const minOpensRecent = Math.max(0, Math.floor(minOpensInLast63));
+  const minFlatPctRecent = Math.max(0, minFlatPctLast63);
+  const enforceRecencyCheck = enforceRecency !== false;
 
   const zSeries = computeZEdgeSeries(canonicalRows, ewmaPath, horizon, simStartDate);
   if (zSeries.length === 0) {
@@ -429,16 +480,16 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
       shortOppCount,
       score,
       shortEntries,
-    signalStats: sigStats,
-    constraints: {
-      flatPct: sigStats.flatPct,
-      minFlatPct,
-      closes: sigStats.closes,
-      minCloses,
-      flips: sigStats.flips,
-      flipPct,
-      maxFlipPct,
-    },
+      signalStats: sigStats,
+      constraints: {
+        flatPct: sigStats.flatPct,
+        minFlatPct,
+        closes: sigStats.closes,
+        minCloses,
+        flips: sigStats.flips,
+        flipPct,
+        maxFlipPct,
+      },
     };
   };
 
@@ -473,6 +524,23 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     foldSummaries: ZFoldSummary[];
     validFolds: number;
     totalShortEntries: number;
+    recency: ZRecencyCheck;
+  };
+
+  const buildFailedConstraints = (candidate: Candidate): string[] => {
+    const failures: string[] = [];
+    const recent = candidate.recency?.recent;
+    if (recent) {
+      if (recent.opens < minOpensRecent) failures.push("minOpensLast63");
+      if (recent.flatPct < minFlatPctRecent) failures.push("minFlatPctLast63");
+    }
+    if (candidate.validFolds === 0) {
+      failures.push("foldConstraints");
+    }
+    if (candidate.totalShortEntries < 1) {
+      failures.push("minShortEntries");
+    }
+    return failures;
   };
 
   const selectBestEffort = (candidates: Candidate[]): Candidate | null => {
@@ -540,17 +608,14 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
         foldSummaries.push({ ...summary });
       }
 
-      if (validFolds === 0) continue;
-
-    const meanScore = scoreSum / validFolds;
-    const avgTradeCount = tradesSum / validFolds;
-    const avgShortOppCount = shortOppSum / validFolds;
-
-    const fullThresholds = deriveThresholds(
-        zSeries.map((p) => p.zEdge),
-        qs
-      );
+      const fullThresholds = deriveThresholds(zSeries.map((p) => p.zEdge), qs);
       if (!fullThresholds) continue;
+
+      const fullSeriesBars = buildBarsFromZEdges(zSeries, fullThresholds, 0);
+      const recencyRecent = computeRecencyWindowStats(fullSeriesBars.bars, recencyWindow63);
+      const recencyTail = computeRecencyWindowStats(fullSeriesBars.bars, recencyWindow252);
+      const recencyPassed =
+        !enforceRecencyCheck || (recencyRecent.opens >= minOpensRecent && recencyRecent.flatPct >= minFlatPctRecent);
 
       if (validFolds === 0) {
         const candidate: Candidate = {
@@ -562,10 +627,26 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
           foldSummaries: [],
           validFolds: 0,
           totalShortEntries: 0,
+          recency: {
+            recent: recencyRecent,
+            tail: recencyTail,
+            constraints: {
+              minOpensInLast63: minOpensRecent,
+              minFlatPctLast63: minFlatPctRecent,
+              bars63: recencyWindow63,
+              bars252: recencyWindow252,
+              enforceRecency: enforceRecencyCheck,
+            },
+            passed: recencyPassed,
+          },
         };
         bestEffort = bestEffort ? selectBestEffort([bestEffort, candidate]) : candidate;
         continue;
       }
+
+      const meanScore = scoreSum / validFolds;
+      const avgTradeCount = tradesSum / validFolds;
+      const avgShortOppCount = shortOppSum / validFolds;
 
       const candidate: Candidate = {
         thresholds: fullThresholds,
@@ -576,6 +657,18 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
         foldSummaries,
         validFolds,
         totalShortEntries,
+        recency: {
+          recent: recencyRecent,
+          tail: recencyTail,
+          constraints: {
+            minOpensInLast63: minOpensRecent,
+            minFlatPctLast63: minFlatPctRecent,
+            bars63: recencyWindow63,
+            bars252: recencyWindow252,
+            enforceRecency: enforceRecencyCheck,
+          },
+          passed: recencyPassed,
+        },
       };
 
       if (!bestEffort) {
@@ -584,7 +677,11 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
         bestEffort = selectBestEffort([bestEffort, candidate]);
       }
 
-      if ((!bestCandidate || meanScore > bestCandidate.meanScore) && totalShortEntries >= 1) {
+      if (
+        recencyPassed &&
+        totalShortEntries >= 1 &&
+        (!bestCandidate || meanScore > bestCandidate.meanScore)
+      ) {
         bestCandidate = candidate;
       }
     }
@@ -592,12 +689,43 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     if (bestCandidate) break;
   }
 
-  if (!bestCandidate) {
+  let selectionTier: ZWfoSelectionTier = "fallbackAuto";
+  let strictPass = false;
+  let recencyPass = false;
+  let failedConstraints: string[] | undefined;
+  let reason: string | undefined;
+  let applyRecommended = false;
+  let chosen: Candidate | null = null;
+  let bestScore = -Infinity;
+  const baselineScoreFinal = baselineScore === -Infinity ? -Infinity : baselineScore;
+
+  if (bestCandidate) {
+    chosen = bestCandidate;
+    selectionTier = "strict";
+    recencyPass = bestCandidate.recency?.passed ?? false;
+    strictPass = recencyPass && bestCandidate.validFolds > 0 && bestCandidate.totalShortEntries >= 1;
+    bestScore = bestCandidate.meanScore;
+    applyRecommended = bestScore > baselineScoreFinal && bestScore > 0;
+    if (!applyRecommended) {
+      if (bestScore <= 0) {
+        reason = "bestScore<=0";
+      } else if (bestScore <= baselineScoreFinal) {
+        reason = "bestScore<=baselineScore";
+      }
+    }
+  } else {
     let fallback = bestEffort;
+    let fallbackTier: ZWfoSelectionTier = "bestEffort";
     if (!fallback) {
       const zEdgesFull = zSeries.map((p) => p.zEdge);
       const autoThresholds = computeAutoThresholds(zEdgesFull, 0.3);
       if (autoThresholds) {
+        const autoSeriesBars = buildBarsFromZEdges(zSeries, autoThresholds, 0);
+        const autoRecencyRecent = computeRecencyWindowStats(autoSeriesBars.bars, recencyWindow63);
+        const autoRecencyTail = computeRecencyWindowStats(autoSeriesBars.bars, recencyWindow252);
+        const autoRecencyPassed =
+          !enforceRecencyCheck ||
+          (autoRecencyRecent.opens >= minOpensRecent && autoRecencyRecent.flatPct >= minFlatPctRecent);
         fallback = {
           thresholds: autoThresholds,
           quantiles: { enter: 0.9, exit: 0.5, flip: 0.95 },
@@ -607,58 +735,74 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
           foldSummaries: [],
           validFolds: 0,
           totalShortEntries: 0,
+          recency: {
+            recent: autoRecencyRecent,
+            tail: autoRecencyTail,
+            constraints: {
+              minOpensInLast63: minOpensRecent,
+              minFlatPctLast63: minFlatPctRecent,
+              bars63: recencyWindow63,
+              bars252: recencyWindow252,
+              enforceRecency: enforceRecencyCheck,
+            },
+            passed: autoRecencyPassed,
+          },
         };
+        fallbackTier = "fallbackAuto";
       }
     }
     if (!fallback) {
       throw new Error("No candidate thresholds satisfied fold constraints");
     }
-
-    return {
-      best: {
-        thresholds: fallback.thresholds,
-        quantiles: fallback.quantiles,
-        meanScore: fallback.meanScore,
-        folds: fallback.foldSummaries.length,
-        avgTradeCount: fallback.avgTradeCount,
-        avgShortOppCount: fallback.avgShortOppCount,
-        applyRecommended: false,
-        baselineScore,
-        bestScore: fallback.meanScore,
-        reason: "noCandidateStrict; bestEffortReturned",
-      },
-      foldSummaries: fallback.foldSummaries,
-      zEdgeSamples: zSeries.length,
-    };
+    chosen = fallback;
+    selectionTier = fallbackTier;
+    strictPass = false;
+    recencyPass = fallback.recency?.passed ?? false;
+    failedConstraints = buildFailedConstraints(fallback);
+    bestScore = fallback.meanScore;
+    reason =
+      selectionTier === "bestEffort"
+        ? recencyPass
+          ? "noCandidateStrict; bestEffortReturned"
+          : "noCandidateRecency; bestEffortReturned"
+        : recencyPass
+          ? "noCandidateStrict; fallbackAuto"
+          : "noCandidateRecency; fallbackAuto";
   }
 
-  const bestScore = bestCandidate.meanScore;
-  const baselineScoreFinal = baselineScore === -Infinity ? -Infinity : baselineScore;
-  const applyRecommended = bestScore > baselineScoreFinal && bestScore > 0;
-  let reason: string | undefined;
-  if (!applyRecommended) {
-    if (bestScore <= 0) {
-      reason = "bestScore<=0";
-    } else if (bestScore <= baselineScoreFinal) {
-      reason = "bestScore<=baselineScore";
+  if (recencyPass && reason?.includes("noCandidateRecency")) {
+    reason = reason.replace("noCandidateRecency; ", "").replace("noCandidateRecency", "").trim() || undefined;
+    if (strictPass) {
+      selectionTier = "strict";
+    } else if (selectionTier !== "fallbackAuto") {
+      selectionTier = "bestEffort";
     }
   }
 
+  if (!chosen) {
+    throw new Error("No candidate thresholds satisfied constraints");
+  }
+
   return {
-      best: {
-        thresholds: bestCandidate.thresholds,
-        quantiles: bestCandidate.quantiles,
-        meanScore: bestCandidate.meanScore,
-        folds: bestCandidate.foldSummaries.length,
-        avgTradeCount: bestCandidate.avgTradeCount,
-        avgShortOppCount: bestCandidate.avgShortOppCount,
-        totalShortEntries: bestCandidate.totalShortEntries,
-        applyRecommended,
-        baselineScore: baselineScoreFinal,
-        bestScore,
-        reason,
-      },
-    foldSummaries: bestCandidate.foldSummaries,
+    best: {
+      thresholds: chosen.thresholds,
+      quantiles: chosen.quantiles,
+      meanScore: chosen.meanScore,
+      folds: chosen.foldSummaries.length,
+      avgTradeCount: chosen.avgTradeCount,
+      avgShortOppCount: chosen.avgShortOppCount,
+      totalShortEntries: chosen.totalShortEntries,
+      applyRecommended,
+      baselineScore: baselineScoreFinal,
+      bestScore,
+      reason,
+      selectionTier,
+      strictPass,
+      recencyPass,
+      failedConstraints,
+      recency: chosen.recency,
+    },
+    foldSummaries: chosen.foldSummaries,
     zEdgeSamples: zSeries.length,
   };
 }

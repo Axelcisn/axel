@@ -4,6 +4,11 @@ import { runEwmaWalker } from "@/lib/volatility/ewmaWalker";
 import { ensureCanonicalOrHistory } from "@/lib/storage/canonical";
 import { optimizeZHysteresisThresholds } from "@/lib/volatility/zWfoOptimize";
 import { Trading212CfdConfig } from "@/lib/backtest/trading212Cfd";
+import {
+  buildZWfoThresholdCacheKey,
+  getZWfoThresholdCache,
+  setZWfoThresholdCache,
+} from "@/lib/cache/zWfoThresholdCache";
 
 export async function GET(
   request: NextRequest,
@@ -26,7 +31,7 @@ export async function GET(
     const coverage = Number(sp.get("coverage") ?? "0.95");
     const trainFraction = Number(sp.get("trainFraction") ?? "0.7");
     const minTrainObs = Number(sp.get("minTrainObs") ?? "500");
-    const shrinkFactor = Number(sp.get("shrinkFactor") ?? "0.5");
+    const shrinkFactorRaw = Number(sp.get("shrinkFactor") ?? "0.5");
 
     const trainLenRaw = Number(sp.get("trainLenBars") ?? "252");
     const valLenRaw = Number(sp.get("valLenBars") ?? "63");
@@ -45,6 +50,13 @@ export async function GET(
     const maxFlipPctRaw = sp.get("maxFlipPct");
     const flipGammaRaw = Number(sp.get("flipGamma") ?? "0.0");
     const tradeEtaRaw = Number(sp.get("tradeEta") ?? "0.0");
+    const allowStale = sp.get("allowStale") === "1" || sp.get("allowStale") === "true";
+    const minOpensLast63Raw = Number(sp.get("minOpensLast63") ?? "1");
+    const minFlatPctLast63Raw = Number(sp.get("minFlatPctLast63") ?? "1");
+    const recencyBarsRaw = (sp.get("recencyBars") ?? "").split(",").map((v) => Number(v.trim()));
+    const recencyBars63Raw = Number.isFinite(recencyBarsRaw[0]) ? recencyBarsRaw[0] : Number(sp.get("recencyBars63") ?? "63");
+    const recencyBars252Raw = Number.isFinite(recencyBarsRaw[1]) ? recencyBarsRaw[1] : Number(sp.get("recencyBars252") ?? "252");
+    const enforceRecency = sp.get("enforceRecency") !== "0";
 
     const parseList = (key: string, fallback: number[]) => {
       const raw = sp.get(key);
@@ -77,6 +89,7 @@ export async function GET(
     };
 
     const reactionMap = await buildEwmaReactionMap(symbol, reactionConfig);
+    const shrinkFactor = Number.isFinite(shrinkFactorRaw) ? shrinkFactorRaw : 0.5;
     const tiltConfig = buildEwmaTiltConfigFromReactionMap(reactionMap, { shrinkFactor, horizon });
     const ewmaResult = await runEwmaWalker({
       symbol,
@@ -87,17 +100,95 @@ export async function GET(
     });
 
     const { rows } = await ensureCanonicalOrHistory(symbol, { interval: "1d", minRows: 260 });
+    const dataEndUsed = rows.length ? rows[rows.length - 1].date : null;
+    if (!dataEndUsed) {
+      throw new Error(`Unable to determine dataEnd for ${symbol}`);
+    }
+    const tradingDays = rows.map((r) => r.date).filter((d): d is string => !!d);
+
+    const minFlatPct = Number.isFinite(minFlatPctRaw) ? minFlatPctRaw : 2;
+    const minCloses = Number.isFinite(minClosesRaw) ? minClosesRaw : 1;
+    const maxFlipPct = maxFlipPctRaw != null ? Number(maxFlipPctRaw) : null;
+    const flipGamma = Number.isFinite(flipGammaRaw) ? flipGammaRaw : 0;
+    const tradeEta = Number.isFinite(tradeEtaRaw) ? tradeEtaRaw : 0;
+    const costBps = Number.isFinite(spreadBpsRaw) ? spreadBpsRaw : 0;
+    const leverage = Number.isFinite(leverageRaw) && leverageRaw > 0 ? leverageRaw : 5;
+    const positionFraction =
+      Number.isFinite(positionFractionRaw) && positionFractionRaw > 0 ? positionFractionRaw : 0.25;
+    const initialEquity =
+      Number.isFinite(initialEquityRaw) && initialEquityRaw > 0 ? initialEquityRaw : 5000;
+    const recencyBars63 = Number.isFinite(recencyBars63Raw) && recencyBars63Raw > 0 ? Math.floor(recencyBars63Raw) : 63;
+    const recencyBars252 =
+      Number.isFinite(recencyBars252Raw) && recencyBars252Raw > 0 ? Math.floor(recencyBars252Raw) : 252;
+    const minOpensLast63 = Number.isFinite(minOpensLast63Raw) ? minOpensLast63Raw : 1;
+    const minFlatPctLast63 = Number.isFinite(minFlatPctLast63Raw) ? minFlatPctLast63Raw : 1;
+    const enforceRecencyChecks = enforceRecency !== false;
 
     const tradingConfig: Trading212CfdConfig = {
-      leverage: Number.isFinite(leverageRaw) && leverageRaw > 0 ? leverageRaw : 5,
+      leverage,
       fxFeeRate: 0.005,
       dailyLongSwapRate: 0,
       dailyShortSwapRate: 0,
-      spreadBps: Number.isFinite(spreadBpsRaw) ? spreadBpsRaw : 0,
+      spreadBps: costBps,
       marginCallLevel: 0.45,
       stopOutLevel: 0.25,
-      positionFraction: Number.isFinite(positionFractionRaw) && positionFractionRaw > 0 ? positionFractionRaw : 0.25,
+      positionFraction,
     };
+
+    const cacheKey = buildZWfoThresholdCacheKey({
+      symbol,
+      dataEnd: dataEndUsed,
+      h: horizon,
+      coverage,
+      lambda,
+      trainFraction,
+      minTrainObs,
+      shrinkK: shrinkFactor,
+      trainLen,
+      valLen,
+      stepLen,
+      quantilesEnter,
+      quantilesExit,
+      quantilesFlip,
+      costBps,
+      leverage,
+      posFrac: positionFraction,
+      initialEquity,
+      minFlatPct,
+      minCloses,
+      maxFlipPct,
+      flipGamma,
+      tradeEta,
+      simStartDate: reactionMap.meta.testStart ?? null,
+      minOpensInLast63: minOpensLast63,
+      minFlatPctLast63,
+      recencyBars63,
+      recencyBars252,
+      enforceRecency: enforceRecencyChecks,
+    });
+
+    const cached = await getZWfoThresholdCache(cacheKey, {
+      allowStale,
+      maxStaleTradingDays: 5,
+      tradingDays,
+      targetDataEnd: dataEndUsed,
+    });
+
+    if (cached.value) {
+      return NextResponse.json({
+        success: true,
+        symbol,
+        horizon,
+        best: cached.value.best,
+        foldSummaries: cached.value.foldSummaries,
+        zEdgeSamples: cached.value.zEdgeSamples,
+        reactionMeta: reactionMap.meta,
+        cacheHit: true,
+        cacheStale: cached.cacheStale,
+        staleDays: cached.staleDays,
+        dataEndUsed: cached.value.dataEndUsed ?? dataEndUsed,
+      });
+    }
 
     const result = await optimizeZHysteresisThresholds({
       symbol,
@@ -112,23 +203,36 @@ export async function GET(
       quantilesExit,
       quantilesFlip,
       tradingConfig,
-      initialEquity: Number.isFinite(initialEquityRaw) && initialEquityRaw > 0 ? initialEquityRaw : 5000,
-      minFlatPct: Number.isFinite(minFlatPctRaw) ? minFlatPctRaw : 2,
-      minCloses: Number.isFinite(minClosesRaw) ? minClosesRaw : 1,
-      maxFlipPct: maxFlipPctRaw != null ? Number(maxFlipPctRaw) : null,
+      initialEquity,
+      minFlatPct,
+      minCloses,
+      maxFlipPct,
+      minOpensInLast63: minOpensLast63,
+      minFlatPctLast63,
+      recencyBars63,
+      recencyBars252,
+      enforceRecency: enforceRecencyChecks,
       scorePenalty: {
-        flipGamma: Number.isFinite(flipGammaRaw) ? flipGammaRaw : 0,
-        tradeEta: Number.isFinite(tradeEtaRaw) ? tradeEtaRaw : 0,
+        flipGamma,
+        tradeEta,
       },
     });
+
+    const payload = {
+      ...result,
+      cacheHit: false,
+      cacheStale: false,
+      staleDays: null as number | null,
+      dataEndUsed,
+    };
+
+    await setZWfoThresholdCache(cacheKey, payload);
 
     return NextResponse.json({
       success: true,
       symbol,
       horizon,
-      best: result.best,
-      foldSummaries: result.foldSummaries,
-      zEdgeSamples: result.zEdgeSamples,
+      ...payload,
       reactionMeta: reactionMap.meta,
     });
   } catch (err: unknown) {

@@ -43,6 +43,7 @@ import {
   PairedTradesSummary,
   RealTradesOverlay,
 } from '@/lib/trading212/tradesClient';
+import { selectTradesForChartMarkers, type TradeOverlaySource } from '@/lib/trading212/tradeOverlayFallback';
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import { StickyTickerBar } from '@/components/StickyTickerBar';
@@ -50,6 +51,7 @@ import TrendSection from '@/components/trend/TrendSection';
 import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
 import { computeEwmaSeries, computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
 import { useLiveQuote } from '@/lib/hooks/useLiveQuote';
+import { decideZOptimizeApply } from '@/lib/volatility/zOptimizeApplyPolicy';
 
 /**
  * Data flow (Timing/Trend):
@@ -466,6 +468,11 @@ export default function TimingPage({ params }: TimingPageProps) {
     baselineScore: number;
     bestScore: number;
     reason?: string;
+    selectionTier: "strict" | "bestEffort" | "fallbackAuto";
+    strictPass: boolean;
+    recencyPass: boolean;
+    failedConstraints?: string[];
+    recency?: any;
   };
 
   const [reactionMapSummary, setReactionMapSummary] = useState<ReactionMapSummary | null>(null);
@@ -505,6 +512,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     trainSpan: { start: string; end: string } | null;
     updatedAt: string | null;
     cacheHit?: boolean;
+    cacheStale?: boolean;
+    staleDays?: number | null;
     objective?: string | null;
     note?: string | null;
     noTrade?: boolean;
@@ -707,6 +716,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     label: string;
     color: string; // hex color for this run
     trades: Trading212Trade[];
+    source?: TradeOverlaySource;
   };
 
   const [t212Runs, setT212Runs] = useState<Trading212SimRun[]>([]);
@@ -1036,12 +1046,21 @@ export default function TimingPage({ params }: TimingPageProps) {
     };
     const simOverlays = t212Runs
       .filter((run) => t212VisibleRunIds.has(run.id))
-      .map((run) => ({
-        runId: run.id,
-        label: run.label,
-        color: runColors[run.id],
-        trades: run.windowResult?.result?.trades ?? run.result.trades,
-      }));
+      .map((run) => {
+        const { trades, source } = selectTradesForChartMarkers({
+          windowResult: run.windowResult ?? null,
+          globalTrades: run.result.trades,
+          visibleWindow,
+          strategyStartDate: run.strategyStartDate ?? null,
+        });
+        return {
+          runId: run.id,
+          label: run.label,
+          color: runColors[run.id],
+          trades,
+          source,
+        };
+      });
     
     // Include real trades overlay if available and enabled
     if (realTradesOverlay) {
@@ -1057,7 +1076,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
     
     return simOverlays;
-  }, [t212Runs, t212VisibleRunIds, realTradesOverlay]);
+  }, [t212Runs, t212VisibleRunIds, realTradesOverlay, visibleWindow]);
 
   // Active run (solo mode) for equity chart
   const t212ActiveRun = useMemo(() => {
@@ -1068,12 +1087,12 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [t212Runs, activeT212RunId, t212VisibleRunIds]);
 
   const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
-    const res = t212ActiveRun?.windowResult?.result ?? t212ActiveRun?.result ?? null;
+    const res = t212ActiveRun?.windowResult?.result ?? null;
     return res?.accountHistory ?? null;
   }, [t212ActiveRun]);
 
   const t212ActiveTrades: Trading212Trade[] | null = useMemo(() => {
-    const res = t212ActiveRun?.windowResult?.result ?? t212ActiveRun?.result ?? null;
+    const res = t212ActiveRun?.windowResult?.result ?? null;
     return res?.trades ?? null;
   }, [t212ActiveRun]);
 
@@ -2521,7 +2540,7 @@ export default function TimingPage({ params }: TimingPageProps) {
         throw new Error(json.error || "Failed to optimize z thresholds");
       }
 
-      setT212ZOptimizeResult({
+      const candidate = {
         thresholds: json.best.thresholds,
         quantiles: json.best.quantiles,
         meanScore: json.best.meanScore,
@@ -2533,8 +2552,16 @@ export default function TimingPage({ params }: TimingPageProps) {
         baselineScore: json.best.baselineScore,
         bestScore: json.best.bestScore,
         reason: json.best.reason,
-      });
-      setT212ZDisplayThresholds(json.best.thresholds);
+        selectionTier: json.best.selectionTier,
+        strictPass: json.best.strictPass,
+        recencyPass: json.best.recencyPass,
+        failedConstraints: json.best.failedConstraints,
+        recency: json.best.recency,
+      } as ZOptimizeResult;
+
+      const decision = decideZOptimizeApply(candidate);
+      setT212ZOptimizeResult(candidate);
+      setT212ZDisplayThresholds(decision.applied ? candidate.thresholds : null);
       setT212ZMode("optimize");
     } catch (err: any) {
       console.error("[Z-OPTIMIZE] error", err);
@@ -2595,6 +2622,8 @@ export default function TimingPage({ params }: TimingPageProps) {
         trainSpan: json.trainSpan ?? null,
         updatedAt: json.updatedAt ?? null,
         cacheHit: json.cacheHit ?? false,
+        cacheStale: json.cacheStale ?? false,
+        staleDays: json.staleDays ?? null,
         objective: json.objective ?? "calmar",
         note: json.note ?? null,
         noTrade: json.noTrade ?? false,
@@ -3106,6 +3135,14 @@ export default function TimingPage({ params }: TimingPageProps) {
           }
         }
 
+        const zOptimizeDecision = decideZOptimizeApply(t212ZOptimizeResult);
+        const effectiveZMode =
+          t212SignalRule === "z" && t212ZMode === "optimize"
+            ? zOptimizeDecision.applied
+              ? "optimize"
+              : "auto"
+            : t212ZMode;
+
         const bars = isNoTradeBaseline
           ? rowsForSim
               .filter((row) => {
@@ -3126,12 +3163,12 @@ export default function TimingPage({ params }: TimingPageProps) {
                 trendWeight: canUseTrendTilt ? trendWeight! : null,
                 trendZByDate,
                 horizon: h,
-                zMode: t212ZMode,
+                zMode: effectiveZMode,
                 signalRule: t212SignalRule,
                 zEnter: t212ZEnter,
                 zExit: t212ZExit,
                 zFlip: t212ZFlip,
-                optimizedThresholds: t212ZOptimizeResult?.thresholds ?? null,
+                optimizedThresholds: zOptimizeDecision.applied ? t212ZOptimizeResult?.thresholds ?? null : null,
               }
             );
 
@@ -6437,6 +6474,22 @@ export default function TimingPage({ params }: TimingPageProps) {
                     </span>
                   )}
                 </div>
+                {biasedMaxCalmarResult && (
+                  <div className={`text-[10px] mb-2 ${isDarkMode ? 'text-slate-400' : 'text-gray-600'}`}>
+                    <span className="mr-2">
+                      Range start used:{" "}
+                      <span className="font-mono text-[11px]">
+                        {biasedMaxCalmarResult.rangeStartUsed ?? "—"}
+                      </span>
+                    </span>
+                    <span>
+                      Train end used:{" "}
+                      <span className="font-mono text-[11px]">
+                        {biasedMaxCalmarResult.trainEndUsed ?? "—"}
+                      </span>
+                    </span>
+                  </div>
+                )}
 
                 <div className="space-y-3 text-xs">
                   <div className="flex items-center justify-between">
@@ -6486,7 +6539,13 @@ export default function TimingPage({ params }: TimingPageProps) {
                     {biasedMaxCalmarResult?.updatedAt && (
                       <span>
                         Updated {new Date(biasedMaxCalmarResult.updatedAt).toLocaleString()}
-                        {biasedMaxCalmarResult.cacheHit ? " (cache)" : ""}
+                        {biasedMaxCalmarResult.cacheHit
+                          ? ` (cache${biasedMaxCalmarResult.cacheStale ? ", stale" : ""}${
+                              biasedMaxCalmarResult.cacheStale && biasedMaxCalmarResult.staleDays != null
+                                ? `, ${biasedMaxCalmarResult.staleDays}d`
+                                : ""
+                            })`
+                          : ""}
                       </span>
                     )}
                   </div>

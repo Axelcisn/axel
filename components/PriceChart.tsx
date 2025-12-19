@@ -355,6 +355,7 @@ export interface Trading212TradeOverlay {
   label: string;
   color: string;  // hex color for this run
   trades: Trading212TradeInfo[];
+  source?: "windowSim" | "globalFallback";
 }
 
 /** Simulation run summary for comparison table */
@@ -481,6 +482,19 @@ interface PriceChartProps {
     baselineScore: number;
     bestScore: number;
     reason?: string;
+    selectionTier?: "strict" | "bestEffort" | "fallbackAuto";
+    strictPass?: boolean;
+    recencyPass?: boolean;
+    failedConstraints?: string[];
+    recency?: {
+      recent?: { opens?: number; flatPct?: number };
+      constraints?: {
+        minOpensInLast63?: number;
+        minFlatPctLast63?: number;
+        bars63?: number;
+        enforceRecency?: boolean;
+      };
+    } | null;
   } | null;
   isOptimizingZThresholds?: boolean;
   t212ZOptimizeError?: string | null;
@@ -838,6 +852,31 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   const optimizedApplyDisabled =
     !t212ZOptimized || !optimizedOrderingValid || isOptimizingZThresholds || !onApplyOptimizedZThresholds;
+
+  const optimizedSelectionTier = t212ZOptimized?.selectionTier ?? "strict";
+  const optimizedStrictPass = !!t212ZOptimized?.strictPass;
+  const optimizedRecencyPass = !!t212ZOptimized?.recencyPass;
+  const optimizedFailedConstraints = t212ZOptimized?.failedConstraints ?? [];
+  const optimizedRecencyRules = useMemo(() => {
+    const constraints = t212ZOptimized?.recency?.constraints;
+    return {
+      minOpens: constraints?.minOpensInLast63 ?? 1,
+      minFlatPct: constraints?.minFlatPctLast63 ?? 1,
+      bars63: constraints?.bars63 ?? 63,
+      enforceRecency: constraints?.enforceRecency !== false,
+    };
+  }, [t212ZOptimized?.recency?.constraints]);
+
+  const optimizedReasonLabel = useMemo(() => {
+    if (!t212ZOptimized?.reason) return null;
+    if (optimizedSelectionTier === "strict") {
+      if (t212ZOptimized.reason === "bestScore<=baselineScore" || t212ZOptimized.reason === "bestScore<=0") {
+        return { label: "Perf note", text: t212ZOptimized.reason };
+      }
+      return { label: "Reason", text: t212ZOptimized.reason };
+    }
+    return { label: "Fallback reason", text: t212ZOptimized.reason };
+  }, [optimizedSelectionTier, t212ZOptimized?.reason]);
 
   const [showSimRangeMenu, setShowSimRangeMenu] = useState(false);
   const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(visibleWindow?.start ?? "");
@@ -3177,7 +3216,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [equityStatsBase, equityLookup, hoveredDate]);
 
   const summaryTrades = useMemo(() => {
-    const trades = tradeOverlays?.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
+    const overlaysForStats =
+      tradeOverlays?.filter((o) => o.source !== "globalFallback") ?? [];
+    const trades = overlaysForStats.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
     if (!activeSimWindow) return trades;
     const { start, end } = activeSimWindow;
     return trades.filter((t) => {
@@ -3784,6 +3825,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     type: Trading212TooltipEventType;
     runId: string;
     runLabel: string;
+    source?: "windowSim" | "globalFallback";
     side: 'long' | 'short';
     entryDate: string;
     entryPrice: number;
@@ -3903,6 +3945,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         const base = {
           runId: overlay.runId,
           runLabel: overlay.label,
+          source: overlay.source,
           side: trade.side,
         };
 
@@ -6300,6 +6343,19 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                       WFO Optimize
                                     </div>
                                     <div className="flex flex-col gap-0.5">
+                                      {optimizedSelectionTier !== "strict" && (
+                                        <span
+                                          className={`
+                                            px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
+                                            ${isDarkMode
+                                              ? 'bg-amber-500/20 text-amber-200'
+                                              : 'bg-amber-50 text-amber-700'
+                                            }
+                                          `}
+                                        >
+                                          {optimizedSelectionTier === "fallbackAuto" ? "Fallback: Auto thresholds" : "Best-effort"}
+                                        </span>
+                                      )}
                                       <span
                                         className={`
                                           px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
@@ -6352,6 +6408,42 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                                         {optimizedBestScore?.text ?? "—"}
                                       </div>
                                     </div>
+                                  </div>
+
+                                  <div className="pt-1.5 space-y-1 text-[10px] border-t border-slate-700/30">
+                                    <div className={`${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
+                                      Tier: {optimizedSelectionTier} · strictPass: {optimizedStrictPass ? "true" : "false"} · recencyPass: {optimizedRecencyPass ? "true" : "false"}
+                                    </div>
+                                    {optimizedSelectionTier !== "strict" && (
+                                      <div className="flex items-start gap-1.5">
+                                        <span className={`${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>Failed constraints</span>
+                                        <div className="flex flex-wrap gap-1">
+                                          {(optimizedFailedConstraints.length ? optimizedFailedConstraints : ["—"]).map((fc, idx) => (
+                                            <span
+                                              key={`${fc}-${idx}`}
+                                              className={`
+                                                px-1.5 py-0.5 rounded text-[9px] font-medium
+                                                ${isDarkMode ? "bg-slate-800 text-slate-200" : "bg-gray-100 text-gray-800"}
+                                              `}
+                                            >
+                                              {fc}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    )}
+                                    <div className="flex items-start gap-1.5">
+                                      <span className={`${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>Recency rules</span>
+                                      <div className={`${isDarkMode ? "text-slate-200" : "text-gray-800"}`}>
+                                        opens≥{optimizedRecencyRules.minOpens} in last {optimizedRecencyRules.bars63} bars; flat≥{optimizedRecencyRules.minFlatPct}%
+                                      </div>
+                                    </div>
+                                    {optimizedReasonLabel && (
+                                      <div className="flex items-start gap-1.5">
+                                        <span className={`${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>{optimizedReasonLabel.label}</span>
+                                        <span className={`${isDarkMode ? "text-slate-200" : "text-gray-800"}`}>{optimizedReasonLabel.text}</span>
+                                      </div>
+                                    )}
                                   </div>
 
                                   {/* Quantiles */}
@@ -7639,6 +7731,7 @@ interface PriceTooltipProps {
   trading212EventsByDate?: Map<string, {
     type: 'open' | 'close';
     runLabel: string;
+    source?: "windowSim" | "globalFallback";
     side: 'long' | 'short';
     entryDate: string;
     entryPrice: number;
@@ -7749,6 +7842,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   
   // Get Trading212 events for this date from the map (opens AND closes)
   const t212Events = trading212EventsByDate?.get(labelStr) ?? [];
+  const t212HasGlobalFallbackMarkers = t212Events.some((e) => e.source === "globalFallback");
   
   // Legacy: Extract trade markers from scatter payload (for backwards compat)
   const tradeMarkers: TradeMarkerPointForTooltip[] = (payload ?? [])
@@ -8132,6 +8226,11 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               }`}>
                 Trade
               </span>
+              {t212HasGlobalFallbackMarkers && (
+                <div className={`mt-1 text-[9px] ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
+                  Markers from global run (strict restart blocked)
+                </div>
+              )}
             </div>
             
             <div className="space-y-1.5 text-[10px]">

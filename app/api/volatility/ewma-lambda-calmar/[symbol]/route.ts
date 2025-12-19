@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { loadCalmarTrainingData, optimizeEwmaLambdaCalmar } from "@/lib/volatility/ewmaLambdaCalmar";
 import {
-  buildLambdaCalmarCacheKey,
+  buildLambdaCalmarCacheKeyParts,
   getLambdaCalmarCache,
   setLambdaCalmarCache,
 } from "@/lib/cache/lambdaCalmarCache";
@@ -34,6 +34,7 @@ export async function GET(
     const shrinkFactor = Number(searchParams.get("shrinkFactor") ?? "0.5");
     const signalRule = (searchParams.get("signalRule") ?? "z").toLowerCase();
     const objective = "calmar";
+    const allowStale = searchParams.get("allowStale") === "1" || searchParams.get("allowStale") === "true";
 
     if (!Number.isFinite(coverage) || coverage <= 0 || coverage >= 1) {
       return NextResponse.json(
@@ -74,8 +75,9 @@ export async function GET(
 
     const trainingData = await loadCalmarTrainingData(symbol, rangeStart);
     const trainEndUsed = trainingData.trainEnd;
+    const tradingDays = trainingData.trainRows.map((r) => r.date).filter((d): d is string => !!d);
 
-    const cacheKey = buildLambdaCalmarCacheKey({
+    const cacheKeyParts = buildLambdaCalmarCacheKeyParts({
       symbol,
       trainEndUsed,
       h: horizon,
@@ -88,14 +90,25 @@ export async function GET(
       shrinkFactor,
     });
 
-    const cached = await getLambdaCalmarCache(cacheKey);
-    if (cached) {
+    const cached = await getLambdaCalmarCache(cacheKeyParts, {
+      allowStale,
+      maxStaleTradingDays: 5,
+      tradingDays,
+      targetTrainEnd: trainEndUsed,
+    });
+
+    if (cached.value) {
+      const payload = {
+        ...cached.value,
+        cacheHit: true,
+        cacheStale: cached.cacheStale,
+        staleDays: cached.staleDays,
+        rangeStartUsed: cached.value.rangeStartUsed ?? rangeStart,
+        trainEndUsed: cached.value.trainEndUsed ?? trainEndUsed,
+      };
       return NextResponse.json({
         success: true,
-        ...cached,
-        cacheHit: true,
-        rangeStartUsed: cached.rangeStartUsed ?? rangeStart,
-        trainEndUsed: cached.trainEndUsed ?? trainEndUsed,
+        ...payload,
       });
     }
 
@@ -115,12 +128,14 @@ export async function GET(
 
     const payload = {
       ...result,
-      cacheHit: false,
       objective,
       rangeStartUsed: rangeStart,
       trainEndUsed,
+      cacheHit: false,
+      cacheStale: false,
+      staleDays: null as number | null,
     };
-    await setLambdaCalmarCache(cacheKey, payload);
+    await setLambdaCalmarCache(cacheKeyParts, payload);
 
     return NextResponse.json({ success: true, ...payload });
   } catch (err: any) {
