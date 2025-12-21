@@ -6,17 +6,13 @@
  * KO + random tickers to ensure the API returns valid forecasts.
  * 
  * Usage:
- *   npx tsx scripts/smoke-volatility-models.ts --baseUrl=http://localhost:3000 --symbols=KO --random=3 --seed=42
+ *   npx tsx scripts/smoke-volatility-models.ts --baseUrl=http://localhost:3000 --symbols=KO --random=3 --seed=42 --h=1 --cov=0.95 --window=504 --lambda=0.94
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
+import * as fs from "node:fs";
+import * as path from "node:path";
 
-// ============================================================================
-// CLI Argument Parsing
-// ============================================================================
-
-interface CliArgs {
+type Args = {
   baseUrl: string;
   symbols: string[];
   random: number;
@@ -25,502 +21,377 @@ interface CliArgs {
   cov: number;
   window: number;
   lambda: number;
+  timeoutMs: number;
+};
+
+type VolModelSpec = {
+  name: string;
+  model: string; // request model string
+  required: boolean;
+  buildParams: (a: Args) => any;
+  // Return true if response method matches the requested model family
+  methodOk: (respMethod: string | null | undefined) => boolean;
+  // Whether a non-200 can be treated as SKIPPED (HAR-RV only)
+  isSkippable?: (status: number, body: any) => boolean;
+};
+
+function parseArgs(argv: string[]): Args {
+  const out: any = {};
+  for (const raw of argv) {
+    if (!raw.startsWith("--")) continue;
+    const [k, vRaw] = raw.slice(2).split("=");
+    out[k] = vRaw ?? "true";
+  }
+
+  const symbols = String(out.symbols ?? "KO")
+    .split(",")
+    .map((s: string) => s.trim())
+    .filter(Boolean);
+
+  return {
+    baseUrl: String(out.baseUrl ?? "http://localhost:3000").replace(/\/$/, ""),
+    symbols,
+    random: Number(out.random ?? 3),
+    seed: Number(out.seed ?? 42),
+    h: Number(out.h ?? 1),
+    cov: Number(out.cov ?? 0.95),
+    window: Number(out.window ?? 504),
+    lambda: Number(out.lambda ?? 0.94),
+    timeoutMs: Number(out.timeoutMs ?? 20_000),
+  };
 }
 
-function parseArgs(): CliArgs {
-  const args: CliArgs = {
-    baseUrl: 'http://localhost:3000',
-    symbols: ['KO'],
-    random: 3,
-    seed: 42,
-    h: 1,
-    cov: 0.95,
-    window: 504,
-    lambda: 0.94,
+// Seeded RNG (Mulberry32)
+function mulberry32(seed: number) {
+  let t = seed >>> 0;
+  return function () {
+    t += 0x6d2b79f5;
+    let x = Math.imul(t ^ (t >>> 15), 1 | t);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffle<T>(arr: T[], rnd: () => number): T[] {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function listCanonicalSymbols(): string[] {
+  const dir = path.join(process.cwd(), "data", "canonical");
+  const files = fs.readdirSync(dir);
+  return files
+    .filter((f) => f.toLowerCase().endsWith(".json"))
+    .map((f) => f.replace(/\.json$/i, ""))
+    .filter((s) => /^[A-Z0-9]+$/.test(s.toUpperCase()))
+    .map((s) => s.toUpperCase());
+}
+
+function padRight(s: string, n: number) {
+  if (s.length >= n) return s;
+  return s + " ".repeat(n - s.length);
+}
+
+function fmtNum(x: any, digits = 4): string {
+  if (x == null || !Number.isFinite(Number(x))) return "-";
+  return Number(x).toFixed(digits);
+}
+
+function fmtPct(x: any, digits = 2): string {
+  if (x == null || !Number.isFinite(Number(x))) return "-";
+  return (Number(x) * 100).toFixed(digits) + "%";
+}
+
+async function fetchJsonWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await fetch(url, { ...init, signal: ctrl.signal });
+    const text = await resp.text();
+    let json: any = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = { _raw: text };
+    }
+    return { resp, json };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// Extractors (be tolerant to schema evolution)
+function getMethod(body: any): string | null {
+  return body?.method ?? body?.meta?.method ?? null;
+}
+function getSigma1d(body: any): number | null {
+  return (
+    body?.estimates?.sigma_forecast ??
+    body?.estimates?.sigma_1d ??
+    body?.sigma_forecast ??
+    body?.sigma_1d ??
+    null
+  );
+}
+function getYHat(body: any): number | null {
+  return body?.y_hat ?? body?.yHat ?? null;
+}
+function getL(body: any): number | null {
+  return body?.intervals?.L_h ?? body?.intervals?.lower ?? body?.L_h ?? body?.lower ?? null;
+}
+function getU(body: any): number | null {
+  return body?.intervals?.U_h ?? body?.intervals?.upper ?? body?.U_h ?? body?.upper ?? null;
+}
+function getBwPct(body: any): number | null {
+  const y = getYHat(body);
+  const L = getL(body);
+  const U = getU(body);
+  if (y == null || L == null || U == null) return null;
+  if (!Number.isFinite(y) || y <= 0) return null;
+  return (U - L) / y;
+}
+
+function isHarRvUnavailable(status: number, body: any): boolean {
+  if (status === 422) return true;
+  const msg = String(body?.error ?? body?.details ?? body?.code ?? "").toLowerCase();
+  return msg.includes("rv") || msg.includes("realized") || msg.includes("har");
+}
+
+function makeSpecs(): VolModelSpec[] {
+  const exact = (m: string) => (respMethod: string | null | undefined) => {
+    if (!respMethod) return false;
+    return respMethod === m;
+  };
+  const gbmOk = (respMethod: string | null | undefined) => {
+    if (!respMethod) return false;
+    return respMethod === "GBM" || respMethod === "GBM-CC" || respMethod.startsWith("GBM");
   };
 
-  for (const arg of process.argv.slice(2)) {
-    const [key, value] = arg.split('=');
-    switch (key) {
-      case '--baseUrl':
-        args.baseUrl = value;
-        break;
-      case '--symbols':
-        args.symbols = value.split(',').map(s => s.trim().toUpperCase());
-        break;
-      case '--random':
-        args.random = parseInt(value, 10);
-        break;
-      case '--seed':
-        args.seed = parseInt(value, 10);
-        break;
-      case '--h':
-        args.h = parseInt(value, 10);
-        break;
-      case '--cov':
-        args.cov = parseFloat(value);
-        break;
-      case '--window':
-        args.window = parseInt(value, 10);
-        break;
-      case '--lambda':
-        args.lambda = parseFloat(value);
-        break;
-    }
-  }
-
-  return args;
-}
-
-// ============================================================================
-// Seeded Random Number Generator
-// ============================================================================
-
-class SeededRandom {
-  private seed: number;
-
-  constructor(seed: number) {
-    this.seed = seed;
-  }
-
-  next(): number {
-    // Simple LCG (Linear Congruential Generator)
-    this.seed = (this.seed * 1103515245 + 12345) & 0x7fffffff;
-    return this.seed / 0x7fffffff;
-  }
-
-  shuffle<T>(array: T[]): T[] {
-    const result = [...array];
-    for (let i = result.length - 1; i > 0; i--) {
-      const j = Math.floor(this.next() * (i + 1));
-      [result[i], result[j]] = [result[j], result[i]];
-    }
-    return result;
-  }
-}
-
-// ============================================================================
-// Symbol Selection
-// ============================================================================
-
-function getAvailableSymbols(): string[] {
-  const canonicalDir = path.join(process.cwd(), 'data', 'canonical');
-  const files = fs.readdirSync(canonicalDir);
-  
-  return files
-    .filter(f => f.endsWith('.json'))
-    .map(f => f.replace('.json', ''))
-    .filter(s => /^[A-Z0-9]+$/.test(s)); // Only alphanumeric symbols
-}
-
-function selectRandomSymbols(
-  available: string[],
-  exclude: string[],
-  count: number,
-  seed: number
-): string[] {
-  const excludeSet = new Set(exclude.map(s => s.toUpperCase()));
-  const candidates = available.filter(s => !excludeSet.has(s));
-  
-  if (candidates.length === 0) {
-    console.warn('⚠️  No candidates available after exclusions');
-    return [];
-  }
-  
-  const rng = new SeededRandom(seed);
-  const shuffled = rng.shuffle(candidates);
-  return shuffled.slice(0, Math.min(count, shuffled.length));
-}
-
-// ============================================================================
-// Model Definitions
-// ============================================================================
-
-interface ModelSpec {
-  name: string;
-  model: string;
-  params: any;
-  optional?: boolean;
-}
-
-function buildModelSpecs(window: number, lambda: number): ModelSpec[] {
   return [
-    // GBM
     {
-      name: 'GBM',
-      model: 'GBM-CC',
-      params: {
-        gbm: {
-          windowN: window,
-          lambdaDrift: lambda,
-        },
-      },
-    },
-    
-    // GARCH Normal
-    {
-      name: 'GARCH11-N',
-      model: 'GARCH11-N',
-      params: {
-        garch: {
-          window,
-          dist: 'normal',
-        },
-      },
-    },
-    
-    // GARCH Student-t
-    {
-      name: 'GARCH11-t',
-      model: 'GARCH11-t',
-      params: {
-        garch: {
-          window,
-          dist: 'student-t',
-        },
-      },
-    },
-    
-    // Range estimators
-    {
-      name: 'Range-P',
-      model: 'Range-P',
-      params: {
-        range: {
-          window,
-          ewma_lambda: lambda,
-        },
-      },
+      name: "GBM",
+      model: "GBM",
+      required: true,
+      buildParams: (a) => ({ gbm: { window: a.window } }),
+      methodOk: gbmOk,
     },
     {
-      name: 'Range-GK',
-      model: 'Range-GK',
-      params: {
-        range: {
-          window,
-          ewma_lambda: lambda,
-        },
-      },
+      name: "GARCH11-N",
+      model: "GARCH11-N",
+      required: true,
+      buildParams: (a) => ({ garch: { window: a.window, dist: "normal" } }),
+      methodOk: exact("GARCH11-N"),
     },
     {
-      name: 'Range-RS',
-      model: 'Range-RS',
-      params: {
-        range: {
-          window,
-          ewma_lambda: lambda,
-        },
-      },
+      name: "GARCH11-t",
+      model: "GARCH11-t",
+      required: true,
+      buildParams: (a) => ({ garch: { window: a.window, dist: "student-t" } }),
+      methodOk: exact("GARCH11-t"),
     },
     {
-      name: 'Range-YZ',
-      model: 'Range-YZ',
-      params: {
-        range: {
-          window,
-          ewma_lambda: lambda,
-        },
-      },
+      name: "Range-P",
+      model: "Range-P",
+      required: true,
+      buildParams: (a) => ({ range: { window: a.window, ewma_lambda: a.lambda } }),
+      methodOk: exact("Range-P"),
     },
-    
-    // HAR-RV (optional - may not have RV data)
     {
-      name: 'HAR-RV',
-      model: 'HAR-RV',
-      params: {
-        har: {
-          window,
-        },
-      },
-      optional: true,
+      name: "Range-GK",
+      model: "Range-GK",
+      required: true,
+      buildParams: (a) => ({ range: { window: a.window, ewma_lambda: a.lambda } }),
+      methodOk: exact("Range-GK"),
+    },
+    {
+      name: "Range-RS",
+      model: "Range-RS",
+      required: true,
+      buildParams: (a) => ({ range: { window: a.window, ewma_lambda: a.lambda } }),
+      methodOk: exact("Range-RS"),
+    },
+    {
+      name: "Range-YZ",
+      model: "Range-YZ",
+      required: true,
+      buildParams: (a) => ({ range: { window: a.window, ewma_lambda: a.lambda } }),
+      methodOk: exact("Range-YZ"),
+    },
+    {
+      name: "HAR-RV",
+      model: "HAR-RV",
+      required: false,
+      buildParams: (a) => ({ har: { window: a.window } }),
+      methodOk: exact("HAR-RV"),
+      isSkippable: isHarRvUnavailable,
     },
   ];
 }
 
-// ============================================================================
-// API Testing
-// ============================================================================
-
-interface TestResult {
-  symbol: string;
-  modelName: string;
-  status: number;
-  outcome: 'OK' | 'FAIL' | 'SKIPPED';
-  method?: string;
-  sigma_1d?: number;
-  y_hat?: number;
-  L_h?: number;
-  U_h?: number;
-  bandWidthPct?: number;
-  error?: string;
-  mismatch?: boolean;
-}
-
-async function testVolatilityModel(
-  baseUrl: string,
-  symbol: string,
-  spec: ModelSpec,
-  h: number,
-  coverage: number
-): Promise<TestResult> {
-  const url = `${baseUrl}/api/volatility/${symbol}`;
-  const body = {
-    model: spec.model,
-    params: spec.params,
-    h,
-    coverage,
-  };
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000); // 20s timeout
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    const data = await response.json();
-
-    // Check for known HAR-RV unavailable errors
-    if (spec.optional && !response.ok) {
-      const errorMsg = data.error || '';
-      const errorCode = data.code || '';
-      if (
-        errorCode === 'INSUFFICIENT_HAR_DATA' ||
-        errorMsg.includes('HAR-RV disabled') ||
-        errorMsg.includes('no realized volatility') ||
-        errorMsg.includes('Insufficient RV data')
-      ) {
-        return {
-          symbol,
-          modelName: spec.name,
-          status: response.status,
-          outcome: 'SKIPPED',
-          error: 'RV data not available',
-        };
-      }
-    }
-
-    // Check for success
-    if (!response.ok) {
-      return {
-        symbol,
-        modelName: spec.name,
-        status: response.status,
-        outcome: 'FAIL',
-        error: data.error || data.message || `HTTP ${response.status}`,
-      };
-    }
-
-    // Extract forecast data
-    const method = data.method || '';
-    const sigma_1d = data.estimates?.sigma_forecast || data.sigma_1d;
-    const y_hat = data.y_hat;
-    const L_h = data.L_h;
-    const U_h = data.U_h;
-
-    let bandWidthPct: number | undefined;
-    if (y_hat && L_h !== undefined && U_h !== undefined && y_hat > 0) {
-      bandWidthPct = ((U_h - L_h) / y_hat) * 100;
-    }
-
-    // Check for model mismatch
-    const expectedPrefix = spec.model.split('-')[0]; // e.g., "Range" from "Range-GK"
-    const mismatch = method && !method.startsWith(expectedPrefix);
-
-    return {
-      symbol,
-      modelName: spec.name,
-      status: response.status,
-      outcome: mismatch ? 'FAIL' : 'OK',
-      method,
-      sigma_1d,
-      y_hat,
-      L_h,
-      U_h,
-      bandWidthPct,
-      mismatch,
-      error: mismatch ? `Expected ${spec.model}, got ${method}` : undefined,
-    };
-  } catch (error: any) {
-    clearTimeout(timeout);
-    
-    if (error.name === 'AbortError') {
-      return {
-        symbol,
-        modelName: spec.name,
-        status: 0,
-        outcome: 'FAIL',
-        error: 'Request timeout (>20s)',
-      };
-    }
-
-    return {
-      symbol,
-      modelName: spec.name,
-      status: 0,
-      outcome: 'FAIL',
-      error: error.message || String(error),
-    };
-  }
-}
-
-// ============================================================================
-// Output Formatting
-// ============================================================================
-
-function formatNumber(n: number | undefined, decimals: number = 4): string {
-  if (n === undefined || n === null) return '-';
-  return n.toFixed(decimals);
-}
-
-function printResults(results: TestResult[], symbol: string) {
-  console.log(`\n${'='.repeat(80)}`);
-  console.log(`SYMBOL: ${symbol}`);
-  console.log('='.repeat(80));
-  console.log(
-    `${'Model'.padEnd(15)} ${'Status'.padEnd(8)} ${'Result'.padEnd(9)} ${'Method'.padEnd(12)} ${'σ₁d'.padEnd(10)} ${'ŷ'.padEnd(10)} ${'L_h'.padEnd(10)} ${'U_h'.padEnd(10)} ${'BW%'.padEnd(8)}`
-  );
-  console.log('-'.repeat(80));
-
-  for (const result of results) {
-    const statusStr = result.status > 0 ? String(result.status) : 'ERR';
-    const outcomeColor =
-      result.outcome === 'OK'
-        ? '\x1b[32m' // green
-        : result.outcome === 'SKIPPED'
-        ? '\x1b[33m' // yellow
-        : '\x1b[31m'; // red
-    const resetColor = '\x1b[0m';
-
-    console.log(
-      `${result.modelName.padEnd(15)} ` +
-        `${statusStr.padEnd(8)} ` +
-        `${outcomeColor}${result.outcome.padEnd(9)}${resetColor} ` +
-        `${(result.method || '-').padEnd(12)} ` +
-        `${formatNumber(result.sigma_1d).padEnd(10)} ` +
-        `${formatNumber(result.y_hat, 2).padEnd(10)} ` +
-        `${formatNumber(result.L_h, 2).padEnd(10)} ` +
-        `${formatNumber(result.U_h, 2).padEnd(10)} ` +
-        `${formatNumber(result.bandWidthPct, 2).padEnd(8)}`
-    );
-
-    if (result.error) {
-      console.log(`  └─ Error: ${result.error}`);
-    }
-    if (result.mismatch) {
-      console.log(`  └─ ⚠️  Model mismatch!`);
-    }
-  }
-}
-
-function printSummary(allResults: TestResult[]) {
-  const total = allResults.length;
-  const ok = allResults.filter(r => r.outcome === 'OK').length;
-  const failed = allResults.filter(r => r.outcome === 'FAIL').length;
-  const skipped = allResults.filter(r => r.outcome === 'SKIPPED').length;
-
-  console.log(`\n${'='.repeat(80)}`);
-  console.log('SUMMARY');
-  console.log('='.repeat(80));
-  console.log(`Total tests:    ${total}`);
-  console.log(`\x1b[32m✓ Passed:       ${ok}\x1b[0m`);
-  console.log(`\x1b[31m✗ Failed:       ${failed}\x1b[0m`);
-  console.log(`\x1b[33m⊘ Skipped:      ${skipped}\x1b[0m`);
-  console.log('='.repeat(80));
-
-  if (failed > 0) {
-    console.log('\n\x1b[31m❌ SMOKE TEST FAILED\x1b[0m');
-    console.log('\nFailed tests:');
-    allResults
-      .filter(r => r.outcome === 'FAIL')
-      .forEach(r => {
-        console.log(`  - ${r.symbol} / ${r.modelName}: ${r.error || 'Unknown error'}`);
-      });
-  } else {
-    console.log('\n\x1b[32m✅ SMOKE TEST PASSED\x1b[0m');
-  }
-}
-
-// ============================================================================
-// Main
-// ============================================================================
-
 async function main() {
-  console.log('🔥 Volatility Models Smoke Test\n');
+  const args = parseArgs(process.argv.slice(2));
 
-  const args = parseArgs();
+  const exclude = new Set(["ABT", "NUE", "AIG", "KMI", "SWK", "KO"]);
+  const canonical = listCanonicalSymbols();
+  const rnd = mulberry32(args.seed);
 
-  console.log('Configuration:');
-  console.log(`  Base URL:       ${args.baseUrl}`);
-  console.log(`  Horizon (h):    ${args.h}`);
-  console.log(`  Coverage:       ${args.cov}`);
-  console.log(`  Window:         ${args.window}`);
-  console.log(`  Lambda:         ${args.lambda}`);
-  console.log(`  Random count:   ${args.random}`);
-  console.log(`  Seed:           ${args.seed}`);
+  const mandatory = args.symbols.map((s) => s.toUpperCase());
+  for (const s of mandatory) exclude.add(s);
 
-  // Build symbol list
-  const excludeSet = ['ABT', 'NUE', 'AIG', 'KMI', 'SWK', 'KO'];
-  const available = getAvailableSymbols();
-  const randomSymbols = selectRandomSymbols(available, excludeSet, args.random, args.seed);
-  const allSymbols = Array.from(new Set([...args.symbols, ...randomSymbols]));
+  const pool = canonical.filter((s) => !exclude.has(s));
+  const picked = shuffle(pool, rnd).slice(0, Math.max(0, args.random));
+  const symbols = Array.from(new Set([...mandatory, ...picked]));
 
-  console.log(`\nTesting ${allSymbols.length} symbols:`);
-  console.log(`  Mandatory:      ${args.symbols.join(', ')}`);
-  console.log(`  Random:         ${randomSymbols.join(', ')}`);
+  const specs = makeSpecs();
 
-  // Build model specs
-  const modelSpecs = buildModelSpecs(args.window, args.lambda);
-  console.log(`\nTesting ${modelSpecs.length} models:`);
-  modelSpecs.forEach(spec => {
-    console.log(`  - ${spec.name}${spec.optional ? ' (optional)' : ''}`);
-  });
+  console.log("\n🔥 Volatility Models Smoke Test\n");
+  console.log("Config:");
+  console.log(`  baseUrl: ${args.baseUrl}`);
+  console.log(`  h:       ${args.h}`);
+  console.log(`  cov:     ${args.cov}`);
+  console.log(`  window:  ${args.window}`);
+  console.log(`  lambda:  ${args.lambda}`);
+  console.log(`  seed:    ${args.seed}`);
+  console.log(`  symbols: ${symbols.join(", ")}\n`);
 
-  // Run tests
-  const allResults: TestResult[] = [];
+  let failures = 0;
+  let skipped = 0;
+  let passed = 0;
+  let total = 0;
 
-  for (const symbol of allSymbols) {
-    const symbolResults: TestResult[] = [];
+  for (const symbol of symbols) {
+    console.log("=".repeat(92));
+    console.log(`SYMBOL: ${symbol}`);
+    console.log("=".repeat(92));
+    console.log(
+      [
+        padRight("Model", 14),
+        padRight("Status", 8),
+        padRight("Result", 9),
+        padRight("Method", 12),
+        padRight("σ₁d", 10),
+        padRight("ŷ", 12),
+        padRight("L_h", 12),
+        padRight("U_h", 12),
+        padRight("BW%", 8),
+      ].join(" ")
+    );
+    console.log("-".repeat(92));
 
-    for (const spec of modelSpecs) {
-      const result = await testVolatilityModel(
-        args.baseUrl,
-        symbol,
-        spec,
-        args.h,
-        args.cov
-      );
-      symbolResults.push(result);
-      allResults.push(result);
+    for (const spec of specs) {
+      total += 1;
+      const url = `${args.baseUrl}/api/volatility/${symbol}`;
+      const body = {
+        model: spec.model,
+        params: spec.buildParams(args),
+        h: args.h,
+        coverage: args.cov,
+      };
 
-      // Small delay to avoid overwhelming the server
-      await new Promise(resolve => setTimeout(resolve, 100));
+      let status = 0;
+      let result = "FAIL";
+      let method = "-";
+      let sigma = "-";
+      let yhat = "-";
+      let L = "-";
+      let U = "-";
+      let bw = "-";
+      let extraNote = "";
+
+      try {
+        const { resp, json } = await fetchJsonWithTimeout(
+          url,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          },
+          args.timeoutMs
+        );
+
+        status = resp.status;
+        const respMethod = getMethod(json);
+        method = respMethod ?? "-";
+        sigma = fmtNum(getSigma1d(json), 6);
+        yhat = fmtNum(getYHat(json), 2);
+        L = fmtNum(getL(json), 2);
+        U = fmtNum(getU(json), 2);
+        bw = fmtPct(getBwPct(json), 2);
+
+        const methodMatches = spec.methodOk(respMethod);
+
+        if (resp.ok && methodMatches) {
+          result = "OK";
+          passed += 1;
+        } else if (!resp.ok && spec.isSkippable?.(resp.status, json)) {
+          result = "SKIPPED";
+          skipped += 1;
+          extraNote = String(json?.error ?? json?.details ?? json?.code ?? "").slice(0, 80);
+        } else {
+          result = "FAIL";
+          failures += 1;
+
+          if (resp.ok && !methodMatches) {
+            extraNote = `method mismatch (wanted ${spec.model}, got ${respMethod ?? "null"})`;
+          } else {
+            extraNote = String(json?.error ?? json?.details ?? json?.code ?? "unknown error").slice(0, 80);
+          }
+        }
+      } catch (e: any) {
+        status = 0;
+        result = "FAIL";
+        failures += 1;
+        extraNote = e?.name === "AbortError" ? "timeout" : String(e?.message ?? e);
+      }
+
+      // Required models fail the run if not OK
+      const requiredFail = spec.required && result !== "OK";
+
+      const line =
+        [
+          padRight(spec.name, 14),
+          padRight(String(status || "-"), 8),
+          padRight(requiredFail ? "FAIL*" : result, 9),
+          padRight(method, 12),
+          padRight(sigma, 10),
+          padRight(yhat, 12),
+          padRight(L, 12),
+          padRight(U, 12),
+          padRight(bw, 8),
+        ].join(" ") + (extraNote ? `  └─ ${extraNote}` : "");
+
+      console.log(line);
+
+      // gentle pacing
+      await new Promise((r) => setTimeout(r, 100));
     }
 
-    printResults(symbolResults, symbol);
+    console.log("");
   }
 
-  // Print summary
-  printSummary(allResults);
+  console.log("=".repeat(92));
+  console.log("SUMMARY");
+  console.log("=".repeat(92));
+  console.log(`Total tests: ${total}`);
+  console.log(`✓ Passed:    ${passed}`);
+  console.log(`⊘ Skipped:   ${skipped}`);
+  console.log(`✗ Failed:    ${failures}`);
+  console.log("=".repeat(92));
 
-  // Exit with error if any required model failed
-  const requiredFailures = allResults.filter(
-    r => r.outcome === 'FAIL' && !r.error?.includes('RV data')
-  );
-
-  if (requiredFailures.length > 0) {
+  if (failures > 0) {
+    console.error("\n❌ SMOKE TEST FAILED\n");
     process.exit(1);
+  } else {
+    console.log("\n✅ SMOKE TEST PASSED\n");
+    process.exit(0);
   }
 }
 
-// Run
-main().catch(error => {
-  console.error('\n\x1b[31mFatal error:\x1b[0m', error);
+main().catch((e) => {
+  console.error("Fatal:", e);
   process.exit(1);
 });
