@@ -2716,8 +2716,14 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // Create chart data with forecast band for rendering the connecting lines and filled area
   const chartDataWithForecastBand = useMemo(() => {
-    // Start with the EWMA-merged data
-    let data = [...chartDataWithEwma];
+    // Start with the EWMA-merged data - ALWAYS null out forecast fields to prevent undefined/0 leakage
+    let data = chartDataWithEwma.map(point => ({
+      ...point,
+      forecastCenter: null as number | null,
+      forecastLower: null as number | null,
+      forecastUpper: null as number | null,
+      forecastBand: null as number | null,
+    }));
 
     // We only want to show the volatility band when the visible window
     // actually ends on the latest fullData bar, similar to how chartData
@@ -2917,19 +2923,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [chartDataWithForecastBand, forecastOverlay, overlayDate]);
 
-  // Compute Y-axis domain that includes EWMA values when overlay is active
+  // Compute Y-axis domain from the forecast band dataset (includes price + forecast + EWMA)
+  // CRITICAL: Never use 0-based fallbacks - always base on actual price data
   const priceYDomain = useMemo(() => {
     const values: number[] = [];
     
+    // Scan all price-related fields, prioritizing close/value (always present) then forecast/EWMA
     chartDataWithForecastBand.forEach(p => {
-      // Only include valid positive values (price can't be 0 or negative)
+      // Priority 1: Core price fields (close, value/adj_close, high, low) - ALWAYS present
       if (p.close != null && Number.isFinite(p.close) && p.close > 0) values.push(p.close);
+      if (p.value != null && Number.isFinite(p.value) && p.value > 0) values.push(p.value);
       if (p.high != null && Number.isFinite(p.high) && p.high > 0) values.push(p.high);
       if (p.low != null && Number.isFinite(p.low) && p.low > 0) values.push(p.low);
+      
+      // Priority 2: Forecast band (only if present and positive)
       if (p.forecastCenter != null && Number.isFinite(p.forecastCenter) && p.forecastCenter > 0) values.push(p.forecastCenter);
       if (p.forecastLower != null && Number.isFinite(p.forecastLower) && p.forecastLower > 0) values.push(p.forecastLower);
       if (p.forecastUpper != null && Number.isFinite(p.forecastUpper) && p.forecastUpper > 0) values.push(p.forecastUpper);
-      // Include EWMA values in domain calculation
+      
+      // Priority 3: EWMA overlays (only if enabled)
       if (showUnbiasedEwma) {
         if (p.ewma_forecast != null && Number.isFinite(p.ewma_forecast) && p.ewma_forecast > 0) values.push(p.ewma_forecast);
         if (p.ewma_lower != null && Number.isFinite(p.ewma_lower) && p.ewma_lower > 0) values.push(p.ewma_lower);
@@ -2946,73 +2958,57 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       }
     });
     
-    // If no values found, fall back to price data only (no forecast/EWMA)
-    if (values.length === 0) {
-      chartDataWithForecastBand.forEach(p => {
-        if (p.close != null && Number.isFinite(p.close) && p.close > 0) values.push(p.close);
-        if (p.high != null && Number.isFinite(p.high) && p.high > 0) values.push(p.high);
-        if (p.low != null && Number.isFinite(p.low) && p.low > 0) values.push(p.low);
-      });
+    // If no valid values found, use last known price as fallback (NEVER use 0-based domain)
+    if (values.length === 0 && lastHistoricalPoint) {
+      const fallbackPrice = lastHistoricalPoint.close ?? lastHistoricalPoint.value ?? 100;
+      // Return tight range around last price
+      return [fallbackPrice * 0.95, fallbackPrice * 1.05];
     }
     
-    // Still no values? Return a safe numeric default
+    // Final safety: if still no values and no lastHistoricalPoint, use a reasonable default
     if (values.length === 0) {
-      return [0, 100]; // Safe numeric fallback, never reached in practice
+      console.warn('[PRICE-DOMAIN] No valid price values found, using default range');
+      return [90, 110];
     }
     
     const min = Math.min(...values);
     const max = Math.max(...values);
     
-    // Guard against invalid values - if this happens, use price data only
+    // Guard: if min/max are invalid or non-positive, fall back to last price
     if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0) {
-      const priceValues: number[] = [];
-      chartDataWithForecastBand.forEach(p => {
-        if (p.close != null && Number.isFinite(p.close) && p.close > 0) priceValues.push(p.close);
-      });
-      if (priceValues.length > 0) {
-        const priceMin = Math.min(...priceValues);
-        const priceMax = Math.max(...priceValues);
-        const pricePadding = (priceMax - priceMin) * 0.03;
-        return [priceMin - pricePadding, priceMax + pricePadding];
+      if (lastHistoricalPoint) {
+        const fallbackPrice = lastHistoricalPoint.close ?? lastHistoricalPoint.value ?? 100;
+        return [fallbackPrice * 0.95, fallbackPrice * 1.05];
       }
-      return [0, 100]; // Ultimate fallback
+      return [90, 110];
     }
     
     // Add 3% padding for better visibility
     const padding = (max - min) * 0.03;
     
     return [min - padding, max + padding];
-  }, [chartDataWithForecastBand, showUnbiasedEwma, showBiasedEwma, showTrendEwma]);
+  }, [chartDataWithForecastBand, lastHistoricalPoint, showUnbiasedEwma, showBiasedEwma, showTrendEwma]);
 
   // Dev logging: Verify Y-axis domain doesn't include 0 when band is active
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
     if (!forecastOverlay?.activeForecast) return;
     
-    // Count points with band fields set to problematic values
-    const zerosInLower = chartDataWithForecastBand.filter(p => p.forecastLower === 0).length;
-    const zerosInBand = chartDataWithForecastBand.filter(p => p.forecastBand === 0).length;
-    const nullsInLower = chartDataWithForecastBand.filter(p => p.forecastLower === null).length;
-    const nullsInBand = chartDataWithForecastBand.filter(p => p.forecastBand === null).length;
-    const bandPointsCount = chartDataWithForecastBand.filter(p => p.forecastBand != null).length;
+    // Count problematic values
+    const forecastLowerZeros = chartDataWithForecastBand.filter(p => p.forecastLower === 0).length;
+    const valuePriceZeros = chartDataWithForecastBand.filter(p => (p.value != null && p.value <= 0) || (p.close != null && p.close <= 0)).length;
     
     const domainMin = Array.isArray(priceYDomain) && typeof priceYDomain[0] === "number" ? priceYDomain[0] : null;
     const domainMax = Array.isArray(priceYDomain) && typeof priceYDomain[1] === "number" ? priceYDomain[1] : null;
-    const isDangerousFallback = typeof priceYDomain[0] === "string" || typeof priceYDomain[1] === "string";
     
     console.log('[VOL-BAND-DOMAIN]', {
       domain: priceYDomain,
-      domainType: isDangerousFallback ? '❌ STRING FALLBACK (causes 0 inclusion)' : '✅ NUMERIC',
       domainMin,
       domainMax,
-      domainMinAboveZero: domainMin != null && domainMin > 0 ? '✅ YES' : '❌ NO - Domain includes 0!',
-      zerosInLower,
-      zerosInBand,
-      nullsInLower,
-      nullsInBand,
-      bandPointsCount,
+      minAboveZero: domainMin != null && domainMin > 0 ? '✅ YES' : '❌ NO - BUG: Domain includes 0!',
+      forecastLowerZeros,
+      valuePriceZeros,
       totalPoints: chartDataWithForecastBand.length,
-      axisBinding: '✅ Areas use yAxisId="price" (verified in JSX)',
     });
   }, [chartDataWithForecastBand, priceYDomain, forecastOverlay]);
 
