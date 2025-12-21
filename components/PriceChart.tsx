@@ -5233,35 +5233,34 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               </>
             )}
             
-            {/* Volatility Model Forecast Band - Stacked Area */}
+            {/* Volatility Model Forecast Band (upper fill + lower mask) */}
             {overlayLower != null && overlayUpper != null && (
               <>
-                {/* Base layer: transparent area at forecastLower level */}
+                {/* Fill to forecastUpper */}
+                <Area
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastUpper"
+                  stroke="none"
+                  fill="url(#forecastBandGradient)"
+                  fillOpacity={0.25}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+
+                {/* Mask everything below forecastLower (same trick as EWMA bands) */}
                 <Area
                   yAxisId="price"
                   type="linear"
                   dataKey="forecastLower"
                   stroke="none"
-                  fill="none"
-                  stackId="forecast-band"
+                  fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
+                  fillOpacity={1}
                   isAnimationActive={false}
                   connectNulls={false}
                 />
-                
-                {/* Top layer: colored band representing the width (Upper - Lower) */}
-                <Area
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastBand"
-                  stroke="none"
-                  fill="url(#forecastBandGradient)"
-                  fillOpacity={0.25}
-                  stackId="forecast-band"
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                
-                {/* Forecast Center Line */}
+
+                {/* Center + boundary lines */}
                 <Line
                   yAxisId="price"
                   type="linear"
@@ -5275,28 +5274,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   isAnimationActive={false}
                   connectNulls={false}
                 />
-                
-                {/* Forecast boundary lines for clarity */}
-                <Line
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastLower"
-                  stroke="#60A5FA"
-                  strokeWidth={1}
-                  strokeOpacity={0.5}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                
                 <Line
                   yAxisId="price"
                   type="linear"
                   dataKey="forecastUpper"
                   stroke="#60A5FA"
                   strokeWidth={1}
-                  strokeOpacity={0.5}
+                  strokeOpacity={0.45}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                <Line
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastLower"
+                  stroke="#60A5FA"
+                  strokeWidth={1}
+                  strokeOpacity={0.45}
                   dot={false}
                   activeDot={false}
                   isAnimationActive={false}
