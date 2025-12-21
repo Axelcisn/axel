@@ -1,6 +1,20 @@
+import { promises as fs } from 'fs';
+import path from 'path';
 import { CompanyInfo, CompanyRegistry } from '../types/company';
 
 export async function loadCompanyRegistry(): Promise<CompanyRegistry> {
+  const registryPath = path.join(process.cwd(), 'public', 'data', 'companies.json');
+
+  // Prefer filesystem read on the server to avoid invalid relative fetch URLs.
+  if (typeof window === 'undefined') {
+    try {
+      const raw = await fs.readFile(registryPath, 'utf-8');
+      return JSON.parse(raw) as CompanyRegistry;
+    } catch {
+      // Fall back to fetch path if the file cannot be read.
+    }
+  }
+
   try {
     const response = await fetch('/data/companies.json');
     if (!response.ok) {

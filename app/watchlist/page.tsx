@@ -163,6 +163,8 @@ export default function WatchlistPage() {
   const [liveBySymbol, setLiveBySymbol] = useState<Record<string, number | null>>({});
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [groups, setGroups] = useState<string[]>(['Watchlist']);
+  const [activeGroup, setActiveGroup] = useState('Watchlist');
   const STORAGE_KEY = 'watchlist:columns';
 
   const allColumns = [
@@ -370,6 +372,15 @@ export default function WatchlistPage() {
     ? new Date(watchlistSummary.as_of).toLocaleDateString()
     : '—';
 
+  const handleAddGroup = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const input = window.prompt('Name your new group');
+    const nextName = (input || '').trim();
+    if (!nextName) return;
+    setGroups((prev) => (prev.includes(nextName) ? prev : [...prev, nextName]));
+    setActiveGroup(nextName);
+  }, []);
+
   const renderCell = (row: TableRow, columnId: string) => {
     const hasDelta = row.change !== null && !Number.isNaN(row.change);
     const positive = hasDelta ? (row.change as number) >= 0 : false;
@@ -411,60 +422,53 @@ export default function WatchlistPage() {
       <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-4 space-y-3">
         {/* Top controls */}
         <div className="flex items-center justify-between text-sm font-semibold text-slate-200">
-          <div className="flex items-center gap-6">
-            <button className="pb-2 text-slate-400 hover:text-white">Tech Leaders</button>
-            <button className="pb-2 text-slate-400 hover:text-white">Traded</button>
-            <button className="border-b-2 border-[#2e7df6] pb-2 text-white">Stocks</button>
-            <button className="text-lg leading-none text-slate-200 hover:text-white" title="Add category">
+          <div className="flex items-center gap-3 md:gap-6">
+            {groups.map((group) => {
+              const isActive = group === activeGroup;
+              return (
+                <button
+                  key={group}
+                  onClick={() => setActiveGroup(group)}
+                  className={`relative pb-1 transition ${
+                    isActive ? 'text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {group}
+                  {isActive && <span className="absolute -bottom-[1px] left-0 right-0 h-px rounded-full bg-[#2e7df6]" />}
+                </button>
+              );
+            })}
+            <button
+              onClick={handleAddGroup}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-700/70 text-lg leading-none text-slate-100 transition hover:border-[#2e7df6] hover:text-white hover:shadow-[0_10px_30px_rgba(46,125,246,0.25)]"
+              title="Add group"
+            >
               +
             </button>
           </div>
           <div className="flex items-center gap-3 text-slate-200">
-            <button className="flex items-center gap-2 rounded-full border border-slate-700 px-3 py-2 text-sm font-semibold hover:border-slate-500 hover:bg-slate-800/40">
-              <span>Watchlist View</span>
-              <svg className="h-4 w-4 text-slate-300" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M5.23 7.21a.75.75 0 0 1 1.06.02L10 10.94l3.71-3.71a.75.75 0 0 1 1.08 1.04l-4.25 4.25a.75.75 0 0 1-1.06 0L5.21 8.27a.75.75 0 0 1 .02-1.06Z" />
-              </svg>
-            </button>
             <button
-              className="group relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-700/80 text-slate-200 transition hover:border-slate-400/80 hover:bg-slate-900/40 focus:outline-none focus:ring-2 focus:ring-slate-500/60"
+              className="group relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-700/80 text-slate-100 transition hover:border-[#2e7df6]/80 hover:shadow-[0_10px_30px_rgba(46,125,246,0.25)] focus:outline-none focus:ring-2 focus:ring-[#2e7df6]/60"
               title="Settings"
               onClick={() => setShowSettings(true)}
             >
-              <span className="pointer-events-none absolute inset-0 rounded-full border border-slate-800/60 group-hover:border-slate-500/60" />
-              <span className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-slate-900/70 to-slate-800/30 group-hover:from-slate-800/70 group-hover:to-slate-700/30" />
-              <svg
-                className="pointer-events-none relative h-5 w-5 text-slate-100 drop-shadow-[0_2px_6px_rgba(0,0,0,0.4)]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="2.6" />
-                <path d="M19.2 12.8c.05-.26.08-.53.08-.8s-.03-.54-.08-.8l1.44-1.12a.5.5 0 0 0 .12-.64l-1.36-2.35a.5.5 0 0 0-.6-.22l-1.7.68a6.2 6.2 0 0 0-1.38-.8l-.26-1.8a.5.5 0 0 0-.5-.43h-2.72a.5.5 0 0 0-.5.43l-.26 1.8a6.2 6.2 0 0 0-1.38.8l-1.7-.68a.5.5 0 0 0-.6.22L3.24 9.44a.5.5 0 0 0 .12.64L4.8 11.2c-.05.26-.08.53-.08.8s.03.54.08.8l-1.44 1.12a.5.5 0 0 0-.12.64l1.36 2.35c.13.23.4.33.64.22l1.7-.68c.42.33.89.6 1.38.8l.26 1.8c.04.25.25.43.5.43h2.72c.25 0 .46-.18.5-.43l.26-1.8c.49-.2.96-.47 1.38-.8l1.7.68c.24.1.51 0 .64-.22l1.36-2.35a.5.5 0 0 0-.12-.64L19.2 12.8Z" />
-              </svg>
-            </button>
-            <button
-              className="group relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-700/80 text-slate-200 transition hover:border-slate-400/80 hover:bg-slate-900/40 focus:outline-none focus:ring-2 focus:ring-slate-500/60"
-              title="Refresh"
-              onClick={loadWatchlist}
-            >
-              <span className="pointer-events-none absolute inset-0 rounded-full border border-slate-800/60 group-hover:border-slate-500/60" />
-              <span className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-slate-900/70 to-slate-800/30 group-hover:from-slate-800/70 group-hover:to-slate-700/30" />
-              <svg
-                className="pointer-events-none relative h-5 w-5 text-slate-100 drop-shadow-[0_2px_6px_rgba(0,0,0,0.4)]"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M20 12a8 8 0 1 1-2.34-5.66" />
-                <path d="M20 5v5h-5" />
-              </svg>
+              <span className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-r from-[#12233b]/60 via-[#0f172a]/70 to-[#0b1220]/70 blur-[1px]" />
+              <span className="pointer-events-none absolute inset-0 rounded-full border border-slate-800/60 group-hover:border-[#2e7df6]/60" />
+              <span className="pointer-events-none absolute -inset-[1px] rounded-full bg-[#2e7df6]/10 opacity-0 transition duration-200 group-hover:opacity-100" />
+              <span className="relative flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-b from-[#0c172b] to-[#0b1220] shadow-inner shadow-black/40 ring-1 ring-[#2e7df6]/30">
+                <svg
+                  className="pointer-events-none relative h-5 w-5 text-slate-100 drop-shadow-[0_2px_8px_rgba(46,125,246,0.5)]"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="12" cy="12" r="2.6" />
+                  <path d="M19.2 12.8c.05-.26.08-.53.08-.8s-.03-.54-.08-.8l1.44-1.12a.5.5 0 0 0 .12-.64l-1.36-2.35a.5.5 0 0 0-.6-.22l-1.7.68a6.2 6.2 0 0 0-1.38-.8l-.26-1.8a.5.5 0 0 0-.5-.43h-2.72a.5.5 0 0 0-.5.43l-.26 1.8a6.2 6.2 0 0 0-1.38.8l-1.7-.68a.5.5 0 0 0-.6.22L3.24 9.44a.5.5 0 0 0 .12.64L4.8 11.2c-.05.26-.08.53-.08.8s.03.54.08.8l-1.44 1.12a.5.5 0 0 0-.12.64l1.36 2.35c.13.23.4.33.64.22l1.7-.68c.42.33.89.6 1.38.8l.26 1.8c.04.25.25.43.5.43h2.72c.25 0 .46-.18.5-.43l.26-1.8c.49-.2.96-.47 1.38-.8l1.7.68c.24.1.51 0 .64-.22l1.36-2.35a.5.5 0 0 0-.12-.64L19.2 12.8Z" />
+                </svg>
+              </span>
             </button>
           </div>
         </div>

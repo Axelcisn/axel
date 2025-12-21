@@ -4539,48 +4539,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           }
         `}</style>
         
-        {/* Volatility Model Info Badge - shown when forecast is active OR loading */}
-        {horizonCoverage?.isLoading && !forecastModelName && (
-          <div className="absolute top-2 left-2 z-10 pointer-events-none">
-            <div className={`px-2.5 py-1 rounded-lg text-[10px] font-mono backdrop-blur-sm border animate-pulse ${
-              isDarkMode 
-                ? 'bg-gray-800/60 border-gray-600/30 text-gray-300' 
-                : 'bg-gray-100/80 border-gray-400/50 text-gray-600'
-            }`}>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold">Loading {horizonCoverage.volModel}...</span>
-                {horizonCoverage?.h && (
-                  <span className="opacity-75">h={horizonCoverage.h}D</span>
-                )}
-                {horizonCoverage?.coverage && (
-                  <span className="opacity-75">{(horizonCoverage.coverage * 100).toFixed(0)}%</span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        {overlayCenter != null && overlayLower != null && overlayUpper != null && forecastModelName && (
-          <div className="absolute top-2 left-2 z-10 pointer-events-none">
-            <div className={`px-2.5 py-1 rounded-lg text-[10px] font-mono backdrop-blur-sm border ${
-              isDarkMode 
-                ? 'bg-blue-900/60 border-blue-500/30 text-blue-100' 
-                : 'bg-blue-50/80 border-blue-300/50 text-blue-900'
-            }`}>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold">{forecastModelName}</span>
-                {overlaySigma != null && (
-                  <span className="opacity-75">σ₁d: {overlaySigma.toFixed(4)}</span>
-                )}
-                {horizonCoverage?.h && (
-                  <span className="opacity-75">h={horizonCoverage.h}D</span>
-                )}
-                {horizonCoverage?.coverage && (
-                  <span className="opacity-75">{(horizonCoverage.coverage * 100).toFixed(0)}%</span>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {/* Volatility Model Info Badge - REMOVED as requested */}
         
         {/* Combined Price and Volume Chart */}
         <div

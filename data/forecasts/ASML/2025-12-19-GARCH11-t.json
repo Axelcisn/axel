@@ -1,0 +1,83 @@
+{
+  "symbol": "ASML",
+  "method": "GARCH11-t",
+  "date_t": "2025-12-19",
+  "horizonTrading": 1,
+  "h_eff_days": 3,
+  "verifyDate": "2025-12-22",
+  "domain": "log",
+  "created_at": "2025-12-21T08:52:16.106Z",
+  "locked": true,
+  "y_hat": 1056.02001953125,
+  "target": {
+    "h": 1,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 756
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0,
+    "sigma_hat": 0.02523004019473833,
+    "mu_star_used": 0,
+    "window_start": "2022-12-15",
+    "window_end": "2025-12-19",
+    "n": 7745,
+    "S_t": 1056.02001953125,
+    "sigma_forecast": 0.02523004019473833,
+    "sigma2_forecast": 0.0006365549282281117,
+    "critical_value": 2.263213055223333,
+    "window_span": {
+      "start": "2022-12-15",
+      "end": "2025-12-19"
+    },
+    "volatility_diagnostics": {
+      "omega": 0.00007395156428661256,
+      "alpha": 0.03,
+      "beta": 0.85,
+      "alpha_plus_beta": 0.88,
+      "unconditional_var": 0.0006162630357217714,
+      "dist": "student-t",
+      "nu": 8
+    }
+  },
+  "intervals": {
+    "L_h": 997.4095476685536,
+    "U_h": 1118.0746006066533,
+    "band_width_bp": 1209.7844182477945
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "model": "GARCH11-t",
+      "h": 1,
+      "coverage": 0.95,
+      "garch": {
+        "window": 756,
+        "variance_targeting": true,
+        "dist": "student-t",
+        "df": 8
+      }
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "diagnostics": {
+    "method_source": "GARCH11-t",
+    "m_log": 6.962262421975949,
+    "s_scale": 0.02523004019473833,
+    "critical_type": "t",
+    "df": 8
+  },
+  "critical": {
+    "type": "t",
+    "value": 2.263213055223333,
+    "df": 8
+  },
+  "window_period": {
+    "start": "2022-12-15",
+    "end": "2025-12-19",
+    "n_obs": 756
+  },
+  "is_active": false
+}
