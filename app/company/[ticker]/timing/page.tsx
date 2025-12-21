@@ -310,24 +310,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Stable forecast overlay state - use the best available forecast for chart display
   const stableOverlayForecast = useMemo(() => {
     // Priority: activeForecast > currentForecast > gbmForecast
-    const forecast = activeForecast || currentForecast || gbmForecast || null;
-    
-    // Persist to localStorage as backup (only on client side)
-    if (forecast) {
-      // Use a setTimeout to avoid SSR issues
-      setTimeout(() => {
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem(`overlay-forecast-${params.ticker}`, JSON.stringify(forecast));
-          } catch (e) {
-            // Ignore localStorage errors
-          }
-        }
-      }, 0);
-    }
-    
-    return forecast;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return activeForecast || currentForecast || gbmForecast || null;
   }, [activeForecast, currentForecast, gbmForecast, params.ticker]);
   // Note: 'window' is a browser global, not a React dependency
 
@@ -352,11 +335,6 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [params.ticker]);
   // Note: 'window' is a browser global, not a React dependency
 
-  // Fallback overlay forecast 
-  const fallbackOverlayForecast = useMemo(() => {
-    return stableOverlayForecast || storedForecast || null;
-  }, [stableOverlayForecast, storedForecast]);
-
   const [window, setWindow] = useState(504);
   const [lambdaDrift, setLambdaDrift] = useState(0.25);
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
@@ -380,6 +358,77 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const DEFAULT_GARCH_WINDOW = 756;
   const DEFAULT_RANGE_WINDOW = 504;
+
+  // Helper: Check if a forecast matches the current UI selection
+  const forecastMatchesSelection = useCallback((forecast: any) => {
+    if (!forecast?.method) return false;
+    
+    const method = forecast.method;
+    
+    // Check if forecast matches selected model
+    if (volModel === 'GBM') {
+      return method === 'GBM' || method === 'GBM-CC';
+    } else if (volModel === 'GARCH') {
+      const expectedMethod = garchEstimator === 'Student-t' ? 'GARCH11-t' : 'GARCH11-N';
+      return method === expectedMethod;
+    } else if (volModel === 'HAR-RV') {
+      return method === 'HAR-RV';
+    } else if (volModel === 'Range') {
+      return method === `Range-${rangeEstimator}`;
+    }
+    
+    return false;
+  }, [volModel, garchEstimator, rangeEstimator]);
+
+  // Update stableOverlayForecast to filter by matching forecasts
+  const stableOverlayForecastFiltered = useMemo(() => {
+    const candidates = [activeForecast, currentForecast, gbmForecast].filter(Boolean);
+    const matchingForecast = candidates.find(f => forecastMatchesSelection(f));
+    
+    // ============================================================================
+    // STEP 1 DIAGNOSTIC: Log forecast selection/matching logic
+    // ============================================================================
+    if (process.env.NODE_ENV === "development") {
+      console.log('[🔍 STEP1-SELECTION]', {
+        selectedVolModel: volModel,
+        selectedRangeEstimator: rangeEstimator,
+        selectedGarchEstimator: garchEstimator,
+        candidateForecastMethods: candidates.map(f => f?.method || 'NONE'),
+        activeForecastMethod: activeForecast?.method || 'NONE',
+        currentForecastMethod: currentForecast?.method || 'NONE',
+        gbmForecastMethod: gbmForecast?.method || 'NONE',
+        matchingForecastMethod: matchingForecast?.method || 'NO MATCH',
+        expectedMatchPattern: volModel === 'Range' ? `Range-${rangeEstimator}` :
+                             volModel === 'GARCH' ? (garchEstimator === 'Student-t' ? 'GARCH11-t' : 'GARCH11-N') :
+                             volModel === 'HAR-RV' ? 'HAR-RV' : 'GBM/GBM-CC',
+        matchFound: !!matchingForecast,
+        timestamp: new Date().toISOString(),
+      });
+    }
+    
+    return matchingForecast || null;
+  }, [activeForecast, currentForecast, gbmForecast, forecastMatchesSelection, volModel, rangeEstimator, garchEstimator]);
+
+  // Fallback overlay forecast - only use stored forecast if it matches current selection
+  const fallbackOverlayForecast = useMemo(() => {
+    if (stableOverlayForecastFiltered) return stableOverlayForecastFiltered;
+    // Check if stored forecast matches current selection before using it
+    if (storedForecast && forecastMatchesSelection(storedForecast)) {
+      return storedForecast;
+    }
+    return null;
+  }, [stableOverlayForecastFiltered, storedForecast, forecastMatchesSelection]);
+
+  // Persist overlay forecast outside of useMemo to keep memo pure
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!stableOverlayForecastFiltered) return;
+    try {
+      localStorage.setItem(`overlay-forecast-${params.ticker}`, JSON.stringify(stableOverlayForecastFiltered));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [stableOverlayForecastFiltered, params.ticker]);
   
   // Volatility window state - softer defaults for GARCH/Range, can be manually set or synced with GBM
   const [volWindow, setVolWindow] = useState(DEFAULT_GARCH_WINDOW);
@@ -528,6 +577,12 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [biasedMaxCalmarError, setBiasedMaxCalmarError] = useState<string | null>(null);
   const [isLoadingBiasedMaxCalmar, setIsLoadingBiasedMaxCalmar] = useState(false);
   const [t212CanonicalRows, setT212CanonicalRows] = useState<CanonicalRow[] | null>(null);
+  const isFetchingCanonicalRowsRef = useRef(false);
+  const canonicalRowsPromiseRef = useRef<Promise<CanonicalRow[] | null> | null>(null);
+  const canonicalFetchAbortRef = useRef<AbortController | null>(null);
+  const canonicalFetchKeyBase = useMemo(() => `${params.ticker}|1d|adj`, [params.ticker]);
+  const canonicalRowsKeyRef = useRef<string | null>(null);
+  const userHasSetWindowRef = useRef(false);
   const derivedMaxTrainFraction = useMemo(() => {
     if (!biasedMaxCalmarResult?.trainSpan) return null;
     const rows = t212CanonicalRows;
@@ -567,6 +622,55 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isReactionMaximized, setIsReactionMaximized] = useState(false);  // Track if Biased has been optimized
   const [, setReactionOptimizeError] = useState<string | null>(null);
   type BaseMode = 'unbiased' | 'biased' | 'max';
+
+  const fetchCanonicalRows = useCallback(async (): Promise<CanonicalRow[] | null> => {
+    if (t212CanonicalRows && t212CanonicalRows.length > 0) return t212CanonicalRows;
+    if (canonicalRowsPromiseRef.current && canonicalRowsKeyRef.current === canonicalFetchKeyBase) {
+      return canonicalRowsPromiseRef.current;
+    }
+    canonicalRowsKeyRef.current = canonicalFetchKeyBase;
+    const promise = (async () => {
+      try {
+        if (canonicalFetchAbortRef.current) {
+          canonicalFetchAbortRef.current.abort();
+        }
+        const aborter = new AbortController();
+        canonicalFetchAbortRef.current = aborter;
+        isFetchingCanonicalRowsRef.current = true;
+        const resp = await fetch(`/api/history/${encodeURIComponent(params.ticker)}`, {
+          signal: aborter.signal,
+        });
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const rows = Array.isArray(data?.rows)
+          ? data.rows
+          : Array.isArray(data)
+            ? data
+            : [];
+        if (Array.isArray(rows) && rows.length > 0) {
+          setT212CanonicalRows(rows as CanonicalRow[]);
+          return rows as CanonicalRow[];
+        }
+      } catch (err) {
+        if (process.env.NODE_ENV === "development") {
+          console.error("[CanonicalRows] fetch error", err);
+        }
+      } finally {
+        isFetchingCanonicalRowsRef.current = false;
+        canonicalRowsPromiseRef.current = null;
+        canonicalFetchAbortRef.current = null;
+        canonicalRowsKeyRef.current = null;
+      }
+      return null;
+    })();
+    canonicalRowsPromiseRef.current = promise;
+    return promise;
+  }, [canonicalFetchKeyBase, params.ticker, t212CanonicalRows]);
+
+  useEffect(() => {
+    if (t212CanonicalRows && t212CanonicalRows.length > 0) return;
+    fetchCanonicalRows();
+  }, [fetchCanonicalRows, t212CanonicalRows]);
 
   interface SimulationMode {
     baseMode: BaseMode;
@@ -643,6 +747,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [isOptimizingZThresholds, setIsOptimizingZThresholds] = useState(false);
   const [t212ZOptimizeError, setT212ZOptimizeError] = useState<string | null>(null);
   const [t212ZDisplayThresholds, setT212ZDisplayThresholds] = useState<ZOptimizeResult["thresholds"] | null>(null);
+  const t212ZOptimizeFailedRef = useRef(false);
   const [t212DailyLongSwap, setT212DailyLongSwap] = useState(0);  // can tune later
   const [t212DailyShortSwap, setT212DailyShortSwap] = useState(0);
   const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
@@ -726,6 +831,16 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [simComparePreset, setSimComparePreset] = useState<SimCompareRangePreset>("chart");
   const [, setSimCompareCustom] = useState<{ start: string; end: string } | null>(null);
   const [visibleWindow, setVisibleWindow] = useState<{ start: string; end: string } | null>(null);
+  const t212RunsRef = useRef<Trading212SimRun[]>([]);
+  const defaultWindowSeededRef = useRef(false);
+  const baselineVerifyLoggedRef = useRef(false);
+
+  useEffect(() => {
+    t212RunsRef.current = t212Runs;
+  }, [t212Runs]);
+  useEffect(() => {
+    defaultWindowSeededRef.current = false;
+  }, [params.ticker]);
   const handleSimComparePresetChange = useCallback((p: SimCompareRangePreset) => {
     setSimComparePreset(p);
   }, []);
@@ -745,9 +860,13 @@ export default function TimingPage({ params }: TimingPageProps) {
       } else if (source === "dropdown" && nextWindow) {
         setSimCompareCustom(nextWindow);
       }
+      const isInitialSeed = !defaultWindowSeededRef.current && !visibleWindow;
+      if (!isInitialSeed && nextWindow) {
+        userHasSetWindowRef.current = true;
+      }
       setVisibleWindow(nextWindow);
     },
-    []
+    [visibleWindow]
   );
   useEffect(() => {
     setVisibleWindow(null);
@@ -755,7 +874,29 @@ export default function TimingPage({ params }: TimingPageProps) {
     setSimComparePreset("chart");
     setBiasedMaxCalmarResult(null);
     setBiasedMaxCalmarError(null);
+    setT212CanonicalRows(null);
+    canonicalRowsPromiseRef.current = null;
+    canonicalFetchAbortRef.current?.abort();
+    canonicalFetchAbortRef.current = null;
+    baselineVerifyLoggedRef.current = false;
+    userHasSetWindowRef.current = false;
   }, [params.ticker]);
+
+  useEffect(() => {
+    if (visibleWindow) {
+      defaultWindowSeededRef.current = true;
+      return;
+    }
+    if (defaultWindowSeededRef.current) return;
+    if (userHasSetWindowRef.current) return;
+    if (!t212CanonicalRows || t212CanonicalRows.length === 0) return;
+    const end = t212CanonicalRows[t212CanonicalRows.length - 1]?.date;
+    const startIdx = Math.max(0, t212CanonicalRows.length - 252);
+    const start = t212CanonicalRows[startIdx]?.date ?? t212CanonicalRows[0]?.date ?? null;
+    if (!start || !end) return;
+    defaultWindowSeededRef.current = true;
+    setVisibleWindow({ start, end });
+  }, [visibleWindow, t212CanonicalRows]);
 
   useEffect(() => {
     setT212Runs((prev) =>
@@ -1095,6 +1236,29 @@ export default function TimingPage({ params }: TimingPageProps) {
     const res = t212ActiveRun?.windowResult?.result ?? null;
     return res?.trades ?? null;
   }, [t212ActiveRun]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (t212Runs.length === 0) return;
+    if (baselineVerifyLoggedRef.current) return;
+    const visibleIds = Array.from(t212VisibleRunIds);
+    const overlaysCount = t212TradeOverlays.length;
+    const equityLen = t212AccountHistory?.length ?? 0;
+    console.log("[T212 DEV VERIFY] baseline seeded", {
+      runCount: t212Runs.length,
+      visibleIds,
+      overlaysCount,
+      equityLen,
+    });
+    if (visibleIds.length === 0 || overlaysCount === 0 || equityLen === 0) {
+      console.warn("[T212 DEV VERIFY] baseline incomplete", {
+        visibleIds,
+        overlaysCount,
+        equityLen,
+      });
+    }
+    baselineVerifyLoggedRef.current = true;
+  }, [t212Runs, t212VisibleRunIds, t212TradeOverlays, t212AccountHistory]);
 
   // Keep visible run in sync with SimulationMode and available runs
   useEffect(() => {
@@ -1785,18 +1949,12 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Fetch current price for header display (canonical fallback)
   const loadCurrentPrice = async () => {
     try {
-      const res = await fetch(`/api/history/${params.ticker}`);
-      if (!res.ok) return;
-
-      const data = await res.json();
-      const rows = Array.isArray(data) ? data : data?.rows;
-
-      if (rows && rows.length > 0) {
-        const last = rows[rows.length - 1];
-        const price = last?.adj_close ?? last?.close;
-        const date = last?.date;
-        setHeaderPrice({ price: price ?? null, date: date ?? null });
-      }
+      const rows = t212CanonicalRows?.length ? t212CanonicalRows : await fetchCanonicalRows();
+      if (!rows || rows.length === 0) return;
+      const last = rows[rows.length - 1];
+      const price = last?.adj_close ?? last?.close;
+      const date = last?.date;
+      setHeaderPrice({ price: price ?? null, date: date ?? null });
     } catch (err) {
       if (process.env.NODE_ENV === "development") {
         console.error("[Header] loadCurrentPrice error", err);
@@ -2334,11 +2492,11 @@ export default function TimingPage({ params }: TimingPageProps) {
         });
       }
 
-      const rangeStart = visibleWindow?.start ?? null;
-      const filteredPath =
-        rangeStart != null ? mappedPath.filter((p) => p.date_tp1 >= rangeStart) : mappedPath;
+      if (!mappedPath.length) {
+        console.warn("[EWMA Biased Max] empty path", { reason: "noPoints", ticker: params.ticker });
+      }
 
-      setEwmaBiasedMaxPath(filteredPath);
+      setEwmaBiasedMaxPath(mappedPath);
     } catch (err: any) {
       console.error("[EWMA Biased Max] loadEwmaBiasedMaxWalker error", err);
       setEwmaBiasedMaxError(err?.message || "Failed to load biased EWMA (Max).");
@@ -2347,7 +2505,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } finally {
       setIsLoadingEwmaBiasedMax(false);
     }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionTrainFraction, getMaxEwmaConfig, visibleWindow?.start, biasedMaxCalmarResult, ewmaShrinkK]);
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionTrainFraction, getMaxEwmaConfig, biasedMaxCalmarResult, ewmaShrinkK]);
 
   // Auto-load/refresh max path when optimizer results exist; clear when not available
   useEffect(() => {
@@ -2509,6 +2667,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       setIsOptimizingZThresholds(true);
       setT212ZOptimizeError(null);
       setT212ZOptimizeResult(null);
+      t212ZOptimizeFailedRef.current = false;
 
       const query = new URLSearchParams({
         h: String(h),
@@ -2566,6 +2725,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     } catch (err: any) {
       console.error("[Z-OPTIMIZE] error", err);
       setT212ZOptimizeError(err?.message || "Failed to optimize z thresholds.");
+      t212ZOptimizeFailedRef.current = true;
       setT212ZMode("optimize");
     } finally {
       setIsOptimizingZThresholds(false);
@@ -2632,13 +2792,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       });
 
       if (!t212CanonicalRows) {
-        const hist = await fetch(`/api/history/${encodeURIComponent(params.ticker)}`);
-        if (hist.ok) {
-          const data = await hist.json();
-          if (data?.rows) {
-            setT212CanonicalRows(data.rows as CanonicalRow[]);
-          }
-        }
+        await fetchCanonicalRows();
       }
     } catch (err: any) {
       console.error("[Lambda Calmar] fetch error", err);
@@ -2662,11 +2816,28 @@ export default function TimingPage({ params }: TimingPageProps) {
   ]);
 
   useEffect(() => {
+    t212ZOptimizeFailedRef.current = false;
+  }, [
+    params?.ticker,
+    h,
+    coverage,
+    reactionLambda,
+    reactionTrainFraction,
+    reactionMinTrainObs,
+    t212CostBps,
+    t212InitialEquity,
+    t212Leverage,
+    t212PositionFraction,
+    ewmaShrinkK,
+  ]);
+
+  useEffect(() => {
     if (
       t212ZMode === "optimize" &&
       !isOptimizingZThresholds &&
       !t212ZOptimizeError &&
-      (!t212ZOptimizeResult || !t212ZDisplayThresholds)
+      (!t212ZOptimizeResult || !t212ZDisplayThresholds) &&
+      !t212ZOptimizeFailedRef.current
     ) {
       runZThresholdOptimization();
     }
@@ -2769,6 +2940,17 @@ export default function TimingPage({ params }: TimingPageProps) {
     zFlip?: number;
     optimizedThresholds?: ZOptimizeResult["thresholds"] | null;
   };
+  type Trading212SimBarsResult = {
+    bars: Trading212SimBar[];
+    thresholdsUsed: {
+      enterLong: number;
+      enterShort: number;
+      exitLong: number;
+      exitShort: number;
+      flipLong: number;
+      flipShort: number;
+    } | null;
+  };
 
   const quantile = (arr: number[], q: number): number => {
     if (!arr.length) return NaN;
@@ -2870,8 +3052,8 @@ export default function TimingPage({ params }: TimingPageProps) {
     ewmaPathArg: EwmaWalkerPathPoint[] | null,
     thresholdPct: number,
     options?: Trading212SimBarsOptions
-  ): Trading212SimBar[] => {
-    if (!ewmaPathArg) return [];
+  ): Trading212SimBarsResult => {
+    if (!ewmaPathArg) return { bars: [], thresholdsUsed: null };
 
     const useTrendTilt =
       !!options?.useTrendTilt &&
@@ -2918,11 +3100,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
 
     if (signalRule === "z" && zMode === "optimize" && !thresholds) {
-      return [];
-    }
-
-    if (thresholds) {
-      setT212ZDisplayThresholds(thresholds);
+      return { bars: [], thresholdsUsed: null };
     }
 
     const bars: Trading212SimBar[] = [];
@@ -3002,7 +3180,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       });
     }
 
-    return bars;
+    return { bars, thresholdsUsed: thresholds };
   }, [computeAutoZThresholds]);
 
   // Trading212 CFD Simulation: Reusable helper to run sim for a specific EWMA source
@@ -3030,16 +3208,10 @@ export default function TimingPage({ params }: TimingPageProps) {
         const isMaxRun = runId === "ewma-biased-max" || runId === "ewma-biased-max-trend";
         const isNoTradeBaseline = isMaxRun && biasedMaxCalmarResult?.lambdaStar == null;
 
-        // Fetch canonical rows if not cached
+        // Fetch canonical rows if not cached (deduped)
         let rows = t212CanonicalRows;
         if (!rows) {
-          const resp = await fetch(`/api/history/${encodeURIComponent(params.ticker)}`);
-          if (!resp.ok) {
-            throw new Error('Failed to fetch historical data');
-          }
-          const data = await resp.json();
-          rows = data.rows as CanonicalRow[];
-          setT212CanonicalRows(rows);
+          rows = await fetchCanonicalRows() ?? null;
         }
 
         if (!rows || rows.length === 0) {
@@ -3135,7 +3307,9 @@ export default function TimingPage({ params }: TimingPageProps) {
           }
         }
 
-        const zOptimizeDecision = decideZOptimizeApply(t212ZOptimizeResult);
+        const zOptimizeDecision = t212ZOptimizeResult
+          ? decideZOptimizeApply(t212ZOptimizeResult)
+          : { applied: false };
         const effectiveZMode =
           t212SignalRule === "z" && t212ZMode === "optimize"
             ? zOptimizeDecision.applied
@@ -3143,17 +3317,20 @@ export default function TimingPage({ params }: TimingPageProps) {
               : "auto"
             : t212ZMode;
 
-        const bars = isNoTradeBaseline
-          ? rowsForSim
-              .filter((row) => {
-                const price = row.adj_close ?? row.close;
-                return price != null && price > 0 && !!row.date;
-              })
-              .map((row) => ({
-                date: row.date,
-                price: (row.adj_close ?? row.close) as number,
-                signal: "flat" as const,
-              }))
+        const built = isNoTradeBaseline
+          ? {
+              bars: rowsForSim
+                .filter((row) => {
+                  const price = row.adj_close ?? row.close;
+                  return price != null && price > 0 && !!row.date;
+                })
+                .map((row) => ({
+                  date: row.date,
+                  price: (row.adj_close ?? row.close) as number,
+                  signal: "flat" as const,
+                })),
+              thresholdsUsed: null,
+            }
           : buildTrading212SimBarsFromEwmaPath(
               rowsForSim,
               ewmaPathForSim,
@@ -3171,6 +3348,12 @@ export default function TimingPage({ params }: TimingPageProps) {
                 optimizedThresholds: zOptimizeDecision.applied ? t212ZOptimizeResult?.thresholds ?? null : null,
               }
             );
+        const bars = built.bars;
+        if (t212SignalRule === "z") {
+          setT212ZDisplayThresholds(built.thresholdsUsed);
+        } else {
+          setT212ZDisplayThresholds(null);
+        }
 
         if (bars.length === 0) {
           throw new Error('No overlapping bars between canonical data and EWMA path');
@@ -3201,18 +3384,22 @@ export default function TimingPage({ params }: TimingPageProps) {
           : null;
 
         // Debug: Log sim run stored
-        console.log("[T212] Sim run stored", {
-          runId,
-          label,
-          source,
-          equityStart: t212InitialEquity,
-          equityEnd: result.finalEquity,
-          trades: result.trades.length,
-          stopOuts: result.stopOutEvents,
-          maxDrawdown: result.maxDrawdown,
-          firstDate: result.accountHistory[0]?.date,
-          lastDate: result.accountHistory[result.accountHistory.length - 1]?.date,
-        });
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[T212] Sim run stored", {
+            runId,
+            label,
+            source,
+            equityStart: t212InitialEquity,
+            equityEnd: result.finalEquity,
+            trades: result.trades.length,
+            stopOuts: result.stopOutEvents,
+            maxDrawdown: result.maxDrawdown,
+            firstDate: result.accountHistory[0]?.date,
+            lastDate: result.accountHistory[result.accountHistory.length - 1]?.date,
+            barsCount: bars.length,
+            equityLen: result.accountHistory.length,
+          });
+        }
 
         // Store the run in our collection
         // For max runs, use calmar-optimized values when available; otherwise fall back
@@ -3247,6 +3434,12 @@ export default function TimingPage({ params }: TimingPageProps) {
           const other = prev.filter((r) => r.id !== runId);
           return [...other, runRecord];
         });
+        setTimeout(() => {
+          const exists = t212RunsRef.current.some((r) => r.id === runId);
+          if (!exists) {
+            console.warn("[T212 GUARD] run dropped after store", { runId });
+          }
+        }, 0);
         if (comparisonRunIds.includes(runId as BaseRunId)) {
           setT212BaseRunsById((prev) => ({
             ...prev,
@@ -3310,40 +3503,29 @@ export default function TimingPage({ params }: TimingPageProps) {
       visibleWindow,
       biasedMaxCalmarResult,
       derivedMaxTrainFraction,
+      fetchCanonicalRows,
     ]
   );
 
-  // Handler for clicking Biased EWMA - load EWMA path only, no sim
+  // Stable handlers for EWMA loading - deduplication check moved to PriceChart
+  // These are intentionally simple to maintain stable callback references
   const handleLoadBiasedClick = useCallback(() => {
-    // Mark that biased EWMA has been requested at least once
     biasedEverLoaded.current = true;
-
-    // If we already have data, nothing else to do
-    if (ewmaBiasedPath && ewmaBiasedPath.length > 0) {
-      return;
-    }
-
-    // Otherwise, load the biased EWMA path
     loadEwmaBiasedWalker();
-  }, [ewmaBiasedPath, loadEwmaBiasedWalker]);
+  }, [loadEwmaBiasedWalker]);
 
   const handleLoadBiasedMaxClick = useCallback(() => {
-    if (ewmaBiasedMaxPath && ewmaBiasedMaxPath.length > 0) {
-      return;
-    }
     loadEwmaBiasedMaxWalker();
-  }, [ewmaBiasedMaxPath, loadEwmaBiasedMaxWalker]);
+  }, [loadEwmaBiasedMaxWalker]);
 
-  // For Unbiased we usually auto-load on mount, but keep a shim for completeness
   const handleLoadUnbiasedClick = useCallback(() => {
-    if (!ewmaPath || ewmaPath.length === 0) {
-      loadEwmaWalker();
-    }
-  }, [ewmaPath, loadEwmaWalker]);
+    loadEwmaWalker();
+  }, [loadEwmaWalker]);
 
   // Debug: Log T212 table row values whenever runs change
   useEffect(() => {
     if (t212Runs.length === 0) return;
+    if (process.env.NODE_ENV !== "development") return;
     console.log("[T212] Table rows updated:");
     t212Runs.forEach((run) => {
       const r = run.result;
@@ -3364,57 +3546,123 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   // Clear T212 runs when CFD is disabled (but keep EWMA overlay selection)
   useEffect(() => {
-    if (!isCfdEnabled && t212Runs.length > 0) {
+    if (!isCfdEnabled && t212RunsRef.current.length > 0) {
       console.log("[T212] CFD disabled, clearing runs (keeping EWMA overlay selection)");
       setT212Runs([]);
       setT212BaseRunsById({});
       setT212CurrentRunId(null);
+      baselineVerifyLoggedRef.current = false;
       // Don't clear t212VisibleRunIds - keep EWMA overlay active on chart
     }
-  }, [isCfdEnabled, t212Runs.length]);
+  }, [isCfdEnabled]);
+
+  const simConfigKey = useMemo(
+    () =>
+      [
+        "ticker",
+        params?.ticker ?? "",
+        "h",
+        h,
+        "cov",
+        coverage,
+        "lambda",
+        reactionLambda,
+        "trainFrac",
+        reactionTrainFraction,
+        "minTrainObs",
+        reactionMinTrainObs,
+        "shrink",
+        ewmaShrinkK,
+        "eq",
+        t212InitialEquity,
+        "lev",
+        t212Leverage,
+        "posFrac",
+        t212PositionFraction,
+        "thresh",
+        t212ThresholdFrac,
+        "cost",
+        t212CostBps,
+        "rule",
+        t212SignalRule,
+        "zMode",
+        t212ZMode,
+        "zEnter",
+        t212ZEnter,
+        "zExit",
+        t212ZExit,
+        "zFlip",
+        t212ZFlip,
+        "swapL",
+        t212DailyLongSwap,
+        "swapS",
+        t212DailyShortSwap,
+        "trendS",
+        trendShortWindow,
+        "trendL",
+        trendLongWindow,
+        "trendM",
+        trendMomentumPeriod,
+        "trendW",
+        effectiveTrendWeight ?? "",
+      ].join("|"),
+    [
+      params?.ticker,
+      h,
+      coverage,
+      reactionLambda,
+      reactionTrainFraction,
+      reactionMinTrainObs,
+      ewmaShrinkK,
+      t212InitialEquity,
+      t212Leverage,
+      t212PositionFraction,
+      t212ThresholdFrac,
+      t212CostBps,
+      t212SignalRule,
+      t212ZMode,
+      t212ZEnter,
+      t212ZExit,
+      t212ZFlip,
+      t212DailyLongSwap,
+      t212DailyShortSwap,
+      trendShortWindow,
+      trendLongWindow,
+      trendMomentumPeriod,
+      effectiveTrendWeight,
+    ]
+  );
+  const prevSimConfigKeyRef = useRef<string | null>(null);
 
   // Clear T212 runs when key parameters change to trigger fresh re-computation
   useEffect(() => {
-    if (t212Runs.length > 0) {
-      console.log("[T212 settings] changed, clearing sims", {
-        t212InitialEquity,
-        t212Leverage,
-        t212PositionFraction,
+    if (prevSimConfigKeyRef.current === null) {
+      prevSimConfigKeyRef.current = simConfigKey;
+      return;
+    }
+    if (prevSimConfigKeyRef.current !== simConfigKey) {
+      prevSimConfigKeyRef.current = simConfigKey;
+      if (t212RunsRef.current.length > 0) {
+        console.log("[T212 settings] changed, clearing sims", {
+          t212InitialEquity,
+          t212Leverage,
+          t212PositionFraction,
           t212ThresholdFrac,
-        t212CostBps,
-        t212SignalRule,
-        t212ZMode,
-        t212ZEnter,
-        t212ZExit,
-        t212ZFlip,
-      });
+          t212CostBps,
+          t212SignalRule,
+          t212ZMode,
+          t212ZEnter,
+          t212ZExit,
+          t212ZFlip,
+        });
+      }
       setT212Runs([]);
       setT212BaseRunsById({});
       setT212CurrentRunId(null);
       setT212VisibleRunIds(new Set<T212RunId>()); // Ensure visible selection is cleared when runs are wiped
+      baselineVerifyLoggedRef.current = false;
     }
-  }, [
-    params?.ticker,
-    h,
-    coverage,
-    reactionLambda,
-    reactionTrainFraction,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
-          t212ThresholdFrac,
-    t212CostBps,
-    t212SignalRule,
-    t212ZMode,
-    t212ZEnter,
-    t212ZExit,
-    t212ZFlip,
-    ewmaShrinkK,
-    trendShortWindow,
-    trendLongWindow,
-    trendMomentumPeriod,
-    t212Runs.length,
-  ]);
+  }, [simConfigKey]);
 
   // Auto-run baseline T212 sims when data is ready (always without trend tilt)
   useEffect(() => {
@@ -4014,6 +4262,28 @@ export default function TimingPage({ params }: TimingPageProps) {
 
       console.log("[VOL] POST", { model: selectedModel, estimator: resolvedEstimator });
 
+      // ============================================================================
+      // STEP 1 DIAGNOSTIC: Log forecast request details (especially for Range)
+      // ============================================================================
+      if (process.env.NODE_ENV === "development") {
+        console.log('[🔍 STEP1-REQUEST]', {
+          selectedVolModel: volModel,
+          selectedRangeEstimator: rangeEstimator,
+          selectedGarchEstimator: garchEstimator,
+          computedModelString: selectedModel,
+          requestPayload: {
+            model: selectedModel,
+            params: modelParams,
+            horizon: h,
+            coverage: effectiveCoverage,
+            tz: effectiveTZ,
+            overwrite: true,
+          },
+          forecastKey: `${selectedModel}_h${h}_cov${effectiveCoverage}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       // Add Range-specific logging
       if (selectedModel?.startsWith('Range-')) {
         const estimator = selectedModel.split('-')[1];
@@ -4132,6 +4402,24 @@ export default function TimingPage({ params }: TimingPageProps) {
       console.log("[VOL][handler] resp.body =", bodyText);
 
       const data = JSON.parse(bodyText);
+      
+      // ============================================================================
+      // STEP 1 DIAGNOSTIC: Log forecast response details
+      // ============================================================================
+      if (process.env.NODE_ENV === "development") {
+        console.log('[🔍 STEP1-RESPONSE]', {
+          httpStatus: resp.status,
+          forecastMethod: data?.method || 'MISSING',
+          sigmaForecast: data?.estimates?.sigma_forecast || 'MISSING',
+          L_h: data?.intervals?.L_h || data?.L_h || 'MISSING',
+          U_h: data?.intervals?.U_h || data?.U_h || 'MISSING',
+          errorField: data?.error || null,
+          success: data?.success !== false,
+          fullResponseKeys: Object.keys(data || {}),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
       setModelAvailabilityMessage(null);
       
       if (volModel === 'GBM') {
@@ -4641,10 +4929,12 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const handleModelChange = useCallback((newModel: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range') => {
     setVolModel(newModel);
-    // Clear stale overlays so tooltip/chart doesn't show previous model while new one is loading
+    // Clear ALL stale overlays so tooltip/chart doesn't show previous model while new one is loading
     setActiveForecast(null);
     setBaseForecast(null);
     setVolForecast(null);
+    setCurrentForecast(null);  // CRITICAL: Clear this to prevent fallback to old forecast
+    setGbmForecast(null);       // CRITICAL: Clear this to prevent fallback to old GBM
     // Auto-triggers volatility forecast via useEffect (for Inspector)
     // Conformal calibration only runs when user clicks "Generate"
   }, []);
@@ -6186,26 +6476,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       </div>
       {/* Price Chart Section */}
       <div className="mb-4">
-        {/* Debug: Log what we're passing to PriceChart */}
-        {(() => {
-          console.log("[Timing] PriceChart props", {
-            h,
-            volModel,
-            coverage,
-            hasActiveForecast: !!activeForecast,
-            hasCurrentForecast: !!currentForecast,
-            hasGbmForecast: !!gbmForecast,
-            hasFallbackForecast: !!fallbackOverlayForecast,
-            activeForecast,
-            fallbackOverlayForecast,
-            hasEwmaPath: !!ewmaPath,
-            ewmaPathLength: ewmaPath?.length ?? 0,
-          });
-          return null;
-        })()}
         <PriceChart 
           symbol={params.ticker} 
           className="w-full"
+          canonicalRows={t212CanonicalRows}
           horizon={h}
           livePrice={livePrice}
           forecastOverlay={forecastOverlayProps}
