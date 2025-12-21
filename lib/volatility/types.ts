@@ -1,4 +1,5 @@
 export type SigmaSource =
+  | "GBM"
   | "GBM-CC"
   | "GARCH11-N"
   | "GARCH11-t"

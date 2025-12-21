@@ -173,8 +173,8 @@ function makeSpecs(): VolModelSpec[] {
 
   return [
     {
-      name: "GBM",
-      model: "GBM",
+      name: "GBM-CC",
+      model: "GBM-CC",
       required: true,
       buildParams: (a) => ({ gbm: { window: a.window } }),
       methodOk: gbmOk,

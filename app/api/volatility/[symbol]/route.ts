@@ -300,6 +300,7 @@ export async function POST(
 
     try {
       switch (model) {
+        case 'GBM':
         case 'GBM-CC':
           if (!volParams.gbm) {
             return NextResponse.json(
