@@ -1,5 +1,5 @@
 import { SigmaForecast } from './types';
-import { loadCanonicalData, loadCanonicalDataFromFS } from '../storage/canonical';
+import { loadCanonicalRows } from '../data/loadCanonicalRows';
 import { CanonicalRow } from '../types/canonical';
 
 export interface RangeParams {
@@ -22,16 +22,9 @@ export interface RangeParams {
 export async function computeRangeSigma(params: RangeParams): Promise<SigmaForecast> {
   const { symbol, date_t, estimator, window, ewma_lambda } = params;
   
-  // Load canonical data - try filesystem first (for API routes), fall back to fetch
-  let dataResult;
-  try {
-    dataResult = await loadCanonicalDataFromFS(symbol);
-  } catch {
-    const rows = await loadCanonicalData(symbol);
-    dataResult = { rows, meta: {} as any };
-  }
+  // Load canonical data using shared loader
+  const data = await loadCanonicalRows(symbol);
   
-  const data = dataResult.rows;
   if (!data || data.length === 0) {
     throw new Error(`No canonical data found for ${symbol}`);
   }

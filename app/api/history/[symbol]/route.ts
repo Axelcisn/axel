@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadCanonicalDataWithMeta } from "@/lib/storage/canonical";
+import { loadCanonicalRows } from "@/lib/data/loadCanonicalRows";
 import { fetchYahooOhlcv } from "@/lib/marketData/yahoo";
 import type { CanonicalRow } from "@/lib/types/canonical";
 
@@ -73,11 +73,18 @@ export async function GET(
     const end = url.searchParams.get("end");
     const requestedInterval = url.searchParams.get("interval"); // e.g., "1d", "1h", "1m"
 
-    // Load canonical data using existing utility
-    let canonicalData = await loadCanonicalDataWithMeta(symbol).catch(() => null);
+    // Load canonical data using shared loader
+    let rows: CanonicalRow[] = [];
+    let meta: Record<string, any> = {};
     
-    let rows: CanonicalRow[] = canonicalData?.rows ?? [];
-    let meta = canonicalData?.meta ?? {};
+    try {
+      rows = await loadCanonicalRows(symbol);
+    } catch (error: any) {
+      // If file doesn't exist, rows stays empty and we'll try Yahoo below
+      if (error.code !== 'ENOENT') {
+        throw error; // Re-throw non-ENOENT errors
+      }
+    }
 
     // Aim to serve at least ~5y of daily data (~1260 trading days)
     const MIN_ROWS_FOR_CHART = 1260;

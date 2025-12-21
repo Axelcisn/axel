@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { loadCanonicalRows } from '@/lib/data/loadCanonicalRows';
 import { fitAndForecastGarch } from '../../../../lib/volatility/garch';
 import { fitAndForecastHar } from '../../../../lib/volatility/har';
 import { computeRangeSigma } from '../../../../lib/volatility/range';
 import { composePi } from '../../../../lib/volatility/piComposer';
 import { SigmaSource, VolParams, SigmaForecast, PiComposeInput } from '../../../../lib/volatility/types';
-import { ensureCanonicalOrHistory } from '../../../../lib/storage/canonical';
 import { ForecastRecord, GbmEstimates } from '../../../../lib/forecast/types';
 import { saveForecast, setActiveForecast } from '../../../../lib/forecast/store';
 import { specFileFor } from '../../../../lib/paths';
@@ -188,11 +188,6 @@ export async function POST(
   try {
     const symbol = (params.symbol || "").toUpperCase();
     
-    console.log("[VOL-API] Request params:", { 
-      rawSymbol: params.symbol, 
-      normalizedSymbol: symbol 
-    });
-    
     const body: VolatilityRequest & {
       horizon?: number;
       horizonTrading?: number;
@@ -205,46 +200,22 @@ export async function POST(
     const bodyH = (body as any).horizonTrading ?? (body as any).h ?? (body as any).horizon;
     const bodyCoverage = (body as any).coverage;
 
-    console.log("[VOL-API] Received request:", {
-      symbol,
-      model,
-      params: volParams,
-      fullBody: body,
-      bodyH,
-      bodyCoverage
-    });
-
-    // Debug logging for target spec path
-    console.log("TARGET_SPEC_PATH", specFileFor(symbol));
-
-    // Load canonical (or Yahoo fallback) data to get latest price and determine date_t
-    let canonicalDataResult;
+    // Load canonical data using shared loader
+    let canonicalData: Array<{ date: string; adj_close: number | null; high?: number | null; low?: number | null; open?: number | null; close?: number | null }>;
     try {
-      console.log("[VOL-API] Attempting to load canonical data for:", symbol);
-      canonicalDataResult = await ensureCanonicalOrHistory(symbol, { minRows: 0 });
-      console.log("[VOL-API] Successfully loaded canonical data:", {
-        symbol,
-        rowCount: canonicalDataResult.rows.length,
-        metaKeys: Object.keys(canonicalDataResult.meta || {})
-      });
+      canonicalData = await loadCanonicalRows(symbol);
     } catch (error: any) {
-      console.error("[VOL-API] Failed to load canonical data:", {
-        symbol,
-        error: error.message,
-        stack: error.stack
-      });
-      const message = error?.message || '';
-      if (message.includes('No canonical data') || message.includes('No data')) {
+      if (error.code === 'ENOENT') {
         return NextResponse.json(
-          { error: `No canonical data found for ${symbol}`, details: message },
+          { error: 'No history for symbol', symbol },
           { status: 404 }
         );
       }
       throw error;
     }
 
-    const canonicalData = canonicalDataResult.rows;
-    const canonicalMeta = canonicalDataResult.meta;
+    // Get exchange timezone from any embedded meta (fallback to Eastern)
+    const canonicalMeta = { exchange_tz: 'America/New_York' };
 
     // Load or create target specification
     const specRes = await ensureDefaultTargetSpec(symbol, {
