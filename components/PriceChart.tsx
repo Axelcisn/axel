@@ -22,6 +22,7 @@ import {
   calculateRangePerformance,
   type PriceRange,
 } from "@/lib/chart/ranges";
+import type { CanonicalRow } from "@/lib/types/canonical";
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
 import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
 import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
@@ -42,9 +43,16 @@ const SYNC_ID = "timing-sync";
 const CHART_MARGIN = { top: 8, right: 0, left: 0, bottom: 0 };
 const Y_AXIS_WIDTH = 56;
 const TOOLTIP_CLASS =
-  "rounded-xl border shadow-2xl backdrop-blur-xl bg-slate-800/40 border-slate-600/30 text-slate-100 px-4 py-3";
+  "rounded-xl border shadow-2xl backdrop-blur-xl bg-slate-800/40 border-slate-600/30 text-slate-100 px-3 py-2.5";
 const TOOLTIP_TITLE_CLASS = "text-slate-100 font-semibold";
 const TOOLTIP_MUTED_CLASS = "text-slate-300";
+const TOOLTIP_HEADER_PADDING = "px-3 py-2";
+const TOOLTIP_SECTION_PADDING = "px-3 py-2.5";
+const TOOLTIP_COLUMN_CLASS = `${TOOLTIP_SECTION_PADDING} flex-1 min-w-[140px]`;
+const TOOLTIP_VALUE_CLASS = "font-mono tabular-nums text-right";
+const TOOLTIP_ROW_GAP = "gap-2.5";
+const TOOLTIP_ROW_GAP_WIDE = "gap-3";
+const RENDER_WARN_LIMIT = 100;
 
 const getBarSizing = (n: number) => {
   // Fill the available category width; zero gap for full-width bars
@@ -144,6 +152,7 @@ interface ChartPoint {
   forecastCenter?: number | null;
   forecastLower?: number | null;
   forecastUpper?: number | null;
+  forecastBand?: number | null;  // Band width (Upper - Lower) for stacked area rendering
   forecastModelName?: string | null;
   forecastModelMethod?: string | null;
   forecastWindowN?: number | null;
@@ -407,6 +416,7 @@ const TREND_EWMA_LONG_COLOR = "#3b82f6";  // Blue
 interface PriceChartProps {
   symbol: string;
   className?: string;
+  canonicalRows?: CanonicalRow[] | null;
   horizon?: number;  // Number of trading days to extend (1,2,3,5)
   livePrice?: number | null;  // Current live price from quote (displayed as horizontal line with pill)
   forecastOverlay?: ForecastOverlayProps;
@@ -535,6 +545,7 @@ const RANGE_OPTIONS: PriceRange[] = [
 const PriceChartInner: React.FC<PriceChartProps> = ({
   symbol,
   className,
+  canonicalRows,
   horizon,
   livePrice,
   forecastOverlay,
@@ -633,27 +644,78 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return ewmaBiasedPath;
   }, [simulationMode.baseMode, ewmaBiasedMaxPath, ewmaBiasedPath]);
 
-  // Ensure the active EWMA path for the selected base mode is loaded
+  // One-shot request tracking to prevent duplicate loads while in-flight
+  const requestedRef = useRef({ unbiased: false, biased: false, max: false });
+
+  // Reset request flags when symbol changes
   useEffect(() => {
+    requestedRef.current = { unbiased: false, biased: false, max: false };
+  }, [symbol]);
+
+  // Reset specific request flag when mode is disabled
+  useEffect(() => {
+    if (!showUnbiasedEwma) {
+      requestedRef.current.unbiased = false;
+    }
+  }, [showUnbiasedEwma]);
+
+  useEffect(() => {
+    if (!showBiasedEwma) {
+      requestedRef.current.biased = false;
+      requestedRef.current.max = false;
+    }
+  }, [showBiasedEwma]);
+
+  // Ensure the active EWMA path for the selected base mode is loaded
+  // Callbacks are now stable from parent, safe to include in dependencies
+  // One-shot refs prevent duplicate calls while loading
+  useEffect(() => {
+    // Dev-only guard: log trigger key to verify effect runs only when intended
+    if (process.env.NODE_ENV !== "production") {
+      const triggerKey = `${symbol}-mode:${simulationMode.baseMode}-unbiased:${showUnbiasedEwma}-biased:${showBiasedEwma}-paths:${ewmaPath?.length ?? 0}/${ewmaBiasedPath?.length ?? 0}/${ewmaBiasedMaxPath?.length ?? 0}-loading:${isLoadingEwmaBiased}/${isLoadingEwmaBiasedMax}-requested:${requestedRef.current.unbiased}/${requestedRef.current.biased}/${requestedRef.current.max}`;
+      console.debug("[PriceChart EWMA Load Effect]", triggerKey);
+    }
+
+    // Compute whether we have data for each mode
+    const hasUnbiased = (ewmaPath?.length ?? 0) > 0;
+    const hasBiased = (ewmaBiasedPath?.length ?? 0) > 0;
+    const hasMax = (ewmaBiasedMaxPath?.length ?? 0) > 0;
+
     if (showUnbiasedEwma) {
-      if ((!ewmaPath || ewmaPath.length === 0) && onLoadEwmaUnbiased) {
+      // Load unbiased if: no data, not loading, not already requested, callback exists
+      if (!hasUnbiased && !requestedRef.current.unbiased && onLoadEwmaUnbiased) {
+        requestedRef.current.unbiased = true;
         onLoadEwmaUnbiased();
       }
     } else if (showBiasedEwma) {
       const wantsMax = simulationMode.baseMode === "max";
+      
       if (wantsMax) {
+        // Load max path if: no data, not loading, not already requested, callback exists
         if (
+          !hasMax &&
           !isLoadingEwmaBiasedMax &&
-          (!ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0) &&
+          !requestedRef.current.max &&
           onLoadEwmaBiasedMax
         ) {
+          requestedRef.current.max = true;
           onLoadEwmaBiasedMax();
         }
-      } else if (!isLoadingEwmaBiased && (!ewmaBiasedPath || ewmaBiasedPath.length === 0) && onLoadEwmaBiased) {
-        onLoadEwmaBiased();
+      } else {
+        // Load standard biased path if: no data, not loading, not already requested, callback exists
+        if (
+          !hasBiased &&
+          !isLoadingEwmaBiased &&
+          !requestedRef.current.biased &&
+          onLoadEwmaBiased
+        ) {
+          requestedRef.current.biased = true;
+          onLoadEwmaBiased();
+        }
       }
     }
   }, [
+    symbol,
     showUnbiasedEwma,
     showBiasedEwma,
     ewmaPath,
@@ -972,6 +1034,28 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   // React state used for UI only (show/hide zoom overlay)
   const [isChartHovered, setIsChartHovered] = useState(false);
+  const renderCounterRef = useRef(0);
+  const renderStartRef = useRef<number | null>(null);
+
+  if (process.env.NODE_ENV !== "production") {
+    if (renderStartRef.current == null) {
+      renderStartRef.current = performance.now();
+    }
+    renderCounterRef.current += 1;
+    if (renderCounterRef.current > RENDER_WARN_LIMIT) {
+      const elapsedMs = performance.now() - (renderStartRef.current ?? performance.now());
+      console.warn("[PriceChart] render loop warning", {
+        count: renderCounterRef.current,
+        elapsedMs: Math.round(elapsedMs),
+        symbol,
+        selectedRange,
+        showUnbiasedEwma,
+        showBiasedEwma,
+      });
+      renderCounterRef.current = 0;
+      renderStartRef.current = performance.now();
+    }
+  }
 
   // Drag-panning refs
   const isDraggingRef = useRef(false);
@@ -1206,7 +1290,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const activeSimWindow = useMemo(() => normalizedVisibleWindow, [normalizedVisibleWindow]);
 
   // Helper to parse rows into PricePoint[]
-  const parseRowsToPoints = (rows: any[]): PricePoint[] => {
+  const parseRowsToPoints = useCallback((rows: any[]): PricePoint[] => {
     const sorted = rows
       .filter((row: any) => row.valid !== false)
       .map((row: any) => ({
@@ -1230,10 +1314,28 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return sorted.filter(
       (p, idx, arr) => idx === 0 || p.date !== arr[idx - 1].date
     );
-  };
+  }, []);
+
+  // Use canonical rows from parent when provided to avoid duplicate fetching
+  useEffect(() => {
+    if (canonicalRows === undefined) return;
+    if (canonicalRows === null) {
+      setLoading(true);
+      return;
+    }
+    const points = parseRowsToPoints(canonicalRows);
+    setFullData(points);
+    setLoading(false);
+    setError(null);
+  }, [canonicalRows, parseRowsToPoints]);
 
   // Fetch full history with auto-sync for missing symbols
   useEffect(() => {
+    // If caller supplies canonical rows, skip internal fetch
+    if (canonicalRows !== undefined) {
+      return;
+    }
+
     let cancelled = false;
 
     const loadHistoryWithAutoSync = async () => {
@@ -1392,7 +1494,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [symbol]);
+  }, [canonicalRows, parseRowsToPoints, symbol]);
 
   // Initialize or reset the view window whenever fullData or the selected range changes.
   // This ensures that after a ticker change (new fullData), the chart always shows the
@@ -2344,6 +2446,49 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return value;
   };
 
+  // Normalize forecast method to include estimator for display and matching
+  const normalizeForecastMethod = (
+    af: any,
+    horizonCoverage?: { volModel?: string; garchEstimator?: string; rangeEstimator?: string }
+  ): string => {
+    const method = typeof af?.method === "string" ? af.method : null;
+    
+    // If method already includes estimator, use it
+    if (method) {
+      if (method.startsWith("GBM")) return "GBM";
+      if (method === "GARCH11-N") return "GARCH11-N";
+      if (method === "GARCH11-t") return "GARCH11-t";
+      if (method === "Range-P") return "Range-P";
+      if (method === "Range-GK") return "Range-GK";
+      if (method === "Range-RS") return "Range-RS";
+      if (method === "Range-YZ") return "Range-YZ";
+      if (method === "HAR-RV") return "HAR-RV";
+      
+      // If method is just "Range" or "GARCH", synthesize with UI selection
+      if (method === "Range" && horizonCoverage?.rangeEstimator) {
+        return `Range-${horizonCoverage.rangeEstimator}`;
+      }
+      if (method === "GARCH" && horizonCoverage?.garchEstimator) {
+        return `GARCH11-${horizonCoverage.garchEstimator}`;
+      }
+      
+      return method;
+    }
+
+    // Fallback: synthesize from UI selections
+    const volModel = horizonCoverage?.volModel;
+    if (volModel === "Range" && horizonCoverage?.rangeEstimator) {
+      return `Range-${horizonCoverage.rangeEstimator}`;
+    }
+    if (volModel === "GARCH" && horizonCoverage?.garchEstimator) {
+      return `GARCH11-${horizonCoverage.garchEstimator}`;
+    }
+    if (volModel === "GBM") return "GBM";
+    if (volModel === "HAR-RV") return "HAR-RV";
+    
+    return volModel || "Unknown";
+  };
+
   // Extract forecast band from activeForecast (if any)
   let overlayDate: string | null = null;
   let overlayCenter: number | null = null;
@@ -2384,6 +2529,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     
     // Use the target date if available, otherwise fall back to last chart date
     overlayDate = targetDate || (lastPoint?.date ?? null);
+    
+    // Dev logging: Target date calculation
+    if (process.env.NODE_ENV === "development" && targetDate) {
+      const normalizedMethod = normalizeForecastMethod(af, horizonCoverage);
+      console.log('[CHART][TARGET-DATE]', {
+        method: normalizedMethod,
+        originDate,
+        horizonValue,
+        targetDate,
+        targetIsInFuture: targetDate > (lastPoint?.date ?? ''),
+        lastChartDate: lastPoint?.date,
+        businessDaysCalculation: `${originDate} + ${horizonValue} business days = ${targetDate}`
+      });
+    }
 
     // 2) Extract center and band exactly like the Inspector does
 
@@ -2483,6 +2642,34 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       overlayLower,
       overlayUpper,
     });
+    
+    // Sanity check: verify band ordering and units
+    if (af && overlayCenter != null && overlayLower != null && overlayUpper != null) {
+      const model = af?.method || forecastOverlay?.volModel || 'UNKNOWN';
+      const sigma = af?.estimates?.sigma_forecast || af?.estimates?.sigma_hat || 0;
+      const sanityOK = overlayLower <= overlayCenter && overlayCenter <= overlayUpper;
+      
+      console.log('[CHART][VOL-BAND]', {
+        model,
+        units: 'daily log-return sigma',
+        sigma_1d: sigma.toFixed(6),
+        horizon: af?.horizonTrading || af?.target?.h || 1,
+        center: overlayCenter.toFixed(2),
+        lower: overlayLower.toFixed(2),
+        upper: overlayUpper.toFixed(2),
+        sanityCheck: sanityOK ? '✅ lower <= center <= upper' : '❌ INVALID ORDERING',
+        bandWidthPct: ((overlayUpper - overlayLower) / overlayCenter * 100).toFixed(2) + '%'
+      });
+      
+      if (!sanityOK) {
+        console.error('[CHART][VOL-BAND] ❌ SANITY FAIL: Band ordering violated!', {
+          lower: overlayLower,
+          center: overlayCenter,
+          upper: overlayUpper,
+          model
+        });
+      }
+    }
   }, [forecastOverlay, overlayDate, overlayCenter, overlayLower, overlayUpper]);
 
   const formatVolModelName = (
@@ -2493,45 +2680,38 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   ): string => {
     if (method) {
       if (method.startsWith("GBM")) return "GBM";
-      if (method === "GARCH11-N") return "GARCH (1,1) - Normal";
-      if (method === "GARCH11-t") return "GARCH (1,1) - Student-t";
-      if (method === "Range-P") return "Range - Parkinson";
-      if (method === "Range-GK") return "Range - Garman-Klass";
-      if (method === "Range-RS") return "Range - Rogers-Satchell";
-      if (method === "Range-YZ") return "Range - Yang Zhang";
+      if (method === "GARCH11-N") return "GARCH11-N";
+      if (method === "GARCH11-t") return "GARCH11-t";
+      if (method === "Range-P") return "Range-P";
+      if (method === "Range-GK") return "Range-GK";
+      if (method === "Range-RS") return "Range-RS";
+      if (method === "Range-YZ") return "Range-YZ";
       if (method === "HAR-RV") return "HAR-RV";
       return method;
     }
 
     // Fallback: use current UI selections
     if (volModel === "Range") {
-      const label = rangeEstimator === "P"
-        ? "Parkinson"
-        : rangeEstimator === "GK"
-          ? "Garman-Klass"
-          : rangeEstimator === "RS"
-            ? "Rogers-Satchell"
-            : rangeEstimator === "YZ"
-              ? "Yang Zhang"
-              : "Range";
-      return `Range - ${label}`;
+      const estimator = rangeEstimator || "?";
+      return `Range-${estimator}`;
     }
     if (volModel === "GARCH") {
-      return garchEstimator === "Student-t" ? "GARCH (1,1) - Student-t" : "GARCH (1,1) - Normal";
+      const estimator = garchEstimator || "N";
+      return `GARCH11-${estimator}`;
     }
     if (volModel === "GBM") return "GBM";
     if (volModel === "HAR-RV") return "HAR-RV";
     return volModel || "Unknown";
   };
 
-  // Get model name for forecast overlay (method-aware + estimator labels)
+  // Get normalized method and display name for forecast overlay
+  const forecastModelMethod = normalizeForecastMethod(af, horizonCoverage);
   const forecastModelName = formatVolModelName(
-    typeof af?.method === "string" ? af.method : null,
+    forecastModelMethod,
     forecastOverlay?.volModel || horizonCoverage?.volModel || null,
     horizonCoverage?.garchEstimator || null,
     horizonCoverage?.rangeEstimator || null
   );
-  const forecastModelMethod = typeof af?.method === "string" ? af.method : null;
   const forecastWindowN = (af as any)?.estimates?.n ?? null;
 
   // Create chart data with forecast band for rendering the connecting lines and filled area
@@ -2570,24 +2750,31 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       const lastHistDate = lastHistoricalPoint.date;
       const lastHistValue = lastHistoricalPoint.close;
       const overlayDateNormalized = normalizeDateString(overlayDate);
-      const overlayAllowed = overlayDateNormalized ? syncedDateSet.has(overlayDateNormalized) : false;
-
-      if (!overlayAllowed) {
-        return data;
-      }
+      
+      // Always allow target date (it's future by design)
+      const targetIsFuture = overlayDateNormalized > lastHistDate;
 
       // Check if overlayDate exists in data
       const overlayDateExists = data.some(p => p.date === overlayDateNormalized);
 
-      // If overlayDate doesn't exist in data, add it
-      if (!overlayDateExists) {
+      // If overlayDate doesn't exist in data, add it (always add for future target)
+      if (!overlayDateExists && targetIsFuture) {
+        const bandWidth = overlayUpper != null && overlayLower != null 
+          ? overlayUpper - overlayLower 
+          : null;
         data = [...data, {
           date: overlayDateNormalized,
           value: null,
+          open: undefined,
+          high: undefined,
+          low: undefined,
+          close: undefined,
+          volume: undefined,
           isFuture: true,
           forecastCenter: overlayCenter,
           forecastLower: overlayLower,
           forecastUpper: overlayUpper,
+          forecastBand: bandWidth,
           forecastModelName,
           forecastModelMethod,
           forecastWindowN,
@@ -2621,6 +2808,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               forecastCenter: lastHistValue,
               forecastLower: lastHistValue,
               forecastUpper: lastHistValue,
+              forecastBand: 0, // Band width = 0 at start
               forecastModelName,
               forecastModelMethod,
               forecastWindowN,
@@ -2629,11 +2817,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           
           // Overlay date: the forecast values
           if (idx === overlayIndex) {
+            const bandWidth = overlayUpper != null && overlayLower != null 
+              ? overlayUpper - overlayLower 
+              : null;
             return {
               ...point,
               forecastCenter: overlayCenter,
               forecastLower: overlayLower,
               forecastUpper: overlayUpper,
+              forecastBand: bandWidth,
               forecastModelName,
               forecastModelMethod,
               forecastWindowN,
@@ -2651,18 +2843,31 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           // Intermediate points: linearly interpolate between start and end
           if (idx > lastHistIndex && idx < overlayIndex) {
             const t = (idx - lastHistIndex) / totalSteps; // 0 to 1
+            const interpLower = overlayLower != null ? lastHistValue + t * (overlayLower - lastHistValue) : null;
+            const interpUpper = overlayUpper != null ? lastHistValue + t * (overlayUpper - lastHistValue) : null;
+            const bandWidth = interpUpper != null && interpLower != null 
+              ? interpUpper - interpLower 
+              : null;
             return {
               ...point,
               forecastCenter: lastHistValue + t * (overlayCenter - lastHistValue),
-              forecastLower: overlayLower != null ? lastHistValue + t * (overlayLower - lastHistValue) : null,
-              forecastUpper: overlayUpper != null ? lastHistValue + t * (overlayUpper - lastHistValue) : null,
+              forecastLower: interpLower,
+              forecastUpper: interpUpper,
+              forecastBand: bandWidth,
               forecastModelName,
               forecastModelMethod,
               forecastWindowN,
             };
           }
           
-          return point;
+          // All other points: explicitly null out forecast fields to prevent 0s in domain
+          return {
+            ...point,
+            forecastCenter: null,
+            forecastLower: null,
+            forecastUpper: null,
+            forecastBand: null,
+          };
         });
       }
     }
@@ -2670,47 +2875,146 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return data;
   }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName, forecastModelMethod, forecastWindowN, syncedDateSet]);
 
+  // Dev logging: Verify band data after computation
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (!forecastOverlay?.activeForecast) return;
+    
+    const bandPoints = chartDataWithForecastBand.filter(p => p.forecastBand != null && p.forecastBand > 0);
+    const af = forecastOverlay.activeForecast;
+    
+    // Check if overlay date is actually in the chart data
+    const overlayDateInChart = overlayDate 
+      ? chartDataWithForecastBand.some(p => p.date === normalizeDateString(overlayDate))
+      : false;
+    
+    const lastChartPoint = chartDataWithForecastBand[chartDataWithForecastBand.length - 1];
+    const isTargetDateLastPoint = lastChartPoint?.date === normalizeDateString(overlayDate || '');
+    
+    const normalizedMethod = normalizeForecastMethod(af, horizonCoverage);
+    
+    console.log('[CHART][BAND-DATA]', {
+      method: normalizedMethod,
+      overlayDate: overlayDate,
+      overlayDateInChart: overlayDateInChart ? '✅ YES' : '❌ NO - Target date missing from chart!',
+      isTargetDateLastPoint: isTargetDateLastPoint ? '✅ YES - Cone extends to target' : '⚠️ NO - Cone may be cut off',
+      lastChartDate: lastChartPoint?.date,
+      totalChartPoints: chartDataWithForecastBand.length,
+      bandPointsCount: bandPoints.length,
+      hasBandData: bandPoints.length > 0,
+      sampleBandPoint: bandPoints.length > 0 ? {
+        date: bandPoints[0].date,
+        forecastCenter: bandPoints[0].forecastCenter?.toFixed(2),
+        forecastLower: bandPoints[0].forecastLower?.toFixed(2),
+        forecastUpper: bandPoints[0].forecastUpper?.toFixed(2),
+        forecastBand: bandPoints[0].forecastBand?.toFixed(2),
+      } : 'NO BAND DATA',
+      targetBandPoint: overlayDateInChart && overlayDate ? {
+        date: normalizeDateString(overlayDate),
+        point: chartDataWithForecastBand.find(p => p.date === normalizeDateString(overlayDate)),
+      } : 'Target not in chart',
+      bandIsVisible: bandPoints.length > 0 ? '✅ YES' : '❌ NO - Band will not render!'
+    });
+  }, [chartDataWithForecastBand, forecastOverlay, overlayDate]);
+
   // Compute Y-axis domain that includes EWMA values when overlay is active
   const priceYDomain = useMemo(() => {
     const values: number[] = [];
     
     chartDataWithForecastBand.forEach(p => {
-      if (p.close != null && Number.isFinite(p.close)) values.push(p.close);
-      if (p.forecastCenter != null && Number.isFinite(p.forecastCenter)) values.push(p.forecastCenter);
-      if (p.forecastLower != null && Number.isFinite(p.forecastLower)) values.push(p.forecastLower);
-      if (p.forecastUpper != null && Number.isFinite(p.forecastUpper)) values.push(p.forecastUpper);
+      // Only include valid positive values (price can't be 0 or negative)
+      if (p.close != null && Number.isFinite(p.close) && p.close > 0) values.push(p.close);
+      if (p.high != null && Number.isFinite(p.high) && p.high > 0) values.push(p.high);
+      if (p.low != null && Number.isFinite(p.low) && p.low > 0) values.push(p.low);
+      if (p.forecastCenter != null && Number.isFinite(p.forecastCenter) && p.forecastCenter > 0) values.push(p.forecastCenter);
+      if (p.forecastLower != null && Number.isFinite(p.forecastLower) && p.forecastLower > 0) values.push(p.forecastLower);
+      if (p.forecastUpper != null && Number.isFinite(p.forecastUpper) && p.forecastUpper > 0) values.push(p.forecastUpper);
       // Include EWMA values in domain calculation
       if (showUnbiasedEwma) {
-        if (p.ewma_forecast != null && Number.isFinite(p.ewma_forecast)) values.push(p.ewma_forecast);
-        if (p.ewma_lower != null && Number.isFinite(p.ewma_lower)) values.push(p.ewma_lower);
-        if (p.ewma_upper != null && Number.isFinite(p.ewma_upper)) values.push(p.ewma_upper);
+        if (p.ewma_forecast != null && Number.isFinite(p.ewma_forecast) && p.ewma_forecast > 0) values.push(p.ewma_forecast);
+        if (p.ewma_lower != null && Number.isFinite(p.ewma_lower) && p.ewma_lower > 0) values.push(p.ewma_lower);
+        if (p.ewma_upper != null && Number.isFinite(p.ewma_upper) && p.ewma_upper > 0) values.push(p.ewma_upper);
       }
       if (showBiasedEwma) {
-        if (p.ewma_biased_forecast != null && Number.isFinite(p.ewma_biased_forecast)) values.push(p.ewma_biased_forecast);
-        if (p.ewma_biased_lower != null && Number.isFinite(p.ewma_biased_lower)) values.push(p.ewma_biased_lower);
-        if (p.ewma_biased_upper != null && Number.isFinite(p.ewma_biased_upper)) values.push(p.ewma_biased_upper);
+        if (p.ewma_biased_forecast != null && Number.isFinite(p.ewma_biased_forecast) && p.ewma_biased_forecast > 0) values.push(p.ewma_biased_forecast);
+        if (p.ewma_biased_lower != null && Number.isFinite(p.ewma_biased_lower) && p.ewma_biased_lower > 0) values.push(p.ewma_biased_lower);
+        if (p.ewma_biased_upper != null && Number.isFinite(p.ewma_biased_upper) && p.ewma_biased_upper > 0) values.push(p.ewma_biased_upper);
       }
       if (showTrendEwma) {
-        if (p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort)) values.push(p.trendEwmaShort);
-        if (p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong)) values.push(p.trendEwmaLong);
+        if (p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort) && p.trendEwmaShort > 0) values.push(p.trendEwmaShort);
+        if (p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong) && p.trendEwmaLong > 0) values.push(p.trendEwmaLong);
       }
     });
     
-    if (values.length === 0) return ["dataMin", "dataMax"];
+    // If no values found, fall back to price data only (no forecast/EWMA)
+    if (values.length === 0) {
+      chartDataWithForecastBand.forEach(p => {
+        if (p.close != null && Number.isFinite(p.close) && p.close > 0) values.push(p.close);
+        if (p.high != null && Number.isFinite(p.high) && p.high > 0) values.push(p.high);
+        if (p.low != null && Number.isFinite(p.low) && p.low > 0) values.push(p.low);
+      });
+    }
+    
+    // Still no values? Return a safe numeric default
+    if (values.length === 0) {
+      return [0, 100]; // Safe numeric fallback, never reached in practice
+    }
     
     const min = Math.min(...values);
     const max = Math.max(...values);
     
-    // Guard against NaN or Infinity
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      return ["dataMin", "dataMax"];
+    // Guard against invalid values - if this happens, use price data only
+    if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0) {
+      const priceValues: number[] = [];
+      chartDataWithForecastBand.forEach(p => {
+        if (p.close != null && Number.isFinite(p.close) && p.close > 0) priceValues.push(p.close);
+      });
+      if (priceValues.length > 0) {
+        const priceMin = Math.min(...priceValues);
+        const priceMax = Math.max(...priceValues);
+        const pricePadding = (priceMax - priceMin) * 0.03;
+        return [priceMin - pricePadding, priceMax + pricePadding];
+      }
+      return [0, 100]; // Ultimate fallback
     }
     
-    // Add 2% padding
-    const padding = (max - min) * 0.02;
+    // Add 3% padding for better visibility
+    const padding = (max - min) * 0.03;
     
     return [min - padding, max + padding];
   }, [chartDataWithForecastBand, showUnbiasedEwma, showBiasedEwma, showTrendEwma]);
+
+  // Dev logging: Verify Y-axis domain doesn't include 0 when band is active
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (!forecastOverlay?.activeForecast) return;
+    
+    // Count points with band fields set to problematic values
+    const zerosInLower = chartDataWithForecastBand.filter(p => p.forecastLower === 0).length;
+    const zerosInBand = chartDataWithForecastBand.filter(p => p.forecastBand === 0).length;
+    const nullsInLower = chartDataWithForecastBand.filter(p => p.forecastLower === null).length;
+    const nullsInBand = chartDataWithForecastBand.filter(p => p.forecastBand === null).length;
+    const bandPointsCount = chartDataWithForecastBand.filter(p => p.forecastBand != null).length;
+    
+    const domainMin = Array.isArray(priceYDomain) && typeof priceYDomain[0] === "number" ? priceYDomain[0] : null;
+    const domainMax = Array.isArray(priceYDomain) && typeof priceYDomain[1] === "number" ? priceYDomain[1] : null;
+    const isDangerousFallback = typeof priceYDomain[0] === "string" || typeof priceYDomain[1] === "string";
+    
+    console.log('[VOL-BAND-DOMAIN]', {
+      domain: priceYDomain,
+      domainType: isDangerousFallback ? '❌ STRING FALLBACK (causes 0 inclusion)' : '✅ NUMERIC',
+      domainMin,
+      domainMax,
+      domainMinAboveZero: domainMin != null && domainMin > 0 ? '✅ YES' : '❌ NO - Domain includes 0!',
+      zerosInLower,
+      zerosInBand,
+      nullsInLower,
+      nullsInBand,
+      bandPointsCount,
+      totalPoints: chartDataWithForecastBand.length,
+      axisBinding: '✅ Areas use yAxisId="price" (verified in JSX)',
+    });
+  }, [chartDataWithForecastBand, priceYDomain, forecastOverlay]);
 
   const priceYMinValue = useMemo(() => {
     return Array.isArray(priceYDomain) && typeof priceYDomain[0] === "number"
@@ -4171,7 +4475,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     );
 
     return (
-      <div className="relative" key={`chart-wrapper-${showTrendEwma}-${chartDataForRender.length}`}>
+      <div className="relative">
         {/* Enhanced CSS Animations for forecast band */}
         <style>{`
           /* Smooth dot entrance with scale and glow */
@@ -4238,6 +4542,50 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             animation: refLineFade 0.6s ease-out forwards;
           }
         `}</style>
+        
+        {/* Volatility Model Info Badge - shown when forecast is active OR loading */}
+        {horizonCoverage?.isLoading && !forecastModelName && (
+          <div className="absolute top-2 left-2 z-10 pointer-events-none">
+            <div className={`px-2.5 py-1 rounded-lg text-[10px] font-mono backdrop-blur-sm border animate-pulse ${
+              isDarkMode 
+                ? 'bg-gray-800/60 border-gray-600/30 text-gray-300' 
+                : 'bg-gray-100/80 border-gray-400/50 text-gray-600'
+            }`}>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">Loading {horizonCoverage.volModel}...</span>
+                {horizonCoverage?.h && (
+                  <span className="opacity-75">h={horizonCoverage.h}D</span>
+                )}
+                {horizonCoverage?.coverage && (
+                  <span className="opacity-75">{(horizonCoverage.coverage * 100).toFixed(0)}%</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {overlayCenter != null && overlayLower != null && overlayUpper != null && forecastModelName && (
+          <div className="absolute top-2 left-2 z-10 pointer-events-none">
+            <div className={`px-2.5 py-1 rounded-lg text-[10px] font-mono backdrop-blur-sm border ${
+              isDarkMode 
+                ? 'bg-blue-900/60 border-blue-500/30 text-blue-100' 
+                : 'bg-blue-50/80 border-blue-300/50 text-blue-900'
+            }`}>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">{forecastModelName}</span>
+                {overlaySigma != null && (
+                  <span className="opacity-75">σ₁d: {overlaySigma.toFixed(4)}</span>
+                )}
+                {horizonCoverage?.h && (
+                  <span className="opacity-75">h={horizonCoverage.h}D</span>
+                )}
+                {horizonCoverage?.coverage && (
+                  <span className="opacity-75">{(horizonCoverage.coverage * 100).toFixed(0)}%</span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* Combined Price and Volume Chart */}
         <div
           ref={chartContainerRef}
@@ -4303,7 +4651,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           <ResponsiveContainer 
             width="100%" 
             height={500}
-            key={`chart-container-${showTrendEwma}-${chartDataForRender.length}`}
           >
             <ComposedChart
               data={chartDataForRender}
@@ -4544,6 +4891,31 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
+              
+              {/* Gradient for volatility forecast band */}
+              <linearGradient
+                id="forecastBandGradient"
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stopColor="#60A5FA"
+                  stopOpacity={0.35}
+                />
+                <stop
+                  offset="50%"
+                  stopColor="#60A5FA"
+                  stopOpacity={0.20}
+                />
+                <stop
+                  offset="100%"
+                  stopColor="#60A5FA"
+                  stopOpacity={0.35}
+                />
+              </linearGradient>
                 </defs>
 
             <XAxis
@@ -4808,13 +5180,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             {/* Forecast band overlay at t+h */}
             {overlayDate && overlayCenter != null && (
               <>
-                {/* Vertical line at forecast date */}
+                {/* Vertical line at forecast date with horizon label */}
                 <ReferenceLine
+                  key={`forecast-target-${overlayDate}-${horizonCoverage?.h || 1}`}
                   x={overlayDate}
                   stroke={isDarkMode ? "rgba(59, 130, 246, 0.5)" : "rgba(59, 130, 246, 0.4)"}
                   strokeDasharray="6 4"
                   strokeWidth={1.5}
                   className="forecast-ref-line"
+                  label={{
+                    value: horizonCoverage?.h ? `h=${horizonCoverage.h}D` : 'Target',
+                    position: 'top',
+                    fill: isDarkMode ? "#60A5FA" : "#3B82F6",
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }}
                 />
 
                 {/* Center forecast dot */}
@@ -4857,56 +5237,76 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               </>
             )}
             
-            {/* Forecast Lines - connecting current price to forecast bounds */}
-            {/* Forecast Lower Line */}
-            {overlayLower != null && (
-              <Line
-                yAxisId="price"
-                type="linear"
-                dataKey="forecastLower"
-                stroke="#60A5FA"
-                strokeWidth={2}
-                strokeOpacity={0.85}
-                dot={false}
-                activeDot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-                filter="url(#forecastGlow)"
-              />
-            )}
-            
-            {/* Forecast Center Line */}
-            {overlayCenter != null && (
-              <Line
-                yAxisId="price"
-                type="linear"
-                dataKey="forecastCenter"
-                stroke="#60A5FA"
-                strokeWidth={2}
-                strokeOpacity={0.85}
-                dot={false}
-                activeDot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-                filter="url(#forecastGlow)"
-              />
-            )}
-            
-            {/* Forecast Upper Line */}
-            {overlayUpper != null && (
-              <Line
-                yAxisId="price"
-                type="linear"
-                dataKey="forecastUpper"
-                stroke="#60A5FA"
-                strokeWidth={2}
-                strokeOpacity={0.85}
-                dot={false}
-                activeDot={false}
-                isAnimationActive={false}
-                connectNulls={false}
-                filter="url(#forecastGlow)"
-              />
+            {/* Volatility Model Forecast Band - Stacked Area */}
+            {overlayLower != null && overlayUpper != null && (
+              <>
+                {/* Base layer: transparent area at forecastLower level */}
+                <Area
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastLower"
+                  stroke="none"
+                  fill="none"
+                  stackId="forecast-band"
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                
+                {/* Top layer: colored band representing the width (Upper - Lower) */}
+                <Area
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastBand"
+                  stroke="none"
+                  fill="url(#forecastBandGradient)"
+                  fillOpacity={0.25}
+                  stackId="forecast-band"
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                
+                {/* Forecast Center Line */}
+                <Line
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastCenter"
+                  stroke="#60A5FA"
+                  strokeWidth={1.5}
+                  strokeOpacity={0.9}
+                  strokeDasharray="4 2"
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                
+                {/* Forecast boundary lines for clarity */}
+                <Line
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastLower"
+                  stroke="#60A5FA"
+                  strokeWidth={1}
+                  strokeOpacity={0.5}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+                
+                <Line
+                  yAxisId="price"
+                  type="linear"
+                  dataKey="forecastUpper"
+                  stroke="#60A5FA"
+                  strokeWidth={1}
+                  strokeOpacity={0.5}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                />
+              </>
             )}
             
             {/* Price Line - based on Close price */}
@@ -4928,7 +5328,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             {/* Trend EWMA overlays (toggle-controlled) */}
             {showTrendEwma && chartHasTrendEwmaShort && (
               <Line
-                key={`trend-ewma-short-${chartDataForRender.length}`}
                 yAxisId="price"
                 type="monotone"
                 dataKey="trendEwmaShort"
@@ -4945,7 +5344,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
             {showTrendEwma && chartHasTrendEwmaLong && (
               <Line
-                key={`trend-ewma-long-${chartDataForRender.length}`}
                 yAxisId="price"
                 type="monotone"
                 dataKey="trendEwmaLong"
@@ -4984,7 +5382,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             >
               {chartDataWithEquity.map((entry, index) => (
                 <Cell 
-                  key={`cell-${index}`} 
+                  key={`vol-${entry.date}-${index}`}
                   fill={entry.volumeColor || "rgba(100, 100, 100, 0.4)"} 
                   stroke={entry.volumeStroke || "rgba(100, 100, 100, 0.6)"}
                   strokeWidth={1}
@@ -5175,6 +5573,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
             {hoveredDate && priceYMinValue != null && priceYMaxValue != null && (
               <ReferenceLine
+                key="hover-refline"
                 x={hoveredDate}
                 yAxisId="price"
                 segment={[
@@ -5249,6 +5648,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   />
 
                   <ReferenceLine
+                    key="momentum-neutral"
                     yAxisId="momentum"
                     y={50}
                     stroke="#4b5563"
@@ -5261,6 +5661,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     }}
                   />
                   <ReferenceLine
+                    key="momentum-lower"
                     yAxisId="momentum"
                     y={25}
                     stroke="#4b5563"
@@ -5268,6 +5669,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     ifOverflow="extendDomain"
                   />
                   <ReferenceLine
+                    key="momentum-upper"
                     yAxisId="momentum"
                     y={75}
                     stroke="#4b5563"
@@ -5275,6 +5677,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     ifOverflow="extendDomain"
                   />
                   <ReferenceLine
+                    key="momentum-zero"
                     yAxisId="momentum"
                     y={0}
                     stroke="#4b5563"
@@ -5282,6 +5685,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     ifOverflow="extendDomain"
                   />
                   <ReferenceLine
+                    key="momentum-hundred"
                     yAxisId="momentum"
                     y={100}
                     stroke="#4b5563"
@@ -5327,6 +5731,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
                   {hoveredDate && (
                     <ReferenceLine
+                      key="momentum-hover-crosshair"
                       x={hoveredDate}
                       yAxisId="momentum"
                       segment={[
@@ -6993,6 +7398,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
                       {hoveredDate && (
                         <ReferenceLine
+                          key="equity-hover-crosshair"
                           x={hoveredDate}
                           stroke={isDarkMode ? "#FFFFFF" : "rgba(148, 163, 184, 0.35)"}
                           strokeWidth={1}
@@ -7001,6 +7407,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       )}
 
                       <ReferenceLine
+                        key="equity-zero-line"
                         y={0}
                         yAxisId="delta"
                         stroke={isDarkMode ? "rgba(148, 163, 184, 0.4)" : "rgba(100, 116, 139, 0.5)"}
@@ -7019,7 +7426,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           const positive = (entry.equityDelta ?? 0) >= 0;
                           return (
                             <Cell
-                              key={`eq-bar-${index}`}
+                              key={`eq-bar-${entry.date}-${index}`}
                               fill={
                                 positive
                                   ? "rgba(52, 211, 153, 0.35)"
@@ -7821,7 +8228,11 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   const hasEwmaData = data.ewma_forecast != null;
   const hasEwmaBiasedData = data.ewma_biased_forecast != null;
   const showEwmaTrend = ewmaShortWindow != null && ewmaLongWindow != null && (shortValue != null || longValue != null);
-  const formatPrice = (v: number | null) => (v != null ? `$${v.toFixed(2)}` : '—');
+  const formatPrice = (v: number | null) => (v != null ? v.toFixed(2) : '—');
+  const formatDelta = (v: number | null | undefined) => {
+    if (v == null || Number.isNaN(v)) return '—';
+    return `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
+  };
   let trendLabel = 'Neutral';
   let trendClass = isDarkMode ? 'text-slate-300' : 'text-gray-600';
 
@@ -7856,7 +8267,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         : 'bg-white/60 border-gray-200/50 text-gray-900'
     }`}>
       {/* Date Header */}
-      <div className={`px-3 py-1 border-b ${
+      <div className={`${TOOLTIP_HEADER_PADDING} border-b ${
         isDarkMode ? 'border-slate-600/30' : 'border-gray-200/50'
       }`}>
         <div className={`text-[11px] font-semibold tracking-wide ${
@@ -7869,7 +8280,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
       <div className={`flex ${isDarkMode ? 'divide-x divide-slate-600/30' : 'divide-x divide-gray-200/50'}`}>
         {/* Model Forecast Section - Blue themed (only for future forecast points) */}
         {hasForecastData && (
-          <div className="px-3 py-2">
+          <div className={TOOLTIP_COLUMN_CLASS}>
             {/* Section Header */}
             <div className="flex items-center gap-1.5 mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
@@ -7881,7 +8292,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
             
             <div className="space-y-0.5 text-[10px]">
               {/* Window (N) */}
-              <div className="flex justify-between gap-3">
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                 <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>N</span>
                 <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
                   {modelWindow != null ? modelWindow.toLocaleString() : '–'}
@@ -7889,7 +8300,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               </div>
               {/* Model Forecast (center) */}
               {data.forecastCenter != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Forecast</span>
                   <span className={`font-mono tabular-nums font-medium ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>
                     ${data.forecastCenter.toFixed(2)}
@@ -7897,7 +8308,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastUpper != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Upper</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
                     ${data.forecastUpper.toFixed(2)}
@@ -7905,7 +8316,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastLower != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Lower</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-blue-300/70' : 'text-blue-600'}`}>
                     ${data.forecastLower.toFixed(2)}
@@ -7914,7 +8325,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               )}
               {/* μ* and σ parameters */}
               {data.forecastMuStar != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>μ*</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastMuStar.toExponential(2)}
@@ -7922,7 +8333,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastSigma != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>σ</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastSigma.toFixed(4)}
@@ -7931,7 +8342,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               )}
               {/* GARCH volatility parameters */}
               {data.forecastOmega != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>ω</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastOmega.toExponential(2)}
@@ -7939,7 +8350,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastAlpha != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>α</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastAlpha.toFixed(4)}
@@ -7947,7 +8358,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastBeta != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>β</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastBeta.toFixed(4)}
@@ -7955,7 +8366,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastAlphaPlusBeta != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>α+β</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastAlphaPlusBeta.toFixed(4)}
@@ -7963,7 +8374,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.forecastUncondVar != null && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>σ²∞</span>
                   <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                     {data.forecastUncondVar.toExponential(2)}
@@ -7976,35 +8387,35 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         
         {/* OHLCV Data - only show for historical points */}
         {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
-          <div className="px-3 py-2">
+          <div className={TOOLTIP_COLUMN_CLASS}>
             <div className={`text-[9px] font-semibold uppercase tracking-wider mb-1 ${
               isDarkMode ? 'text-slate-400' : 'text-gray-500'
             }`}>
               OHLCV
             </div>
-            <div className="space-y-0.5 text-[10px]">
+            <div className="space-y-1 text-[10px]">
               {data.open && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Open</span>
-                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.open.toFixed(2)}</span>
+                  <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.open.toFixed(2)}</span>
                 </div>
               )}
               {data.high && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>High</span>
-                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.high.toFixed(2)}</span>
+                  <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.high.toFixed(2)}</span>
                 </div>
               )}
               {data.low && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Low</span>
-                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.low.toFixed(2)}</span>
+                  <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.low.toFixed(2)}</span>
                 </div>
               )}
               {data.close && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Close</span>
-                  <span className={`font-mono tabular-nums font-medium ${
+                  <span className={`${TOOLTIP_VALUE_CLASS} font-medium ${
                     data.open && data.close > data.open
                       ? 'text-emerald-400'
                       : data.open && data.close < data.open
@@ -8014,9 +8425,9 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 </div>
               )}
               {data.volume && (
-                <div className="flex justify-between gap-3">
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Vol</span>
-                  <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>{formatVolumeAbbreviated(data.volume)}</span>
+                  <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>{formatVolumeAbbreviated(data.volume)}</span>
                 </div>
               )}
             </div>
@@ -8025,94 +8436,72 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         
         {/* EWMA Unbiased Section */}
         {(data.ewma_past_forecast != null || data.ewma_future_forecast != null) && (
-          <div className="px-3 py-2">
-            {/* Section Header */}
-            <div className="flex items-center gap-1.5 mb-1">
-              <div className={`w-1 h-1 rounded-full ${isDarkMode ? 'bg-purple-400' : 'bg-purple-500'}`} />
+          <div className={TOOLTIP_COLUMN_CLASS}>
+            <div className="mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                isDarkMode ? 'text-purple-400' : 'text-purple-600'
+                isDarkMode ? 'text-purple-300' : 'text-purple-700'
               }`}>
                 EWMA Unbiased
               </span>
             </div>
-            
-            {/* Two-column table */}
-            <table className="w-full text-[9px]">
-              <tbody className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>
-                {/* Made on (origin date) */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Made on</td>
-                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_past_origin_date ? formatDateShort(data.ewma_past_origin_date) : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_future_origin_date ? formatDateShort(data.ewma_future_origin_date) : '—'}
-                  </td>
-                </tr>
-                {/* Target (target date) */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Target</td>
-                  <td className={`text-right px-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_past_target_date ? formatDateShort(data.ewma_past_target_date) : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_future_target_date ? formatDateShort(data.ewma_future_target_date) : '—'}
-                  </td>
-                </tr>
-                {/* Forecast Price */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Forecast</td>
-                  <td className={`text-right px-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>
-                    {data.ewma_past_forecast != null ? `$${data.ewma_past_forecast.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono tabular-nums font-bold ${isDarkMode ? 'text-purple-300' : 'text-purple-700'}`}>
-                    {data.ewma_future_forecast != null ? `$${data.ewma_future_forecast.toFixed(2)}` : '—'}
-                  </td>
-                </tr>
-                {/* Upper Band */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Upper</td>
-                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_past_upper != null ? `$${data.ewma_past_upper.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_future_upper != null ? `$${data.ewma_future_upper.toFixed(2)}` : '—'}
-                  </td>
-                </tr>
-                {/* Lower Band */}
-                <tr>
-                  <td className={`pr-2 ${isDarkMode ? 'text-slate-500' : 'text-gray-400'}`}>Lower</td>
-                  <td className={`text-right px-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_past_lower != null ? `$${data.ewma_past_lower.toFixed(2)}` : '—'}
-                  </td>
-                  <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    {data.ewma_future_lower != null ? `$${data.ewma_future_lower.toFixed(2)}` : '—'}
-                  </td>
-                </tr>
-                {/* Error row */}
-                {!data.isFuture && data.close != null && (
-                  <tr>
-                    <td className={`pr-2 ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>Error</td>
-                    <td className="text-right px-1 font-mono tabular-nums">
-                      {data.ewma_past_forecast != null ? (
-                        <span className={(data.ewma_past_forecast - data.close) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                          {(data.ewma_past_forecast - data.close) >= 0 ? '+' : ''}{(data.ewma_past_forecast - data.close).toFixed(2)}
-                        </span>
-                      ) : <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>—</span>}
-                    </td>
-                    <td className={`text-right pl-1 font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      —
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+
+            <div className="text-[10px] space-y-1">
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>Expected</span>
+                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                  {formatPrice(data.ewma_past_forecast ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_past_upper ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_past_lower ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Error</span>
+                <span className="font-mono tabular-nums">
+                  {data.ewma_past_forecast != null && (data.close ?? data.ewma_past_realized) != null ? (
+                    <span className={(data.ewma_past_forecast - (data.close ?? data.ewma_past_realized)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {formatDelta(data.ewma_past_forecast - (data.close ?? data.ewma_past_realized))}
+                    </span>
+                  ) : (
+                    <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>—</span>
+                  )}
+                </span>
+              </div>
+              <div className={`border-t my-1.5 ${isDarkMode ? 'border-slate-600/40' : 'border-gray-300/60'}`} />
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>Forecast</span>
+                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                  {formatPrice(data.ewma_future_forecast ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_future_upper ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_future_lower ?? null)}
+                </span>
+              </div>
+            </div>
           </div>
         )}
         
         {/* EWMA Trend Section */}
         {(data.trendEwmaShort != null || data.trendEwmaLong != null) && (
-          <div className="px-3 py-2">
+          <div className={TOOLTIP_COLUMN_CLASS}>
             {/* Section Header */}
             <div className="mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
@@ -8125,22 +8514,22 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
             {/* Single column layout */}
             <div className="text-[9px] space-y-0.5">
               {/* Short EWMA (yellow) */}
-              <div className="flex justify-between gap-4">
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE}`}>
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Short EWMA</span>
                 <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-yellow-300' : 'text-yellow-700'}`}>
-                  {data.trendEwmaShort != null ? `$${data.trendEwmaShort.toFixed(2)}` : '—'}
+                  {data.trendEwmaShort != null ? data.trendEwmaShort.toFixed(2) : '—'}
                 </span>
               </div>
               {/* Long EWMA (blue) */}
-              <div className="flex justify-between gap-4">
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE}`}>
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Long EWMA</span>
                 <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-blue-300' : 'text-blue-700'}`}>
-                  {data.trendEwmaLong != null ? `$${data.trendEwmaLong.toFixed(2)}` : '—'}
+                  {data.trendEwmaLong != null ? data.trendEwmaLong.toFixed(2) : '—'}
                 </span>
               </div>
               {/* Signal - Bullish when short > long, Bearish when short < long */}
               {data.trendEwmaShort != null && data.trendEwmaLong != null && (
-                <div className="flex justify-between gap-4">
+                <div className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Signal</span>
                   <span className={`font-mono tabular-nums font-semibold ${
                     data.trendEwmaShort > data.trendEwmaLong 
@@ -8157,8 +8546,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         
         {/* EWMA Biased Section */}
         {(data.ewma_biased_past_forecast != null || data.ewma_biased_future_forecast != null) && (
-          <div className="px-3 py-2">
-            {/* Section Header - no dot */}
+          <div className={TOOLTIP_COLUMN_CLASS}>
             <div className="mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
                 isDarkMode ? 'text-cyan-300' : 'text-cyan-700'
@@ -8166,50 +8554,55 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 EWMA Biased
               </span>
             </div>
-            
-            {/* Single column layout */}
-            <div className="text-[9px] space-y-0.5">
-              {/* E[Price] - the forecasted price for current date (from past forecast) */}
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>E[Price]</span>
-                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  {data.ewma_biased_past_forecast != null ? `$${data.ewma_biased_past_forecast.toFixed(2)}` : '—'}
+
+            <div className="text-[10px] space-y-1">
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Expected</span>
+                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
+                  {formatPrice(data.ewma_biased_past_forecast ?? null)}
                 </span>
               </div>
-              {/* Upper Band */}
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Upper</span>
-                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                  {data.ewma_biased_past_upper != null ? `$${data.ewma_biased_past_upper.toFixed(2)}` : '—'}
-                </span>
-              </div>
-              {/* Lower Band */}
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Lower</span>
-                <span className={`font-mono tabular-nums ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                  {data.ewma_biased_past_lower != null ? `$${data.ewma_biased_past_lower.toFixed(2)}` : '—'}
-                </span>
-              </div>
-              {/* Error row */}
-              <div className="flex justify-between gap-4">
-                <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Error</span>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
                 <span className="font-mono tabular-nums">
-                  {!data.isFuture && data.close != null && data.ewma_biased_past_forecast != null ? (
-                    <span className={(data.ewma_biased_past_forecast - data.close) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {(data.ewma_biased_past_forecast - data.close) >= 0 ? '+' : ''}{(data.ewma_biased_past_forecast - data.close).toFixed(2)}
-                    </span>
-                  ) : <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>—</span>}
+                  {formatPrice(data.ewma_biased_past_upper ?? null)}
                 </span>
               </div>
-              
-              {/* Separator line */}
-              <div className={`border-t my-1.5 ${isDarkMode ? 'border-slate-600/50' : 'border-gray-300/50'}`} />
-              
-              {/* Forecast - the price forecasted for Horizon (future forecast) */}
-              <div className="flex justify-between gap-4">
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_biased_past_lower ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Error</span>
+                <span className="font-mono tabular-nums">
+                  {data.ewma_biased_past_forecast != null && (data.close ?? data.ewma_biased_past_realized) != null ? (
+                    <span className={(data.ewma_biased_past_forecast - (data.close ?? data.ewma_biased_past_realized)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {formatDelta(data.ewma_biased_past_forecast - (data.close ?? data.ewma_biased_past_realized))}
+                    </span>
+                  ) : (
+                    <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>—</span>
+                  )}
+                </span>
+              </div>
+              <div className={`border-t my-2 ${isDarkMode ? 'border-slate-600/40' : 'border-gray-300/60'}`} />
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
                 <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Forecast</span>
-                <span className={`font-mono tabular-nums font-bold ${isDarkMode ? 'text-cyan-300' : 'text-cyan-700'}`}>
-                  {data.ewma_biased_future_forecast != null ? `$${data.ewma_biased_future_forecast.toFixed(2)}` : '—'}
+                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
+                  {formatPrice(data.ewma_biased_future_forecast ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_biased_future_upper ?? null)}
+                </span>
+              </div>
+              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
+                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
+                <span className="font-mono tabular-nums">
+                  {formatPrice(data.ewma_biased_future_lower ?? null)}
                 </span>
               </div>
             </div>
@@ -8218,7 +8611,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         
         {/* Trading212 Events Section (opens AND closes) */}
         {t212Events.length > 0 && (
-          <div className="px-3 py-2">
+          <div className={TOOLTIP_COLUMN_CLASS}>
             {/* Section Header - no dot, renamed to Trade */}
             <div className="mb-1">
               <span className={`text-[9px] font-semibold uppercase tracking-wider ${
@@ -8233,7 +8626,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               )}
             </div>
             
-            <div className="space-y-1.5 text-[10px]">
+            <div className="space-y-1 text-[10px]">
               {t212Events.map((e, idx) => {
                 const isShort = e.side === 'short';
                 const openLabel = e.side === 'long' ? 'Open Long' : 'Open Short';
@@ -8242,7 +8635,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 if (e.type === 'open') {
                   // Open event - just show the open line
                   return (
-                    <div key={idx} className="flex justify-between gap-4">
+                    <div key={idx} className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE}`}>
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -8275,7 +8668,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                 return (
                   <div key={idx} className="flex flex-col space-y-0.5">
                     {/* Open row for this CLOSED position */}
-                    <div className="flex justify-between gap-4">
+                    <div className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE}`}>
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -8291,7 +8684,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                     </div>
 
                     {/* Exit row */}
-                    <div className="flex justify-between gap-4">
+                    <div className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE}`}>
                       <span className="flex items-center gap-1 text-slate-300">
                         <span
                           className={
@@ -8307,7 +8700,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                     </div>
 
                     {/* P&L row - dollar amount */}
-                    <div className="flex justify-between gap-4 ml-3">
+                    <div className={`flex justify-between ${TOOLTIP_ROW_GAP_WIDE} ml-3`}>
                       <span className={isDarkMode ? 'text-slate-400' : 'text-gray-400'}>P&amp;L</span>
                       <span
                         className={
