@@ -1,0 +1,49 @@
+{
+  "symbol": "SO",
+  "date_t": "2025-12-12",
+  "method": "GBM-CC",
+  "y_hat": 84.47708299492515,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0.94,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.0004670622618462384,
+    "sigma_hat": 0.01094397292588987,
+    "mu_star_used": 0.0004390385261354641,
+    "window_start": "2023-12-08",
+    "window_end": "2025-12-12",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 84.44000244140625,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 4.4364802904191665,
+  "s_scale": 0.01094397292588987,
+  "L_h": 82.68436254387096,
+  "U_h": 86.3086723023961,
+  "band_width_bp": 438,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0.94,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-21T10:44:46.359Z",
+  "is_active": false
+}

@@ -1,0 +1,78 @@
+{
+  "symbol": "POOL",
+  "method": "Range-YZ",
+  "date_t": "2025-12-12",
+  "horizonTrading": 1,
+  "h_eff_days": 3,
+  "verifyDate": "2025-12-15",
+  "domain": "log",
+  "created_at": "2025-12-21T11:33:31.304Z",
+  "locked": true,
+  "y_hat": 240.27000427246094,
+  "target": {
+    "h": 1,
+    "coverage": 0.95,
+    "window_requirements": {
+      "min_days": 504
+    }
+  },
+  "estimates": {
+    "mu_star_hat": 0,
+    "sigma_hat": 0.02121135349939143,
+    "mu_star_used": 0,
+    "window_start": "2023-12-11",
+    "window_end": "2025-12-12",
+    "n": 7592,
+    "S_t": 240.27000427246094,
+    "sigma_forecast": 0.02121135349939143,
+    "sigma2_forecast": 0.00044992151727614503,
+    "critical_value": 1.96,
+    "window_span": {
+      "start": "2023-12-11",
+      "end": "2025-12-12"
+    },
+    "volatility_diagnostics": {
+      "estimator": "YZ",
+      "window": 504,
+      "ewma_lambda": 0.94,
+      "k": 0.14505267086224152,
+      "gap_warnings": [
+        "Gap day detected: 9 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 7.15, threshold: 2.0. Consider using RS or YZ estimators."
+      ]
+    }
+  },
+  "intervals": {
+    "L_h": 230.4857540397205,
+    "U_h": 250.4696014450405,
+    "band_width_bp": 867.0317820109652
+  },
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "model": "Range-YZ",
+      "h": 1,
+      "coverage": 0.95,
+      "range": {
+        "window": 504,
+        "ewma_lambda": 0.94
+      }
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "diagnostics": {
+    "method_source": "Range-YZ",
+    "m_log": 5.481763308785617,
+    "s_scale": 0.02121135349939143,
+    "critical_type": "normal"
+  },
+  "critical": {
+    "type": "normal",
+    "value": 1.96
+  },
+  "window_period": {
+    "start": "2023-12-11",
+    "end": "2025-12-12",
+    "n_obs": 504
+  }
+}

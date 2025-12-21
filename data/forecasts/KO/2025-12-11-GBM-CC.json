@@ -1,8 +1,8 @@
 {
-  "symbol": "ASML",
-  "date_t": "2025-12-19",
+  "symbol": "KO",
+  "date_t": "2025-12-11",
   "method": "GBM-CC",
-  "y_hat": 1056.02001953125,
+  "y_hat": 69.11000061035156,
   "params": {
     "window": 504,
     "lambda_drift": 0,
@@ -10,27 +10,27 @@
     "h": 1
   },
   "estimates": {
-    "mu_star_hat": 0.0007058654238752418,
-    "sigma_hat": 0.026975305687289015,
+    "mu_star_hat": 0.0004399591059269381,
+    "sigma_hat": 0.009644266804269268,
     "mu_star_used": 0,
-    "window_start": "2023-12-15",
-    "window_end": "2025-12-19",
+    "window_start": "2023-12-07",
+    "window_end": "2025-12-11",
     "n": 504
   },
   "target": {
     "h": 1,
     "coverage": 0.95
   },
-  "S_t": 1056.02001953125,
+  "S_t": 69.11000061035156,
   "critical": {
     "type": "normal",
     "z_alpha": 1.959963986120195
   },
-  "m_log": 6.962262421975949,
-  "s_scale": 0.026975305687289015,
-  "L_h": 1001.6378551541387,
-  "U_h": 1113.3547678059451,
-  "band_width_bp": 1115,
+  "m_log": 4.235699446934898,
+  "s_scale": 0.009644266804269268,
+  "L_h": 67.81592377620778,
+  "U_h": 70.42877127390027,
+  "band_width_bp": 385,
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
@@ -44,5 +44,6 @@
     "conformal": null
   },
   "locked": true,
-  "created_at": "2025-12-21T10:36:44.365Z"
+  "created_at": "2025-12-21T11:47:37.944Z",
+  "is_active": false
 }

@@ -1,0 +1,49 @@
+{
+  "symbol": "DUK",
+  "date_t": "2025-12-12",
+  "method": "GBM-CC",
+  "y_hat": 115.35929560437407,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0.94,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.0005469294790296179,
+    "sigma_hat": 0.010522848567200543,
+    "mu_star_used": 0.0005141137102878408,
+    "window_start": "2023-12-08",
+    "window_end": "2025-12-12",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 115.30000305175781,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 4.748051567453278,
+  "s_scale": 0.010522848567200543,
+  "L_h": 113.0044460179772,
+  "U_h": 117.76321685803678,
+  "band_width_bp": 421,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0.94,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-21T10:44:44.332Z",
+  "is_active": false
+}

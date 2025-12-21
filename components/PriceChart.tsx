@@ -420,6 +420,8 @@ interface PriceChartProps {
   horizon?: number;  // Number of trading days to extend (1,2,3,5)
   livePrice?: number | null;  // Current live price from quote (displayed as horizontal line with pill)
   forecastOverlay?: ForecastOverlayProps;
+  volSelectionKey?: string;  // Stable key for vol model selection (for transition tracking)
+  isVolForecastLoading?: boolean;  // True while volatility forecast is being fetched
   ewmaPath?: EwmaWalkerPathPoint[] | null;
   ewmaSummary?: EwmaSummary | null;
   ewmaBiasedPath?: EwmaWalkerPathPoint[] | null;
@@ -549,6 +551,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   horizon,
   livePrice,
   forecastOverlay,
+  volSelectionKey,
+  isVolForecastLoading,
   ewmaPath,
   ewmaSummary,
   ewmaBiasedPath,
@@ -1091,9 +1095,74 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     | "List of trades";
   const [activeInsightTab, setActiveInsightTab] = useState<InsightTab>("Overview");
 
+  // Volatility model transition state machine
+  type TransitionPhase = "idle" | "fadingOut" | "loading" | "fadingIn";
+  const [transitionPhase, setTransitionPhase] = useState<TransitionPhase>("idle");
+  const [displayForecast, setDisplayForecast] = useState<any | null>(forecastOverlay?.activeForecast ?? null);
+  const [displayKey, setDisplayKey] = useState<string>(volSelectionKey ?? "");
+  const [bandOpacity, setBandOpacity] = useState(1);
+
   // Position lines state (Long/Short)
   type PositionType = 'long' | 'short' | null;
   const [activePosition, setActivePosition] = useState<PositionType>(null);
+
+  // Transition effect: Detect selection key change and initiate fade-out
+  useEffect(() => {
+    if (!volSelectionKey) return;
+    
+    // If selection changed and we're currently showing something, fade out
+    if (volSelectionKey !== displayKey && displayForecast && transitionPhase === "idle") {
+      setTransitionPhase("fadingOut");
+      setBandOpacity(0);
+      
+      // After fade-out completes, clear display
+      const fadeOutTimer = setTimeout(() => {
+        setDisplayForecast(null);
+        setTransitionPhase("loading");
+      }, 200);
+      
+      return () => clearTimeout(fadeOutTimer);
+    }
+  }, [volSelectionKey, displayKey, displayForecast, transitionPhase]);
+
+  // Transition effect: Handle loading state
+  useEffect(() => {
+    if (transitionPhase === "loading" && isVolForecastLoading) {
+      // Stay in loading phase while fetching
+      return;
+    }
+    
+    // When new forecast arrives and matches selection key
+    if (
+      transitionPhase === "loading" &&
+      !isVolForecastLoading &&
+      forecastOverlay?.activeForecast &&
+      volSelectionKey &&
+      volSelectionKey !== displayKey
+    ) {
+      // New forecast loaded, fade in
+      setDisplayForecast(forecastOverlay.activeForecast);
+      setDisplayKey(volSelectionKey);
+      setTransitionPhase("fadingIn");
+      
+      // Fade in animation
+      setTimeout(() => setBandOpacity(1), 50);
+      
+      const fadeInTimer = setTimeout(() => {
+        setTransitionPhase("idle");
+      }, 350);
+      
+      return () => clearTimeout(fadeInTimer);
+    }
+  }, [transitionPhase, isVolForecastLoading, forecastOverlay?.activeForecast, volSelectionKey, displayKey]);
+
+  // Initial mount: Set display forecast if available
+  useEffect(() => {
+    if (forecastOverlay?.activeForecast && !displayForecast && volSelectionKey) {
+      setDisplayForecast(forecastOverlay.activeForecast);
+      setDisplayKey(volSelectionKey);
+    }
+  }, []);  // Only on mount
   const [positionPriceInput, setPositionPriceInput] = useState<string>('');
   const [longPrice, setLongPrice] = useState<number | null>(null);
   const [shortPrice, setShortPrice] = useState<number | null>(null);
@@ -2489,7 +2558,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return volModel || "Unknown";
   };
 
-  // Extract forecast band from activeForecast (if any)
+  // Extract forecast band from displayForecast (transition-aware)
   let overlayDate: string | null = null;
   let overlayCenter: number | null = null;
   let overlayLower: number | null = null;
@@ -2505,7 +2574,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   let overlayUncondVar: number | null = null;
   let overlayGarchDistribution: string | null = null;
 
-  const af = forecastOverlay?.activeForecast;
+  const af = displayForecast;
 
   if (af && chartData.length > 0) {
     // 1) Calculate target date (Date t+h) using business days.
@@ -4871,6 +4940,29 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   stopOpacity={0.35}
                 />
               </linearGradient>
+
+              {/* Shimmer gradient for loading state */}
+              <linearGradient
+                id="forecastBandGradientLoading"
+                x1="0"
+                y1="0"
+                x2="1"
+                y2="0"
+              >
+                <stop offset="0%" stopColor="#60A5FA" stopOpacity={0.15} />
+                <stop offset="30%" stopColor="#93C5FD" stopOpacity={0.25} />
+                <stop offset="50%" stopColor="#DBEAFE" stopOpacity={0.35} />
+                <stop offset="70%" stopColor="#93C5FD" stopOpacity={0.25} />
+                <stop offset="100%" stopColor="#60A5FA" stopOpacity={0.15} />
+                <animateTransform
+                  attributeName="gradientTransform"
+                  type="translate"
+                  from="-1 0"
+                  to="1 0"
+                  dur="1.5s"
+                  repeatCount="indefinite"
+                />
+              </linearGradient>
                 </defs>
 
             <XAxis
@@ -5194,70 +5286,111 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             
             {/* Volatility Model Forecast Band (upper fill + lower mask) */}
             {overlayLower != null && overlayUpper != null && (
-              <>
-                {/* Fill to forecastUpper */}
-                <Area
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastUpper"
-                  stroke="none"
-                  fill="url(#forecastBandGradient)"
-                  fillOpacity={0.25}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
+              <g style={{ opacity: bandOpacity, transition: "opacity 250ms ease" }}>
+                {/* Normal forecast band - shown when not loading */}
+                {transitionPhase !== "loading" && (
+                  <>
+                    {/* Fill to forecastUpper */}
+                    <Area
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastUpper"
+                      stroke="none"
+                      fill="url(#forecastBandGradient)"
+                      fillOpacity={0.25}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      animationEasing="ease-out"
+                      connectNulls={false}
+                    />
 
-                {/* Mask everything below forecastLower (same trick as EWMA bands) */}
-                <Area
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastLower"
-                  stroke="none"
-                  fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
-                  fillOpacity={1}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
+                    {/* Mask everything below forecastLower (same trick as EWMA bands) */}
+                    <Area
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastLower"
+                      stroke="none"
+                      fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
+                      fillOpacity={1}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      animationEasing="ease-out"
+                      connectNulls={false}
+                    />
 
-                {/* Center + boundary lines */}
-                <Line
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastCenter"
-                  stroke="#60A5FA"
-                  strokeWidth={1.5}
-                  strokeOpacity={0.9}
-                  strokeDasharray="4 2"
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                <Line
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastUpper"
-                  stroke="#60A5FA"
-                  strokeWidth={1}
-                  strokeOpacity={0.45}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-                <Line
-                  yAxisId="price"
-                  type="linear"
-                  dataKey="forecastLower"
-                  stroke="#60A5FA"
-                  strokeWidth={1}
-                  strokeOpacity={0.45}
-                  dot={false}
-                  activeDot={false}
-                  isAnimationActive={false}
-                  connectNulls={false}
-                />
-              </>
+                    {/* Center + boundary lines */}
+                    <Line
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastCenter"
+                      stroke="#60A5FA"
+                      strokeWidth={1.5}
+                      strokeOpacity={0.9}
+                      strokeDasharray="4 2"
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      animationEasing="ease-out"
+                      connectNulls={false}
+                    />
+                    <Line
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastUpper"
+                      stroke="#60A5FA"
+                      strokeWidth={1}
+                      strokeOpacity={0.45}
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      animationEasing="ease-out"
+                      connectNulls={false}
+                    />
+                    <Line
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastLower"
+                      stroke="#60A5FA"
+                      strokeWidth={1}
+                      strokeOpacity={0.45}
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={true}
+                      animationDuration={300}
+                      animationEasing="ease-out"
+                      connectNulls={false}
+                    />
+                  </>
+                )}
+
+                {/* Shimmer loading ghost band - shown during loading */}
+                {transitionPhase === "loading" && (
+                  <>
+                    <Area
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastUpper"
+                      stroke="none"
+                      fill="url(#forecastBandGradientLoading)"
+                      fillOpacity={0.22}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                    />
+                    <Area
+                      yAxisId="price"
+                      type="linear"
+                      dataKey="forecastLower"
+                      stroke="none"
+                      fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
+                      fillOpacity={1}
+                      isAnimationActive={false}
+                      connectNulls={false}
+                    />
+                  </>
+                )}
+              </g>
             )}
             
             {/* Price Line - based on Close price */}

@@ -351,6 +351,17 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [garchDf, setGarchDf] = useState(8);
   const [harUseIntradayRv, setHarUseIntradayRv] = useState(true);
   const [rangeEwmaLambda, setRangeEwmaLambda] = useState(0.94);
+  const [isVolForecastLoading, setIsVolForecastLoading] = useState(false);
+  
+  // Compute stable selection key for transition tracking
+  const volSelectionKey = useMemo(() => {
+    const modelPart = volModel === 'GARCH' 
+      ? `GARCH-${garchEstimator}` 
+      : volModel === 'Range'
+      ? `Range-${rangeEstimator}`
+      : volModel;
+    return `${modelPart}|h=${h}|cov=${coverage}`;
+  }, [volModel, garchEstimator, rangeEstimator, h, coverage]);
   
   // GBM state for volatility models (separate from standalone GBM card)
   const [gbmWindow, setGbmWindow] = useState<number>(504);
@@ -4024,6 +4035,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     console.log("[VOL][handler] click", { time: new Date().toISOString() });
     setVolatilityError(null);
     setModelAvailabilityMessage(null);
+    setIsVolForecastLoading(true);
 
     // Read current values from state instead of depending on them
     const currentTargetSpec = targetSpecResult || serverTargetSpec;
@@ -4453,6 +4465,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       return emitVolResult({ ok: false, forecast: null, reason: 'ERROR' }, "exception");
     } finally {
       setIsGeneratingVolatility(false);
+      setIsVolForecastLoading(false);
     }
   }, [
     tickerParam,
@@ -6483,6 +6496,8 @@ export default function TimingPage({ params }: TimingPageProps) {
           horizon={h}
           livePrice={livePrice}
           forecastOverlay={forecastOverlayProps}
+          volSelectionKey={volSelectionKey}
+          isVolForecastLoading={isVolForecastLoading}
           ewmaPath={ewmaPath}
           ewmaSummary={ewmaSummary}
           ewmaBiasedPath={ewmaBiasedPath}

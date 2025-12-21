@@ -1,0 +1,49 @@
+{
+  "symbol": "NVDA",
+  "date_t": "2025-12-16",
+  "method": "GBM-CC",
+  "y_hat": 178.15698562819546,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0.94,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.002612572771308047,
+    "sigma_hat": 0.0319270912852212,
+    "mu_star_used": 0.002455818405029564,
+    "window_start": "2023-12-12",
+    "window_end": "2025-12-16",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 177.72000122070312,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 5.182665103341424,
+  "s_scale": 0.0319270912852212,
+  "L_h": 167.35028894399545,
+  "U_h": 189.66152809420566,
+  "band_width_bp": 1333,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0.94,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-21T11:33:31.532Z",
+  "is_active": false
+}

@@ -1,0 +1,49 @@
+{
+  "symbol": "RSG",
+  "date_t": "2025-12-15",
+  "method": "GBM-CC",
+  "y_hat": 215.4537294756049,
+  "params": {
+    "window": 504,
+    "lambda_drift": 0.94,
+    "coverage": 0.95,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.0006110962314984077,
+    "sigma_hat": 0.01064006141270112,
+    "mu_star_used": 0.0005744304576085032,
+    "window_start": "2023-12-08",
+    "window_end": "2025-12-15",
+    "n": 504
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.95
+  },
+  "S_t": 215.3300018310547,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.959963986120195
+  },
+  "m_log": 5.372746174079607,
+  "s_scale": 0.01064006141270112,
+  "L_h": 211.00715374384527,
+  "U_h": 219.99400836096612,
+  "band_width_bp": 426,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 504,
+      "lambda_drift": 0.94,
+      "coverage": 0.95,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-21T11:33:29.639Z",
+  "is_active": false
+}
