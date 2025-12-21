@@ -134,17 +134,42 @@ function getSigma1d(body: any): number | null {
     body?.estimates?.sigma_1d ??
     body?.sigma_forecast ??
     body?.sigma_1d ??
+    body?.estimates?.sigma_hat ??
+    body?.estimates?.gbm?.sigma_hat ??
+    body?.sigma_hat ??
     null
   );
 }
 function getYHat(body: any): number | null {
-  return body?.y_hat ?? body?.yHat ?? null;
+  return (
+    body?.y_hat ??
+    body?.yHat ??
+    body?.forecast?.y_hat ??
+    body?.yhat ??
+    null
+  );
 }
 function getL(body: any): number | null {
-  return body?.intervals?.L_h ?? body?.intervals?.lower ?? body?.L_h ?? body?.lower ?? null;
+  return (
+    body?.intervals?.L_h ??
+    body?.intervals?.lower ??
+    body?.L_h ??
+    body?.lower ??
+    body?.intervals?.L ??
+    body?.pi?.L_h ??
+    null
+  );
 }
 function getU(body: any): number | null {
-  return body?.intervals?.U_h ?? body?.intervals?.upper ?? body?.U_h ?? body?.upper ?? null;
+  return (
+    body?.intervals?.U_h ??
+    body?.intervals?.upper ??
+    body?.U_h ??
+    body?.upper ??
+    body?.intervals?.U ??
+    body?.pi?.U_h ??
+    null
+  );
 }
 function getBwPct(body: any): number | null {
   const y = getYHat(body);
@@ -176,7 +201,7 @@ function makeSpecs(): VolModelSpec[] {
       name: "GBM-CC",
       model: "GBM-CC",
       required: true,
-      buildParams: (a) => ({ gbm: { window: a.window } }),
+      buildParams: (a) => ({ gbm: { windowN: a.window, lambdaDrift: a.lambda } }),
       methodOk: gbmOk,
     },
     {
@@ -325,8 +350,24 @@ async function main() {
         const methodMatches = spec.methodOk(respMethod);
 
         if (resp.ok && methodMatches) {
-          result = "OK";
-          passed += 1;
+          // Check if required fields are missing for GBM-CC
+          const sigmaVal = getSigma1d(json);
+          const yhatVal = getYHat(json);
+          const LVal = getL(json);
+          const UVal = getU(json);
+          
+          const hasMissingFields = 
+            sigmaVal == null || yhatVal == null || LVal == null || UVal == null;
+          
+          if (hasMissingFields && spec.required) {
+            result = "FAIL";
+            failures += 1;
+            const keys = Object.keys(json).join(",");
+            extraNote = `missing fields; keys=${keys.slice(0, 60)}`;
+          } else {
+            result = "OK";
+            passed += 1;
+          }
         } else if (!resp.ok && spec.isSkippable?.(resp.status, json)) {
           result = "SKIPPED";
           skipped += 1;
