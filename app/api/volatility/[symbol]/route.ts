@@ -562,8 +562,35 @@ export async function POST(
           
           const estimator = model.split('-')[1] as "P" | "GK" | "RS" | "YZ";
           try {
-            // Compute adaptive window for range estimators
+            // Validate OHLC data availability for Range estimators
             const filtered = date_t ? canonicalData.filter(row => row.date <= date_t) : canonicalData;
+            const ohlcRows = filtered.filter(row => 
+              row.high != null && row.low != null && 
+              typeof row.high === 'number' && typeof row.low === 'number' &&
+              row.high > 0 && row.low > 0
+            );
+            
+            const ohlcAvailability = filtered.length > 0 ? ohlcRows.length / filtered.length : 0;
+            
+            if (ohlcAvailability < 0.8) {
+              const sampleRow = filtered.find(r => r.high == null || r.low == null);
+              return NextResponse.json(
+                {
+                  error: 'Range estimators require OHLC (high/low) data',
+                  code: 'MISSING_OHLC_DATA',
+                  details: `Only ${(ohlcAvailability * 100).toFixed(1)}% of rows have valid high/low values`,
+                  sampleRow: sampleRow ? {
+                    date: sampleRow.date,
+                    close: sampleRow.close,
+                    high: sampleRow.high,
+                    low: sampleRow.low
+                  } : null
+                },
+                { status: 400 }
+              );
+            }
+            
+            // Compute adaptive window for range estimators
             const availableRows = filtered.length;
             const configWindow = volParams.range.window;
             const rangeMinWindow = 252;

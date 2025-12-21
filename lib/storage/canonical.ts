@@ -14,7 +14,26 @@ function getDataBaseUrl(): string {
 }
 
 /**
- * Load canonical data for a symbol
+ * Load canonical data directly from filesystem (server-side only)
+ * This is the preferred method for API routes to avoid fetch() issues
+ */
+export async function loadCanonicalDataFromFS(symbol: string): Promise<CanonicalData> {
+  const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
+  
+  try {
+    const fileContent = await fs.promises.readFile(canonicalPath, 'utf-8');
+    const canonicalData: CanonicalData = JSON.parse(fileContent);
+    return canonicalData;
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      throw new Error(`No canonical data found for ${symbol}`);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Load canonical data for a symbol (client-side using fetch)
  */
 export async function loadCanonicalData(symbol: string): Promise<CanonicalRow[]> {
   const baseUrl = getDataBaseUrl();
@@ -163,7 +182,13 @@ export async function ensureCanonicalOrHistory(
 
   let existing: CanonicalData | null = null;
   try {
-    existing = await loadCanonicalDataWithMeta(symbol);
+    // Try filesystem first (for API routes), fall back to fetch (for client-side)
+    try {
+      existing = await loadCanonicalDataFromFS(symbol);
+    } catch {
+      existing = await loadCanonicalDataWithMeta(symbol);
+    }
+    
     const hasRange = (existing.meta as any)?.range;
     const prevRange = typeof hasRange === "string" ? hasRange : null;
     const prevStart = existing.meta?.calendar_span?.start ?? null;
