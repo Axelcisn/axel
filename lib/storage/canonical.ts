@@ -20,11 +20,35 @@ function getDataBaseUrl(): string {
 export async function loadCanonicalDataFromFS(symbol: string): Promise<CanonicalData> {
   const canonicalPath = path.join(process.cwd(), 'data', 'canonical', `${symbol}.json`);
   
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[loadCanonicalDataFromFS] Attempting to load:', {
+      symbol,
+      canonicalPath,
+      cwd: process.cwd()
+    });
+  }
+  
   try {
     const fileContent = await fs.promises.readFile(canonicalPath, 'utf-8');
     const canonicalData: CanonicalData = JSON.parse(fileContent);
+    
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[loadCanonicalDataFromFS] Successfully loaded:', {
+        symbol,
+        rowCount: canonicalData.rows?.length || 0
+      });
+    }
+    
     return canonicalData;
   } catch (error: any) {
+    if (process.env.NODE_ENV === 'development') {
+      console.error('[loadCanonicalDataFromFS] Failed to load:', {
+        symbol,
+        canonicalPath,
+        errorCode: error.code,
+        errorMessage: error.message
+      });
+    }
     if (error.code === 'ENOENT') {
       throw new Error(`No canonical data found for ${symbol}`);
     }
@@ -180,13 +204,44 @@ export async function ensureCanonicalOrHistory(
   const persist = opts?.persist !== false;
   const forceMaxRefresh = opts?.forceMaxRefresh === true;
 
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[ensureCanonicalOrHistory] Starting load for:', {
+      symbol,
+      minRows,
+      interval,
+      persist,
+      forceMaxRefresh
+    });
+  }
+
   let existing: CanonicalData | null = null;
   try {
     // Try filesystem first (for API routes), fall back to fetch (for client-side)
     try {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[ensureCanonicalOrHistory] Trying filesystem loader...');
+      }
       existing = await loadCanonicalDataFromFS(symbol);
-    } catch {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[ensureCanonicalOrHistory] Filesystem load succeeded:', {
+          symbol,
+          rowCount: existing.rows.length
+        });
+      }
+    } catch (fsError: any) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[ensureCanonicalOrHistory] Filesystem load failed, trying fetch:', {
+          symbol,
+          fsError: fsError.message
+        });
+      }
       existing = await loadCanonicalDataWithMeta(symbol);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[ensureCanonicalOrHistory] Fetch load succeeded:', {
+          symbol,
+          rowCount: existing.rows.length
+        });
+      }
     }
     
     const hasRange = (existing.meta as any)?.range;

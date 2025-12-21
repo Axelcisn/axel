@@ -187,6 +187,12 @@ export async function POST(
 ) {
   try {
     const symbol = (params.symbol || "").toUpperCase();
+    
+    console.log("[VOL-API] Request params:", { 
+      rawSymbol: params.symbol, 
+      normalizedSymbol: symbol 
+    });
+    
     const body: VolatilityRequest & {
       horizon?: number;
       horizonTrading?: number;
@@ -214,12 +220,23 @@ export async function POST(
     // Load canonical (or Yahoo fallback) data to get latest price and determine date_t
     let canonicalDataResult;
     try {
+      console.log("[VOL-API] Attempting to load canonical data for:", symbol);
       canonicalDataResult = await ensureCanonicalOrHistory(symbol, { minRows: 0 });
+      console.log("[VOL-API] Successfully loaded canonical data:", {
+        symbol,
+        rowCount: canonicalDataResult.rows.length,
+        metaKeys: Object.keys(canonicalDataResult.meta || {})
+      });
     } catch (error: any) {
+      console.error("[VOL-API] Failed to load canonical data:", {
+        symbol,
+        error: error.message,
+        stack: error.stack
+      });
       const message = error?.message || '';
       if (message.includes('No canonical data') || message.includes('No data')) {
         return NextResponse.json(
-          { error: `No canonical data found for ${symbol}` },
+          { error: `No canonical data found for ${symbol}`, details: message },
           { status: 404 }
         );
       }
