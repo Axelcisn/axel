@@ -18,11 +18,6 @@ export interface HarParams {
 export async function fitAndForecastHar(params: HarParams): Promise<SigmaForecast> {
   const { symbol, date_t, window, use_intraday_rv } = params;
   
-  // Check if intraday RV is required and available
-  if (!use_intraday_rv) {
-    throw new Error('HAR-RV disabled: use_intraday_rv must be true to enable');
-  }
-  
   // Load canonical data
   const data = await loadCanonicalData(symbol);
   if (!data || data.length === 0) {
@@ -39,10 +34,9 @@ export async function fitAndForecastHar(params: HarParams): Promise<SigmaForecas
     throw new Error(`Insufficient data: need ${window}, have ${filteredData.length}`);
   }
   
-  // Check if RV data is available (we'll simulate this check)
-  // In practice, this would check for intraday data or pre-computed RV
+  // If intraday RV is unavailable, fall back to squared daily log returns
   const hasRvData = checkForRealizedVolatility(filteredData);
-  if (!hasRvData) {
+  if (!hasRvData && use_intraday_rv) {
     throw new Error('HAR-RV disabled: no realized volatility data available');
   }
   
@@ -104,17 +98,35 @@ export async function fitAndForecastHar(params: HarParams): Promise<SigmaForecas
  * (In practice, this would check for intraday data)
  */
 function checkForRealizedVolatility(data: CanonicalRow[]): boolean {
-  // For now, we'll return false to indicate RV is not available
-  // In a real implementation, this would check for intraday data or pre-computed RV
-  return false;
+  const rv = computeDailyRV(data);
+  return rv.length > 0;
 }
 
 /**
  * Compute daily RV from squared returns (proxy)
  */
 function computeDailyRV(data: CanonicalRow[]): number[] {
-  const returns = data.map(row => row.r).filter(r => r !== null) as number[];
-  return returns.map(r => r * r); // RV approximated by squared daily returns
+  const returns: number[] = [];
+  for (let i = 1; i < data.length; i++) {
+    const r = data[i].r;
+    if (typeof r === "number" && Number.isFinite(r)) {
+      returns.push(r);
+      continue;
+    }
+    const prev = data[i - 1];
+    const curr = data[i];
+    const prevPrice = (prev.adj_close ?? prev.close) as number | null;
+    const currPrice = (curr.adj_close ?? curr.close) as number | null;
+    if (
+      prevPrice != null &&
+      currPrice != null &&
+      prevPrice > 0 &&
+      currPrice > 0
+    ) {
+      returns.push(Math.log(currPrice / prevPrice));
+    }
+  }
+  return returns.map(r => r * r); // RV approximated by squared daily log returns
 }
 
 /**

@@ -6,45 +6,45 @@
   "h_eff_days": 3,
   "verifyDate": "2025-12-22",
   "domain": "log",
-  "created_at": "2025-12-21T10:30:14.183Z",
+  "created_at": "2025-12-22T07:16:58.578Z",
   "locked": true,
   "y_hat": 1056.02001953125,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 504
+      "min_days": 756
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.024757077896706715,
+    "sigma_hat": 0.023465692635252243,
     "mu_star_used": 0,
-    "window_start": "2023-12-18",
+    "window_start": "2022-12-15",
     "window_end": "2025-12-19",
     "n": 7745,
     "S_t": 1056.02001953125,
-    "sigma_forecast": 0.024757077896706715,
-    "sigma2_forecast": 0.0006129129059836042,
+    "sigma_forecast": 0.023465692635252243,
+    "sigma2_forecast": 0.0005506387308521313,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2023-12-18",
+      "start": "2022-12-15",
       "end": "2025-12-19"
     },
     "volatility_diagnostics": {
       "estimator": "YZ",
-      "window": 504,
+      "window": 756,
       "ewma_lambda": 0.94,
-      "k": 0.14505267086224152,
+      "k": 0.14513484480126648,
       "gap_warnings": [
-        "Gap day detected: 25 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 4.62, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 42 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 5.02, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 1006.001205831275,
-    "U_h": 1108.5257902144274,
-    "band_width_bp": 1019.1298359173895
+    "L_h": 1008.5507359024048,
+    "U_h": 1105.7235317497148,
+    "band_width_bp": 963.4894149411766
   },
   "provenance": {
     "rng_seed": null,
@@ -54,7 +54,7 @@
       "coverage": 0.95,
       "range": {
         "estimator": "YZ",
-        "window": 504,
+        "window": 756,
         "ewma_lambda": 0.94
       }
     },
@@ -64,7 +64,7 @@
   "diagnostics": {
     "method_source": "Range-YZ",
     "m_log": 6.962262421975949,
-    "s_scale": 0.024757077896706715,
+    "s_scale": 0.023465692635252243,
     "critical_type": "normal"
   },
   "critical": {
@@ -72,9 +72,9 @@
     "value": 1.96
   },
   "window_period": {
-    "start": "2023-12-18",
+    "start": "2022-12-15",
     "end": "2025-12-19",
-    "n_obs": 504
+    "n_obs": 756
   },
   "is_active": false
 }

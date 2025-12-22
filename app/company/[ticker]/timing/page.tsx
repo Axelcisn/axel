@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart, TrendOverlayState } from '@/components/PriceChart';
+import { PriceChart, TrendOverlayState, SimulationRunSummary, VolCell, VolBundle } from '@/components/PriceChart';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
   Trading212CfdConfig,
@@ -52,6 +52,8 @@ import useEwmaCrossover from '@/lib/hooks/useEwmaCrossover';
 import { computeEwmaSeries, computeEwmaGapZSeries } from '@/lib/indicators/ewmaCrossover';
 import { useLiveQuote } from '@/lib/hooks/useLiveQuote';
 import { decideZOptimizeApply } from '@/lib/volatility/zOptimizeApplyPolicy';
+import { computeGbmInterval } from '@/lib/gbm/engine';
+import { buildVolSelectionKey } from '@/lib/volatility/volSelectionKey';
 
 /**
  * Data flow (Timing/Trend):
@@ -163,6 +165,525 @@ interface TimingPageProps {
     ticker: string;
   };
 }
+
+type VolModelSpec = {
+  model: 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
+  garchEstimator?: 'Normal' | 'Student-t';
+  rangeEstimator?: 'P' | 'GK' | 'RS' | 'YZ';
+};
+
+async function runWithConcurrencyLimit<T>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  if (items.length === 0) return;
+  const queue = [...items];
+  const runners = Array(Math.min(limit, queue.length))
+    .fill(null)
+    .map(async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        if (item === undefined) break;
+        await worker(item);
+      }
+    });
+  await Promise.all(runners);
+}
+
+const toNum = (v: unknown): number | undefined => {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+};
+
+function toVolCell(forecast: any | null | undefined): VolCell | undefined {
+  if (!forecast) return undefined;
+
+  const intervals = forecast.intervals ?? {};
+  const lower = toNum(
+    intervals.L_h ??
+    intervals.lower ??
+    (forecast as any)?.L_h ??
+    (forecast as any)?.lower ??
+    (forecast as any)?.bounds?.lower ??
+    (forecast as any)?.bounds?.L_h
+  );
+  const upper = toNum(
+    intervals.U_h ??
+    intervals.upper ??
+    (forecast as any)?.U_h ??
+    (forecast as any)?.upper ??
+    (forecast as any)?.bounds?.upper ??
+    (forecast as any)?.bounds?.U_h
+  );
+
+  const est = forecast.estimates ?? {};
+  const sigma1d = toNum(
+    est.sigma_forecast ??
+    est.sigma_1d ??
+    est.sigma_hat ??
+    (forecast as any)?.sigma_1d
+  );
+
+  const widthPct =
+    lower != null && upper != null && lower > 0
+      ? ((upper / lower) - 1) * 100
+      : undefined;
+
+  return {
+    sigma1d: sigma1d ?? undefined,
+    lower: lower ?? undefined,
+    upper: upper ?? undefined,
+    widthPct,
+  };
+}
+
+const mean = (arr: number[]): number => {
+  if (!arr.length) return NaN;
+  return arr.reduce((s, v) => s + v, 0) / arr.length;
+};
+
+const variance = (arr: number[], avg?: number): number => {
+  if (arr.length === 0) return NaN;
+  const m = avg != null ? avg : mean(arr);
+  return arr.reduce((s, v) => s + Math.pow(v - m, 2), 0) / arr.length;
+};
+
+const getWindowedRows = (
+  rows: CanonicalRow[] | null | undefined,
+  window: { start: string; end: string } | null
+): CanonicalRow[] => {
+  if (!rows || rows.length === 0) return [];
+  if (!window) return rows;
+  return rows.filter((r) => r.date >= window.start && r.date <= window.end);
+};
+
+interface EwmaExpectedReturnArgs {
+  rows: CanonicalRow[];
+  h: number;
+  lambda: number;
+  trainFraction: number;
+  initialEquity: number;
+  leverage: number;
+  positionFraction: number;
+  costBps: number;
+}
+
+const computeEwmaExpectedReturnPct = ({
+  rows,
+  h,
+  lambda,
+  trainFraction,
+  initialEquity,
+  leverage,
+  positionFraction,
+  costBps,
+}: EwmaExpectedReturnArgs): number | undefined => {
+  if (!rows || rows.length < 3) return undefined;
+  const prices: number[] = [];
+  for (const row of rows) {
+    const p = toNum(row.adj_close ?? row.close);
+    if (p != null && p > 0) prices.push(p);
+  }
+  if (prices.length < 3) return undefined;
+
+  const returns: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const prev = prices[i - 1];
+    const curr = prices[i];
+    if (prev > 0 && curr > 0) {
+      returns.push(Math.log(curr / prev));
+    }
+  }
+  if (returns.length < 2) return undefined;
+
+  const exposure = leverage * positionFraction;
+  const MIN_TRAIN = 20;
+  let equity = initialEquity;
+  let prevPos = 0;
+  let positionChanges = 0;
+
+  for (let i = 0; i < returns.length - 1; i++) {
+    const priceIdx = i + 1; // prices index corresponding to returns[i]
+    const historyReturns = returns.slice(0, i + 1);
+    const trainN = Math.max(2, Math.floor(trainFraction * historyReturns.length));
+    const trainReturns = historyReturns.slice(-trainN);
+    if (trainReturns.length < MIN_TRAIN) {
+      prevPos = 0;
+      continue;
+    }
+
+    const muLog = mean(trainReturns);
+    let sigma2 = variance(trainReturns, muLog);
+    if (!Number.isFinite(sigma2)) sigma2 = 0;
+    for (const r of trainReturns) {
+      const e = r - muLog;
+      sigma2 = lambda * sigma2 + (1 - lambda) * (e * e);
+    }
+    const sigmaHat = Math.sqrt(Math.max(sigma2, 0));
+    const muHat = muLog + 0.5 * sigmaHat * sigmaHat;
+    const muStarUsed = lambda * muHat;
+    const S_t = prices[priceIdx];
+    if (!Number.isFinite(S_t) || S_t <= 0) {
+      prevPos = 0;
+      continue;
+    }
+    const expected = S_t * Math.exp(muStarUsed * h);
+    const pos = expected > S_t ? 1 : -1;
+
+    const rSimple = prices[priceIdx + 1] / prices[priceIdx] - 1;
+    if (!Number.isFinite(rSimple)) {
+      prevPos = pos;
+      continue;
+    }
+    const delta = 1 + exposure * pos * rSimple;
+    const deltaClamped = delta > 0 ? delta : 1e-6;
+
+    let costMultiplier = 0;
+    if (pos !== prevPos) {
+      costMultiplier = prevPos !== 0 ? 2 : 1;
+      positionChanges++;
+    }
+
+    equity = equity * deltaClamped * (1 - (costBps / 10000) * costMultiplier);
+    prevPos = pos;
+  }
+
+  if (equity <= 0 || !Number.isFinite(equity)) return undefined;
+  return equity / initialEquity - 1;
+};
+
+const buildEwmaExpectedBars = (
+  rows: CanonicalRow[],
+  h: number,
+  lambda: number,
+  trainFraction: number
+): Trading212SimBar[] => {
+  if (!rows || rows.length < 3) return [];
+  const prices: number[] = [];
+  const dates: string[] = [];
+  for (const row of rows) {
+    const p = toNum(row.adj_close ?? row.close);
+    if (p != null && p > 0 && row.date) {
+      prices.push(p);
+      dates.push(row.date);
+    }
+  }
+  if (prices.length < 3) return [];
+
+  const returns: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    const prev = prices[i - 1];
+    const curr = prices[i];
+    if (prev > 0 && curr > 0) {
+      returns.push(Math.log(curr / prev));
+    }
+  }
+  const bars: Trading212SimBar[] = [];
+  const MIN_TRAIN = 20;
+  for (let i = 0; i < returns.length - 1; i++) {
+    const priceIdx = i + 1;
+    const historyReturns = returns.slice(0, i + 1);
+    const trainN = Math.max(2, Math.floor(trainFraction * historyReturns.length));
+    const trainReturns = historyReturns.slice(-trainN);
+    if (trainReturns.length < MIN_TRAIN) {
+      bars.push({ date: dates[priceIdx], price: prices[priceIdx], signal: "flat" });
+      continue;
+    }
+    const muLog = mean(trainReturns);
+    let sigma2 = variance(trainReturns, muLog);
+    if (!Number.isFinite(sigma2)) sigma2 = 0;
+    for (const r of trainReturns) {
+      const e = r - muLog;
+      sigma2 = lambda * sigma2 + (1 - lambda) * (e * e);
+    }
+    const sigmaHat = Math.sqrt(Math.max(sigma2, 0));
+    const muHat = muLog + 0.5 * sigmaHat * sigmaHat;
+    const muStarUsed = lambda * muHat;
+    const S_t = prices[priceIdx];
+    if (!Number.isFinite(S_t) || S_t <= 0) {
+      bars.push({ date: dates[priceIdx], price: prices[priceIdx], signal: "flat" });
+      continue;
+    }
+    const expected = S_t * Math.exp(muStarUsed * h);
+    const signal: Trading212Signal = expected > S_t ? "long" : "short";
+    bars.push({ date: dates[priceIdx], price: prices[priceIdx], signal });
+  }
+  return bars;
+};
+
+const summarizeSimPerformance = (
+  result: Trading212SimulationResult,
+  priceStart: number | null,
+  priceEnd: number | null
+): Partial<SimulationRunSummary> => {
+  const trades = result.trades ?? [];
+  const initialCapital = result.initialEquity;
+  const lastSnap = result.accountHistory[result.accountHistory.length - 1] ?? null;
+  const openPnl = lastSnap?.unrealisedPnl ?? 0;
+  const netProfit = result.finalEquity - result.initialEquity;
+  const grossProfit = trades.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const grossLoss = trades.filter((t) => (t.netPnl ?? 0) < 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const closedLong = trades.filter((t) => t.side === "long");
+  const closedShort = trades.filter((t) => t.side === "short");
+  const netProfitLong = closedLong.reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const netProfitShort = closedShort.reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const grossProfitLong = closedLong.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const grossLossLong = closedLong.filter((t) => (t.netPnl ?? 0) < 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const grossProfitShort = closedShort.filter((t) => (t.netPnl ?? 0) > 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const grossLossShort = closedShort.filter((t) => (t.netPnl ?? 0) < 0).reduce((a, t) => a + (t.netPnl ?? 0), 0);
+  const commissionPaid = result.swapFeesTotal ?? 0;
+  const buyHoldPricePct = priceStart != null && priceEnd != null && priceStart > 0 ? (priceEnd - priceStart) / priceStart : null;
+  const buyHoldReturn = buyHoldPricePct != null && Number.isFinite(buyHoldPricePct) ? buyHoldPricePct * initialCapital : undefined;
+  const maxContractsHeld = Math.max(0, ...trades.map((t) => Math.abs(t.quantity ?? 0)));
+
+  const equitySeries = result.accountHistory
+    .map((s) => ({ date: s.date, equity: s.equity }))
+    .filter((s) => Number.isFinite(s.equity));
+
+  const dayDiff = (start: string, end: string) => {
+    const a = new Date(start);
+    const b = new Date(end);
+    const diff = Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+    if (!Number.isFinite(diff)) return 0;
+    return Math.max(1, diff);
+  };
+
+  const computeDrawdownStats = (series: { date: string; equity: number }[]) => {
+    if (series.length < 2) {
+      return {
+        avgDuration: null,
+        maxDuration: null,
+        avgValue: null,
+        maxValue: null,
+        avgPct: null,
+        maxPct: null,
+      };
+    }
+    const segments: { peak: number; trough: number; duration: number }[] = [];
+    let peak = series[0].equity;
+    let peakDate = series[0].date;
+    let trough = series[0].equity;
+    let startDate = series[0].date;
+    let inDrawdown = false;
+
+    for (let i = 1; i < series.length; i++) {
+      const eq = series[i].equity;
+      const date = series[i].date;
+      if (eq > peak) {
+        if (inDrawdown) {
+          segments.push({
+            peak,
+            trough,
+            duration: dayDiff(startDate, date),
+          });
+        }
+        peak = eq;
+        peakDate = date;
+        trough = eq;
+        startDate = date;
+        inDrawdown = false;
+        continue;
+      }
+      if (eq < trough) {
+        trough = eq;
+      }
+      if (!inDrawdown && eq < peak) {
+        inDrawdown = true;
+        startDate = peakDate;
+      }
+      if (inDrawdown && eq >= peak) {
+        segments.push({
+          peak,
+          trough,
+          duration: dayDiff(startDate, date),
+        });
+        peak = eq;
+        peakDate = date;
+        trough = eq;
+        startDate = date;
+        inDrawdown = false;
+      }
+    }
+    if (inDrawdown) {
+      const last = series[series.length - 1];
+      segments.push({
+        peak,
+        trough,
+        duration: dayDiff(startDate, last.date),
+      });
+    }
+    const pctValues = segments
+      .map((s) => (s.peak > 0 ? (s.trough - s.peak) / s.peak : null))
+      .filter((v): v is number => v != null && Number.isFinite(v));
+    const valueValues = segments.map((s) => s.trough - s.peak);
+    const durations = segments.map((s) => s.duration);
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    const min = (arr: number[]) => (arr.length ? Math.min(...arr) : null);
+    return {
+      avgDuration: avg(durations),
+      maxDuration: durations.length ? Math.max(...durations) : null,
+      avgValue: avg(valueValues),
+      maxValue: min(valueValues),
+      avgPct: avg(pctValues),
+      maxPct: min(pctValues),
+    };
+  };
+
+  const computeRunUpStats = (series: { date: string; equity: number }[]) => {
+    if (series.length < 2) {
+      return {
+        avgDuration: null,
+        maxDuration: null,
+        avgValue: null,
+        maxValue: null,
+        avgPct: null,
+        maxPct: null,
+      };
+    }
+    const segments: { trough: number; peak: number; duration: number }[] = [];
+    let trough = series[0].equity;
+    let troughDate = series[0].date;
+    let peak = series[0].equity;
+    let startDate = series[0].date;
+    let inRunUp = false;
+
+    for (let i = 1; i < series.length; i++) {
+      const eq = series[i].equity;
+      const date = series[i].date;
+
+      if (eq < trough) {
+        if (inRunUp) {
+          segments.push({
+            trough,
+            peak,
+            duration: dayDiff(startDate, date),
+          });
+        }
+        trough = eq;
+        troughDate = date;
+        peak = eq;
+        startDate = troughDate;
+        inRunUp = false;
+        continue;
+      }
+
+      if (eq > peak) {
+        peak = eq;
+      }
+      if (!inRunUp && eq > trough) {
+        inRunUp = true;
+        startDate = troughDate;
+      }
+      if (inRunUp && eq <= trough) {
+        segments.push({
+          trough,
+          peak,
+          duration: dayDiff(startDate, date),
+        });
+        trough = eq;
+        troughDate = date;
+        peak = eq;
+        startDate = troughDate;
+        inRunUp = false;
+      }
+    }
+    if (inRunUp) {
+      const last = series[series.length - 1];
+      segments.push({
+        trough,
+        peak,
+        duration: dayDiff(startDate, last.date),
+      });
+    }
+
+    const pctValues = segments
+      .map((s) => (s.trough > 0 ? (s.peak - s.trough) / s.trough : null))
+      .filter((v): v is number => v != null && Number.isFinite(v));
+    const valueValues = segments.map((s) => s.peak - s.trough);
+    const durations = segments.map((s) => s.duration);
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    const max = (arr: number[]) => (arr.length ? Math.max(...arr) : null);
+
+    return {
+      avgDuration: avg(durations),
+      maxDuration: max(durations),
+      avgValue: avg(valueValues),
+      maxValue: max(valueValues),
+      avgPct: avg(pctValues),
+      maxPct: max(pctValues),
+    };
+  };
+
+  const drawdownStats = computeDrawdownStats(equitySeries);
+  const runUpStats = computeRunUpStats(equitySeries);
+
+  const pctOfInitial = (v: number | null | undefined) => {
+    if (initialCapital <= 0 || v == null || !Number.isFinite(v)) return null;
+    return v / initialCapital;
+  };
+
+  const openPnlPct = pctOfInitial(openPnl);
+  const netProfitPct = pctOfInitial(netProfit);
+  const grossProfitPct = pctOfInitial(grossProfit);
+  const grossLossPct = pctOfInitial(grossLoss);
+  const commissionPct = pctOfInitial(commissionPaid);
+  const buyHoldPct = pctOfInitial(buyHoldReturn ?? null) ?? buyHoldPricePct ?? null;
+
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[SIM-PERF]", {
+      initialEquity: initialCapital,
+      finalEquity: result.finalEquity,
+      netProfitUsd: netProfit,
+      netProfitPct,
+      maxDDUsd: drawdownStats.maxValue,
+      maxDDPct: drawdownStats.maxPct,
+      buyHoldUsd: buyHoldReturn,
+      buyHoldPct,
+      buyHoldPricePct,
+    });
+  }
+
+  return {
+    initialCapital,
+    openPnl,
+    openPnlPct: openPnlPct ?? undefined,
+    netProfit,
+    netProfitPct: netProfitPct ?? undefined,
+    netProfitLong,
+    netProfitShort,
+    grossProfit,
+    grossProfitPct: grossProfitPct ?? undefined,
+    grossLoss,
+    grossLossPct: grossLossPct ?? undefined,
+    grossProfitLong,
+    grossLossLong,
+    grossProfitShort,
+    grossLossShort,
+    commissionPaid,
+    commissionPct: commissionPct ?? undefined,
+    buyHoldReturn,
+    buyHoldPct: buyHoldPct ?? undefined,
+    buyHoldPricePct: buyHoldPricePct ?? undefined,
+    maxContractsHeld,
+    avgRunUpDuration: runUpStats.avgDuration ?? undefined,
+    maxRunUpDuration: runUpStats.maxDuration ?? undefined,
+    avgRunUpValue: runUpStats.avgValue ?? undefined,
+    maxRunUpValue: runUpStats.maxValue ?? undefined,
+    avgRunUpPct: runUpStats.avgPct ?? undefined,
+    maxRunUpPct: runUpStats.maxPct ?? undefined,
+    avgDrawdownDuration: drawdownStats.avgDuration ?? undefined,
+    maxDrawdownDuration: drawdownStats.maxDuration ?? undefined,
+    avgDrawdownValue: drawdownStats.avgValue ?? undefined,
+    maxDrawdownValue: drawdownStats.maxValue ?? undefined,
+    avgDrawdownPct: drawdownStats.avgPct ?? undefined,
+    maxDrawdownPct: drawdownStats.maxPct ?? undefined,
+  };
+};
 
 export default function TimingPage({ params }: TimingPageProps) {
   // Dark mode hook
@@ -353,18 +874,28 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [rangeEwmaLambda, setRangeEwmaLambda] = useState(0.94);
   const [isVolForecastLoading, setIsVolForecastLoading] = useState(false);
   const [volForecastError, setVolForecastError] = useState<string | null>(null);
+  const volInFlightRef = useRef<Set<string>>(new Set());
+  const volPrefetchRunIdRef = useRef(0);
   
   // STEP 3: Bulletproof forecast storage by selection key
   const [forecastByKey, setForecastByKey] = useState<Record<string, any>>({});
+
+  const EWMA_UNBIASED_DEFAULTS: Record<number, { lambda: number; trainFraction: number }> = {
+    1: { lambda: 0.94, trainFraction: 0.7 },
+    2: { lambda: 0.94, trainFraction: 0.7 },
+    3: { lambda: 0.94, trainFraction: 0.7 },
+    5: { lambda: 0.94, trainFraction: 0.7 },
+  };
   
   // Compute stable selection key for transition tracking
   const volSelectionKey = useMemo(() => {
-    const modelPart = volModel === 'GARCH' 
-      ? `GARCH-${garchEstimator}` 
-      : volModel === 'Range'
-      ? `Range-${rangeEstimator}`
-      : volModel;
-    return `${modelPart}|h=${h}|cov=${coverage}`;
+    return buildVolSelectionKey({
+      model: volModel,
+      garchEstimator,
+      rangeEstimator,
+      h,
+      coverage,
+    });
   }, [volModel, garchEstimator, rangeEstimator, h, coverage]);
   
   // GBM state for volatility models (separate from standalone GBM card)
@@ -787,19 +1318,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     stopOutEvents: number;
   };
 
-  interface SimulationStrategySummary {
-    id: StrategyKey;
-    label: string;
-    lambda?: number | null;
-    trainFraction?: number;
-    returnPct: number;
-    maxDrawdown: number;
-    tradeCount: number;
-    stopOutEvents: number;
-    days: number;
-    firstDate: string;
-    lastDate: string;
-  }
+  type SimulationStrategySummary = SimulationRunSummary;
 
   // Type for trade overlays passed to PriceChart
   type Trading212TradeOverlay = {
@@ -1364,28 +1883,200 @@ export default function TimingPage({ params }: TimingPageProps) {
       });
     }
 
+    const windowedRows = getWindowedRows(t212CanonicalRows, visibleWindow);
+    const asOfRow = windowedRows.length > 0 ? windowedRows[windowedRows.length - 1] : null;
+    const asOfDate = asOfRow?.date ?? null;
+    const prices: number[] = [];
+    for (const row of windowedRows) {
+      const p = toNum(row.adj_close ?? row.close);
+      if (p != null && p > 0) {
+        prices.push(p);
+      }
+    }
+    const returns: number[] = [];
+    for (let i = 1; i < prices.length; i++) {
+      const prev = prices[i - 1];
+      const curr = prices[i];
+      if (prev > 0 && curr > 0) {
+        returns.push(Math.log(curr / prev));
+      }
+    }
+
+    const sharedVolatility: VolBundle = {
+      gbm: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "GBM", h, coverage })
+        ]
+      ),
+      garchNormal: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "GARCH", garchEstimator: "Normal", h, coverage })
+        ]
+      ),
+      garchStudent: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "GARCH", garchEstimator: "Student-t", h, coverage })
+        ]
+      ),
+      harRv: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "HAR-RV", h, coverage })
+        ]
+      ),
+      rangeParkinson: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "Range", rangeEstimator: "P", h, coverage })
+        ]
+      ),
+      rangeGarmanKlass: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "Range", rangeEstimator: "GK", h, coverage })
+        ]
+      ),
+      rangeRogersSatchell: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "Range", rangeEstimator: "RS", h, coverage })
+        ]
+      ),
+      rangeYangZhang: toVolCell(
+        forecastByKey[
+          buildVolSelectionKey({ model: "Range", rangeEstimator: "YZ", h, coverage })
+        ]
+      ),
+    };
+
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[SIM-TABLE][VOL-BUNDLE] Building volatility bundle", {
+        forecastKeys: Object.keys(forecastByKey),
+        rangeKeys: {
+          P: buildVolSelectionKey({ model: "Range", rangeEstimator: "P", h, coverage }),
+          GK: buildVolSelectionKey({ model: "Range", rangeEstimator: "GK", h, coverage }),
+          RS: buildVolSelectionKey({ model: "Range", rangeEstimator: "RS", h, coverage }),
+          YZ: buildVolSelectionKey({ model: "Range", rangeEstimator: "YZ", h, coverage }),
+        },
+        rangeForecasts: {
+          P: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "P", h, coverage })],
+          GK: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "GK", h, coverage })],
+          RS: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "RS", h, coverage })],
+          YZ: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "YZ", h, coverage })],
+        },
+        volBundle: sharedVolatility,
+      });
+    }
+
     const rows: SimulationStrategySummary[] = comparisonRowSpecs.map((spec, idx) => {
       const run = t212BaseRunsById[spec.id];
       const stats = run ? summarizeRunStats(run, visibleWindow) : null;
+      const defaults = EWMA_UNBIASED_DEFAULTS[h] ?? { lambda: 0.94, trainFraction: 0.7 };
+      const isUnbiased = spec.key === "unbiased" || /unbiased/i.test(spec.label);
+      const isBiasedMax = spec.key === "biased-max";
 
-      const lambda =
-        spec.key === "unbiased"
-          ? undefined
-          : spec.key === "biased"
-            ? run?.lambda ?? reactionLambda
-            : run?.lambda ?? biasedMaxCalmarResult?.lambdaStar;
-      const trainFraction =
-        spec.key === "unbiased"
-          ? undefined
-          : spec.key === "biased"
-            ? run?.trainFraction ?? reactionTrainFraction
-            : run?.trainFraction ?? derivedMaxTrainFraction ?? undefined;
+      let lambdaUsed = isUnbiased
+        ? (run?.lambda ?? defaults.lambda)
+        : (run?.lambda ?? reactionLambda ?? 0.94);
+      let trainFracUsed = isUnbiased
+        ? (run?.trainFraction ?? defaults.trainFraction)
+        : (run?.trainFraction ?? reactionTrainFraction ?? 0.7);
+
+      if (isBiasedMax) {
+        lambdaUsed = run?.lambda ?? biasedMaxCalmarResult?.lambdaStar ?? lambdaUsed;
+        trainFracUsed = run?.trainFraction ?? derivedMaxTrainFraction ?? trainFracUsed;
+      }
+
+      let horizonForecast = undefined as SimulationStrategySummary["horizonForecast"];
+      let ewmaExpectedReturnPct: number | undefined = undefined;
+      let perfMetrics: Partial<SimulationStrategySummary> | undefined = undefined;
+      if (
+        returns.length >= 2 &&
+        asOfRow &&
+        asOfRow.date &&
+        (asOfRow.adj_close != null || asOfRow.close != null)
+      ) {
+        const trainN = Math.max(2, Math.floor(trainFracUsed * returns.length));
+        const trainReturns = returns.slice(-trainN);
+        if (trainReturns.length >= 2) {
+        const muLog = mean(trainReturns);
+        let sigma2 = variance(trainReturns, muLog);
+        if (!Number.isFinite(sigma2)) {
+          sigma2 = 0;
+        }
+        for (const r of trainReturns) {
+          const e = r - muLog;
+          sigma2 = lambdaUsed * sigma2 + (1 - lambdaUsed) * (e * e);
+        }
+        const sigmaHat = Math.sqrt(Math.max(sigma2, 0));
+        const muHat = muLog + 0.5 * sigmaHat * sigmaHat;
+        const muStarUsed = lambdaUsed * muHat;
+        const S0 = toNum(asOfRow.adj_close ?? asOfRow.close);
+        if (S0 != null && S0 > 0 && Number.isFinite(muStarUsed) && Number.isFinite(sigmaHat)) {
+          const interval = computeGbmInterval({
+            S_t: S0,
+            muStarUsed,
+            sigmaHat,
+            h_trading: h,
+            coverage,
+          });
+          const expected = S0 * Math.exp(muStarUsed * h);
+          horizonForecast = {
+            expected: Number.isFinite(expected) ? expected : undefined,
+            lower: Number.isFinite(interval.L_h) ? interval.L_h : undefined,
+            upper: Number.isFinite(interval.U_h) ? interval.U_h : undefined,
+            asOfDate: asOfDate ?? undefined,
+            mu: muStarUsed,
+            sigma1d: sigmaHat,
+          };
+        }
+        }
+        // Compute EWMA expected-based return for Unbiased only
+        if (isUnbiased) {
+          ewmaExpectedReturnPct = computeEwmaExpectedReturnPct({
+            rows: windowedRows,
+            h,
+            lambda: lambdaUsed,
+            trainFraction: trainFracUsed,
+            initialEquity: t212InitialEquity,
+            leverage: t212Leverage,
+            positionFraction: t212PositionFraction,
+            costBps: t212CostBps,
+          });
+          if (process.env.NODE_ENV !== "production") {
+            console.log("[EWMA-EXPECTED][RET]", {
+              returnPct: ewmaExpectedReturnPct,
+              h,
+              lambdaUsed,
+              trainFracUsed,
+              startDate: windowedRows[0]?.date,
+              endDate: asOfDate,
+            });
+          }
+
+          // Build bars and simulate for performance breakdown
+          const bars = buildEwmaExpectedBars(windowedRows, h, lambdaUsed, trainFracUsed);
+          if (bars.length > 0) {
+            const config: Trading212CfdConfig = {
+              leverage: t212Leverage,
+              fxFeeRate: 0,
+              dailyLongSwapRate: 0,
+              dailyShortSwapRate: 0,
+              spreadBps: t212CostBps,
+              marginCallLevel: 0.45,
+              stopOutLevel: 0.25,
+              positionFraction: t212PositionFraction,
+            };
+            const simResult = simulateTrading212Cfd(bars, t212InitialEquity, config);
+            const priceStart = prices[0] ?? null;
+            const priceEnd = prices[prices.length - 1] ?? null;
+            perfMetrics = summarizeSimPerformance(simResult, priceStart, priceEnd);
+          }
+        }
+      }
 
       const row = {
         id: spec.key,
         label: spec.label,
-        lambda,
-        trainFraction,
+        lambda: lambdaUsed,
+        trainFraction: trainFracUsed,
+        ewmaExpectedReturnPct,
         returnPct: stats?.returnPct ?? 0,
         maxDrawdown: stats?.maxDrawdown ?? 0,
         tradeCount: stats?.tradeCount ?? 0,
@@ -1393,47 +2084,9 @@ export default function TimingPage({ params }: TimingPageProps) {
         days: stats?.days ?? 0,
         firstDate: stats?.firstDate ?? "—",
         lastDate: stats?.lastDate ?? "—",
-        // Add volatility forecast bounds from forecastByKey
-        gbmBounds: (() => {
-          const key = `GBM|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        garchNormalBounds: (() => {
-          const key = `GARCH|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast?.garchDistribution === 'normal' ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        garchStudentBounds: (() => {
-          const key = `GARCH|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast?.garchDistribution === 'student' ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        harvBounds: (() => {
-          const key = `HAR-RV|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        rangeParkinsonBounds: (() => {
-          const key = `Range|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast?.rangeEstimator === 'parkinson' ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        rangeGarmanKlassBounds: (() => {
-          const key = `Range|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast?.rangeEstimator === 'garman-klass' ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        rangeRogersSatchellBounds: (() => {
-          const key = `Range|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast?.rangeEstimator === 'rogers-satchell' ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
-        rangeYangZhangBounds: (() => {
-          const key = `Range|h=${h}|cov=${coverage}`;
-          const forecast = forecastByKey[key];
-          return forecast?.rangeEstimator === 'yang-zhang' ? { lower: forecast.lower, upper: forecast.upper } : null;
-        })(),
+        volatility: sharedVolatility,
+        horizonForecast,
+        ...(perfMetrics ?? {}),
       };
 
       if (process.env.NODE_ENV !== "production") {
@@ -1466,10 +2119,28 @@ export default function TimingPage({ params }: TimingPageProps) {
     summarizeRunStats,
     t212BaseRunsById,
     visibleWindow,
+    t212CanonicalRows,
     forecastByKey,
     h,
     coverage,
+    t212InitialEquity,
+    t212Leverage,
+    t212PositionFraction,
+    t212CostBps,
   ]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    console.log(
+      "[SIM-TABLE][VOL]",
+      simulationRunsSummary.map((r) => ({
+        id: r.id,
+        gbm: r.volatility?.gbm,
+        garchN: r.volatility?.garchNormal,
+        garchT: r.volatility?.garchStudent,
+      }))
+    );
+  }, [simulationRunsSummary]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -1696,6 +2367,130 @@ export default function TimingPage({ params }: TimingPageProps) {
     return isInitialized && hasValidH && hasValidCoverage && hasTZ && historyCount > 0;
   }, [historyCount, isInitialized, h, coverage, resolvedTargetSpec, uploadResult]);
 
+  const fetchVolForecast = useCallback(
+    async (spec: VolModelSpec): Promise<any | null> => {
+      const currentTargetSpec = targetSpecResult || serverTargetSpec;
+      const effectiveCoverage = currentTargetSpec?.spec?.coverage ?? coverage;
+      const effectiveTZ =
+        currentTargetSpec?.spec?.exchange_tz ||
+        uploadResult?.meta?.exchange_tz ||
+        "America/New_York";
+      const currentHistoryCount = historyCount;
+
+      // Choose window per model and clamp to available history
+      const baseWindow = spec.model === "GBM" ? gbmWindow : volWindow;
+      const effectiveWindowN =
+        currentHistoryCount > 0
+          ? Math.min(baseWindow, Math.max(1, currentHistoryCount - 1))
+          : baseWindow;
+
+      const selectedModel =
+        spec.model === "GBM"
+          ? "GBM-CC"
+          : spec.model === "GARCH"
+            ? spec.garchEstimator === "Student-t"
+              ? "GARCH11-t"
+              : "GARCH11-N"
+            : spec.model === "HAR-RV"
+              ? "HAR-RV"
+              : `Range-${spec.rangeEstimator ?? "P"}`;
+
+      const isGarchModel = selectedModel === "GARCH11-N" || selectedModel === "GARCH11-t";
+      const isRangeModel = selectedModel.startsWith("Range-");
+      const resolvedDist =
+        isGarchModel && selectedModel === "GARCH11-t" ? "student-t" : "normal";
+      const resolvedEstimator = isRangeModel
+        ? selectedModel.split("-")[1] || spec.rangeEstimator
+        : spec.rangeEstimator;
+
+      const modelParams: any = {};
+      if (selectedModel === "GBM-CC") {
+        modelParams.gbm = {
+          windowN: effectiveWindowN,
+          lambdaDrift: gbmLambda,
+        };
+      } else if (isGarchModel) {
+        modelParams.garch = {
+          window: effectiveWindowN,
+          variance_targeting: garchVarianceTargeting,
+          dist: resolvedDist,
+          ...(resolvedDist === "student-t" ? { df: garchDf } : {}),
+        };
+      } else if (selectedModel === "HAR-RV") {
+        modelParams.har = {
+          window: effectiveWindowN,
+          use_intraday_rv: harUseIntradayRv,
+        };
+      } else {
+        modelParams.range = {
+          estimator: resolvedEstimator,
+          window: effectiveWindowN,
+          ewma_lambda: rangeEwmaLambda,
+        };
+      }
+
+      try {
+        const resp = await fetch(
+          `/api/volatility/${encodeURIComponent(params.ticker)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: selectedModel,
+              params: modelParams,
+              overwrite: true,
+              horizon: h,
+              coverage: effectiveCoverage,
+              tz: effectiveTZ,
+            }),
+          }
+        );
+
+        if (!resp.ok) {
+          const bodyText = await resp.text();
+          if (process.env.NODE_ENV !== "production") {
+            console.warn("[VOL PREFETCH][ERR]", {
+              key: buildVolSelectionKey({
+                model: spec.model,
+                garchEstimator: spec.garchEstimator,
+                rangeEstimator: spec.rangeEstimator,
+                h,
+                coverage,
+              }),
+              status: resp.status,
+              bodyText,
+              model: selectedModel,
+              estimator: resolvedEstimator,
+            });
+          }
+          return null;
+        }
+
+        const bodyText = await resp.text();
+        const data = JSON.parse(bodyText);
+        return data ?? null;
+      } catch (_error) {
+        return null;
+      }
+    },
+    [
+      targetSpecResult,
+      serverTargetSpec,
+      coverage,
+      uploadResult,
+      historyCount,
+      gbmWindow,
+      volWindow,
+      gbmLambda,
+      garchVarianceTargeting,
+      garchDf,
+      harUseIntradayRv,
+      rangeEwmaLambda,
+      params.ticker,
+      h,
+    ]
+  );
+
   const prevServerTargetSpecRef = useRef<any | null>(null);
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
@@ -1704,6 +2499,78 @@ export default function TimingPage({ params }: TimingPageProps) {
       prevServerTargetSpecRef.current = serverTargetSpec;
     }
   }, [serverTargetSpec]);
+
+  const ensureAllVolForecasts = useCallback(async () => {
+    const runId = ++volPrefetchRunIdRef.current;
+    const specs: { spec: VolModelSpec; key: string }[] = [
+      { spec: { model: "GBM" }, key: buildVolSelectionKey({ model: "GBM", h, coverage }) },
+      {
+        spec: { model: "GARCH", garchEstimator: "Normal" },
+        key: buildVolSelectionKey({ model: "GARCH", garchEstimator: "Normal", h, coverage }),
+      },
+      {
+        spec: { model: "GARCH", garchEstimator: "Student-t" },
+        key: buildVolSelectionKey({ model: "GARCH", garchEstimator: "Student-t", h, coverage }),
+      },
+      { spec: { model: "HAR-RV" }, key: buildVolSelectionKey({ model: "HAR-RV", h, coverage }) },
+      {
+        spec: { model: "Range", rangeEstimator: "P" },
+        key: buildVolSelectionKey({ model: "Range", rangeEstimator: "P", h, coverage }),
+      },
+      {
+        spec: { model: "Range", rangeEstimator: "GK" },
+        key: buildVolSelectionKey({ model: "Range", rangeEstimator: "GK", h, coverage }),
+      },
+      {
+        spec: { model: "Range", rangeEstimator: "RS" },
+        key: buildVolSelectionKey({ model: "Range", rangeEstimator: "RS", h, coverage }),
+      },
+      {
+        spec: { model: "Range", rangeEstimator: "YZ" },
+        key: buildVolSelectionKey({ model: "Range", rangeEstimator: "YZ", h, coverage }),
+      },
+    ];
+
+    const todo = specs.filter(({ key }) => {
+      const existing = forecastByKey[key];
+      const isInFlight = volInFlightRef.current.has(key);
+      // Refetch if: no forecast, or forecast exists but has no valid interval data
+      const needsFetch = !existing || 
+        !existing.intervals?.L_h || 
+        !existing.intervals?.U_h ||
+        !Number.isFinite(existing.intervals.L_h) ||
+        !Number.isFinite(existing.intervals.U_h);
+      return needsFetch && !isInFlight;
+    });
+
+    if (todo.length === 0) return;
+
+    await runWithConcurrencyLimit(todo, 3, async ({ key, spec }) => {
+      volInFlightRef.current.add(key);
+      try {
+        if (spec.rangeEstimator === "RS") {
+          console.log("[VOL PREFETCH][RS]", { key, payload: { spec, h, coverage } });
+        }
+        const forecast = await fetchVolForecast(spec);
+        if (volPrefetchRunIdRef.current !== runId) return;
+        if (forecast) {
+          setForecastByKey((prev) =>
+            prev[key] ? prev : { ...prev, [key]: { ...forecast, _key: key } }
+          );
+          if (spec.rangeEstimator === "RS") {
+            console.log("[VOL PREFETCH][RS][WRITE]", { key });
+          }
+        }
+      } finally {
+        volInFlightRef.current.delete(key);
+      }
+    });
+  }, [h, coverage, forecastByKey, fetchVolForecast]);
+
+  useEffect(() => {
+    if (!pipelineReady) return;
+    ensureAllVolForecasts();
+  }, [pipelineReady, ensureAllVolForecasts]);
 
   // Memoize forecast overlay props to prevent unnecessary re-renders
   // STEP 3: Use strict key matching (no fallback chain)
@@ -5908,70 +6775,6 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   const actionButtons = (
     <>
-      {/* Upload Data Button */}
-      <button
-        onClick={() => setShowUploadModal(true)}
-        className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-          isDarkMode
-            ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500'
-            : 'text-slate-600 border border-slate-200 hover:text-slate-800'
-        }`}
-        title="Upload Data"
-      >
-        <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-        </svg>
-      </button>
-
-      {/* Yahoo Finance Sync Button */}
-      <div className="relative">
-        <button
-          onClick={handleYahooSync}
-          disabled={isYahooSyncing}
-          className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-            isDarkMode
-              ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed'
-              : 'text-slate-600 border border-slate-200 hover:text-slate-800 disabled:opacity-40 disabled:cursor-not-allowed'
-          }`}
-          title="Sync from Yahoo Finance"
-        >
-          {isYahooSyncing ? (
-            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-            </svg>
-          ) : (
-            <svg className="w-5 h-5 transition-transform group-hover:scale-110 group-hover:rotate-180 duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          )}
-        </button>
-        {yahooSyncError && (
-          <div className={`absolute top-full right-0 mt-2 px-2 py-1 text-[10px] rounded-md whitespace-nowrap z-10 ${
-            isDarkMode ? 'bg-red-500/20 text-red-400 border border-red-500/30' : 'bg-red-50 text-red-600 border border-red-200'
-          }`}>
-            {yahooSyncError}
-          </div>
-        )}
-      </div>
-
-      {/* Data Quality / Help Button */}
-      <button
-        onClick={() => setShowDataQualityModal(true)}
-        className={`group relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200 ${
-          isDarkMode
-            ? 'text-slate-300 border border-slate-700/70 hover:text-white hover:border-slate-500'
-            : 'text-slate-600 border border-slate-200 hover:text-slate-800'
-        }`}
-        title="Data Quality Information"
-      >
-        <svg className="w-5 h-5 transition-transform group-hover:scale-110" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="1.75">
-          <circle cx="12" cy="12" r="10"/>
-          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-          <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
-        </svg>
-      </button>
-
       {/* Add to Watchlist Button */}
       <button
         onClick={addToWatchlist}

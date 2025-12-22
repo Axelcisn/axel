@@ -6,45 +6,45 @@
   "h_eff_days": 1,
   "verifyDate": "2025-12-17",
   "domain": "log",
-  "created_at": "2025-12-21T11:33:32.314Z",
+  "created_at": "2025-12-22T07:27:42.364Z",
   "locked": true,
   "y_hat": 177.72000122070312,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 504
+      "min_days": 756
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.0323220665785408,
+    "sigma_hat": 0.031937047872733285,
     "mu_star_used": 0,
-    "window_start": "2023-12-13",
+    "window_start": "2022-12-12",
     "window_end": "2025-12-16",
     "n": 6768,
     "S_t": 177.72000122070312,
-    "sigma_forecast": 0.0323220665785408,
-    "sigma2_forecast": 0.0010447159879076245,
+    "sigma_forecast": 0.031937047872733285,
+    "sigma2_forecast": 0.0010199750268252577,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2023-12-13",
+      "start": "2022-12-12",
       "end": "2025-12-16"
     },
     "volatility_diagnostics": {
       "estimator": "YZ",
-      "window": 504,
+      "window": 756,
       "ewma_lambda": 0.94,
-      "k": 0.14505267086224152,
+      "k": 0.14513484480126648,
       "gap_warnings": [
-        "Gap day detected: 11 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 5.93, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 16 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 9.34, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
   "intervals": {
-    "L_h": 166.81043275182276,
-    "U_h": 189.34306633492974,
-    "band_width_bp": 1350.7928258078782
+    "L_h": 166.93636152947226,
+    "U_h": 189.20023501476973,
+    "band_width_bp": 1333.6742984761197
   },
   "provenance": {
     "rng_seed": null,
@@ -53,7 +53,8 @@
       "h": 1,
       "coverage": 0.95,
       "range": {
-        "window": 504,
+        "estimator": "YZ",
+        "window": 756,
         "ewma_lambda": 0.94
       }
     },
@@ -63,7 +64,7 @@
   "diagnostics": {
     "method_source": "Range-YZ",
     "m_log": 5.180209284936395,
-    "s_scale": 0.0323220665785408,
+    "s_scale": 0.031937047872733285,
     "critical_type": "normal"
   },
   "critical": {
@@ -71,8 +72,9 @@
     "value": 1.96
   },
   "window_period": {
-    "start": "2023-12-13",
+    "start": "2022-12-12",
     "end": "2025-12-16",
-    "n_obs": 504
-  }
+    "n_obs": 756
+  },
+  "is_active": false
 }

@@ -6,7 +6,7 @@
   "h_eff_days": 3,
   "verifyDate": "2025-12-22",
   "domain": "log",
-  "created_at": "2025-12-21T08:52:13.170Z",
+  "created_at": "2025-12-22T07:16:58.640Z",
   "locked": true,
   "y_hat": 1056.02001953125,
   "target": {
@@ -18,32 +18,32 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.02523003887032629,
+    "sigma_hat": 0.02523003445416732,
     "mu_star_used": 0,
     "window_start": "2022-12-15",
     "window_end": "2025-12-19",
     "n": 7745,
     "S_t": 1056.02001953125,
-    "sigma_forecast": 0.02523003887032629,
-    "sigma2_forecast": 0.0006365548613981756,
+    "sigma_forecast": 0.02523003445416732,
+    "sigma2_forecast": 0.0006365546385584701,
     "critical_value": 1.96,
     "window_span": {
       "start": "2022-12-15",
       "end": "2025-12-19"
     },
     "volatility_diagnostics": {
-      "omega": 0.00007395155431102729,
+      "omega": 0.00007395152086061889,
       "alpha": 0.03,
       "beta": 0.85,
       "alpha_plus_beta": 0.88,
-      "unconditional_var": 0.0006162629525918942,
+      "unconditional_var": 0.0006162626738384908,
       "dist": "normal"
     }
   },
   "intervals": {
-    "L_h": 1005.0690712968636,
-    "U_h": 1109.5538739559868,
-    "band_width_bp": 1039.5783299182026
+    "L_h": 1005.0690799964116,
+    "U_h": 1109.5538643520526,
+    "band_width_bp": 1039.5781388082703
   },
   "provenance": {
     "rng_seed": null,
@@ -63,7 +63,7 @@
   "diagnostics": {
     "method_source": "GARCH11-N",
     "m_log": 6.962262421975949,
-    "s_scale": 0.02523003887032629,
+    "s_scale": 0.02523003445416732,
     "critical_type": "normal"
   },
   "critical": {

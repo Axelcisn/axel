@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { AlertFire, WatchlistRow, WatchlistSummary } from '@/lib/watchlist/types';
 import type { Quote } from '@/lib/types/quotes';
@@ -43,6 +44,15 @@ function formatPercent(value: number | null | undefined) {
   return `${sign}${safe.toFixed(2)}%`;
 }
 
+function TrendArrow({ positive }: { positive: boolean }) {
+  const fill = positive ? 'bg-emerald-900/40 text-emerald-300' : 'bg-rose-900/35 text-rose-300';
+  return (
+    <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ${fill}`}>
+      {positive ? '↑' : '↓'}
+    </span>
+  );
+}
+
 function buildTableRow(
   row: WatchlistRow,
   company: CompanyMap[string],
@@ -75,80 +85,6 @@ function buildTableRow(
     trendPoints,
     source: row,
   };
-}
-
-function TrendArrow({ positive }: { positive: boolean }) {
-  return (
-    <div
-      className={`flex h-9 w-9 items-center justify-center rounded-full ${
-        positive ? 'bg-emerald-900/40 text-emerald-300' : 'bg-rose-900/35 text-rose-300'
-      }`}
-    >
-      <span className="text-lg">{positive ? '↑' : '↓'}</span>
-    </div>
-  );
-}
-
-function DetailPanel({ row, company }: { row: TableRow | null; company?: CompanyMap[string] }) {
-  if (!row) {
-    return (
-      <div className="rounded-xl bg-[#0d1019] p-4 text-slate-300 shadow-inner shadow-black/30">
-        <p className="text-sm">Select a symbol to view details.</p>
-      </div>
-    );
-  }
-
-  const metrics = [
-    { label: 'Opening Price', value: formatNumber(row.source.bands.L_1) },
-    { label: 'High', value: formatNumber(row.source.bands.U_1) },
-    { label: 'T̂ (days)', value: formatNumber(row.source.forecast.T_hat_median) },
-    { label: 'Next Review', value: row.source.forecast.next_review_date || '—' },
-    { label: 'Coverage', value: formatPercent(row.source.quality.pi_coverage_250d) },
-    { label: 'Regime', value: row.source.quality.regime?.id ?? '—' },
-  ];
-
-  return (
-    <div className="rounded-xl border border-slate-800/70 bg-transparent p-4 shadow-inner shadow-black/30">
-      <div className="flex items-start justify-between border-b border-slate-800/70 px-4 py-3">
-        <div>
-          <p className="text-[11px] uppercase tracking-wide text-slate-400">{company?.name || row.symbol}</p>
-          <h2 className="text-3xl font-semibold text-slate-100">{row.symbol}</h2>
-        </div>
-        <div className="text-right">
-          <div className="text-4xl font-semibold text-emerald-400">{formatNumber(row.last)}</div>
-          <div className="text-sm text-slate-400">
-            {formatChange(row.change)} ({formatPercent(row.changePct)})
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 border-b border-slate-800/70 px-4 py-3">
-        <button className="flex-1 rounded-md bg-[#0f62fe] px-3 py-2 text-sm font-semibold text-white shadow hover:bg-[#0d55d8]">
-          Buy Order
-        </button>
-        <button className="flex-1 rounded-md bg-[#d32f2f] px-3 py-2 text-sm font-semibold text-white shadow hover:bg-[#b92626]">
-          Sell Order
-        </button>
-        <button className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-100 hover:bg-slate-800">
-          ⚡
-        </button>
-      </div>
-
-      <div className="grid grid-cols-2 gap-x-4 border-b border-slate-800/70 px-4 py-4 text-sm">
-        {metrics.map((metric) => (
-          <div key={metric.label} className="flex justify-between py-1">
-            <span className="text-slate-400">{metric.label}</span>
-            <span className="font-medium text-slate-100">{metric.value}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="px-4 py-4">
-        <p className="mb-2 text-sm font-semibold text-slate-100">Trend</p>
-        <TrendArrow positive={(row.change || 0) >= 0} />
-      </div>
-    </div>
-  );
 }
 
 export default function WatchlistPage() {
@@ -363,11 +299,6 @@ export default function WatchlistPage() {
     [watchlistRows, companyMap, quotes, liveBySymbol]
   );
 
-  const selectedRow = useMemo(
-    () => tableRows.find((row) => row.symbol === selectedSymbol) || null,
-    [tableRows, selectedSymbol]
-  );
-
   const asOfDisplay = watchlistSummary?.as_of
     ? new Date(watchlistSummary.as_of).toLocaleDateString()
     : '—';
@@ -389,7 +320,14 @@ export default function WatchlistPage() {
 
     switch (columnId) {
       case 'symbol':
-        return <span className="font-semibold text-slate-100">{row.symbol}</span>;
+        return (
+          <Link
+            href={`/company/${row.symbol}/timing`}
+            className="font-semibold text-slate-100 transition hover:text-white hover:underline hover:decoration-[#2e7df6]"
+          >
+            {row.symbol}
+          </Link>
+        );
       case 'name':
         return <span className="text-slate-200">{row.name}</span>;
       case 'live':
@@ -473,7 +411,7 @@ export default function WatchlistPage() {
           </div>
         </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_1fr]">
+      <div className="grid grid-cols-1 gap-4">
           {/* Table */}
           <div className="overflow-hidden rounded-xl bg-transparent">
             {watchlistError ? (
@@ -529,10 +467,6 @@ export default function WatchlistPage() {
             )}
           </div>
 
-          {/* Detail panel and alerts */}
-          <div className="flex flex-col gap-4">
-            <DetailPanel row={selectedRow} company={selectedRow ? companyMap[selectedRow.symbol] : undefined} />
-          </div>
         </div>
       </div>
 

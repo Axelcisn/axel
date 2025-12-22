@@ -6,37 +6,37 @@
   "h_eff_days": 3,
   "verifyDate": "2025-12-22",
   "domain": "log",
-  "created_at": "2025-12-21T10:33:36.435Z",
+  "created_at": "2025-12-22T07:16:58.716Z",
   "locked": true,
   "y_hat": 1056.02001953125,
   "target": {
     "h": 1,
     "coverage": 0.95,
     "window_requirements": {
-      "min_days": 504
+      "min_days": 756
     }
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.015944522312598245,
+    "sigma_hat": 0.01594452231259826,
     "mu_star_used": 0,
-    "window_start": "2023-12-18",
+    "window_start": "2022-12-15",
     "window_end": "2025-12-19",
     "n": 7745,
     "S_t": 1056.02001953125,
-    "sigma_forecast": 0.015944522312598245,
-    "sigma2_forecast": 0.00025422779177694326,
+    "sigma_forecast": 0.01594452231259826,
+    "sigma2_forecast": 0.0002542277917769437,
     "critical_value": 1.96,
     "window_span": {
-      "start": "2023-12-18",
+      "start": "2022-12-15",
       "end": "2025-12-19"
     },
     "volatility_diagnostics": {
       "estimator": "GK",
-      "window": 504,
+      "window": 756,
       "ewma_lambda": 0.94,
       "gap_warnings": [
-        "Gap day detected: 25 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 4.62, threshold: 2.0. Consider using RS or YZ estimators."
+        "Gap day detected: 42 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 5.02, threshold: 2.0. Consider using RS or YZ estimators."
       ]
     }
   },
@@ -52,7 +52,8 @@
       "h": 1,
       "coverage": 0.95,
       "range": {
-        "window": 504,
+        "estimator": "GK",
+        "window": 756,
         "ewma_lambda": 0.94
       }
     },
@@ -62,7 +63,7 @@
   "diagnostics": {
     "method_source": "Range-GK",
     "m_log": 6.962262421975949,
-    "s_scale": 0.015944522312598245,
+    "s_scale": 0.01594452231259826,
     "critical_type": "normal"
   },
   "critical": {
@@ -70,9 +71,9 @@
     "value": 1.96
   },
   "window_period": {
-    "start": "2023-12-18",
+    "start": "2022-12-15",
     "end": "2025-12-19",
-    "n_obs": 504
+    "n_obs": 756
   },
   "is_active": false
 }
