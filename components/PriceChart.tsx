@@ -3882,68 +3882,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       <div className="relative">
         {/* Enhanced CSS Animations for forecast band */}
         <style>{`
-          /* Smooth dot entrance with scale and glow */
-          @keyframes dotPopIn {
-            0% {
-              opacity: 0;
-              transform: scale(0);
-            }
-            50% {
-              opacity: 1;
-              transform: scale(1.3);
-            }
-            70% {
-              transform: scale(0.9);
-            }
-            100% {
-              opacity: 1;
-              transform: scale(1);
-            }
-          }
-          
-          /* Subtle breathing glow for dots */
-          @keyframes dotGlow {
-            0%, 100% {
-              filter: drop-shadow(0 0 2px rgba(59, 130, 246, 0.5));
-            }
-            50% {
-              filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.8));
-            }
-          }
-          
-          /* Reference line fade in */
-          @keyframes refLineFade {
-            0% {
-              opacity: 0;
-              stroke-dashoffset: 100;
-            }
-            100% {
-              opacity: 1;
-              stroke-dashoffset: 0;
-            }
-          }
-          
           .forecast-dot-animated {
             transform-origin: center;
-            animation: dotPopIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
-                       dotGlow 3s ease-in-out infinite 0.5s;
           }
           
           .forecast-dot-center {
-            animation-delay: 0.2s, 0.7s;
           }
           
           .forecast-dot-upper {
-            animation-delay: 0.35s, 0.85s;
           }
           
           .forecast-dot-lower {
-            animation-delay: 0.5s, 1s;
           }
           
           .forecast-ref-line {
             stroke-dasharray: 100;
-            animation: refLineFade 0.6s ease-out forwards;
           }
         `}</style>
         
@@ -4257,8 +4210,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   ewmaLongWindow={ewmaLongWindow}
                 />
               )}
-              animationDuration={0}
               cursor={false}
+              animationDuration={0}
+              isAnimationActive={false}
             />
             
             {/* Live Price Reference Line - horizontal dotted line with price pill */}
@@ -4523,7 +4477,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             
             {/* Volatility Model Forecast Band (upper fill + lower mask) */}
             {overlayLower != null && overlayUpper != null && (
-              <g style={{ opacity: bandOpacity, transition: "opacity 250ms ease" }}>
+              <g style={{ opacity: bandOpacity }}>
                 {/* Normal forecast band - shown when not loading */}
                 {transitionPhase !== "loading" && (
                   <>
@@ -4535,9 +4489,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       stroke="none"
                       fill="url(#forecastBandGradient)"
                       fillOpacity={0.25}
-                      isAnimationActive={true}
-                      animationDuration={300}
-                      animationEasing="ease-out"
+                      isAnimationActive={false}
                       connectNulls={false}
                     />
 
@@ -4549,9 +4501,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       stroke="none"
                       fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
                       fillOpacity={1}
-                      isAnimationActive={true}
-                      animationDuration={300}
-                      animationEasing="ease-out"
+                      isAnimationActive={false}
                       connectNulls={false}
                     />
 
@@ -4566,9 +4516,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       strokeDasharray="4 2"
                       dot={false}
                       activeDot={false}
-                      isAnimationActive={true}
-                      animationDuration={300}
-                      animationEasing="ease-out"
+                      isAnimationActive={false}
                       connectNulls={false}
                     />
                     <Line
@@ -4580,9 +4528,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       strokeOpacity={0.45}
                       dot={false}
                       activeDot={false}
-                      isAnimationActive={true}
-                      animationDuration={300}
-                      animationEasing="ease-out"
+                      isAnimationActive={false}
                       connectNulls={false}
                     />
                     <Line
@@ -4594,9 +4540,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       strokeOpacity={0.45}
                       dot={false}
                       activeDot={false}
-                      isAnimationActive={true}
-                      animationDuration={300}
-                      animationEasing="ease-out"
+                      isAnimationActive={false}
                       connectNulls={false}
                     />
                   </>
@@ -4804,6 +4748,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 strokeWidth={2.2}
                 strokeOpacity={1}
                 ifOverflow="visible"
+                isAnimationActive={false}
+                animationDuration={0}
               />
             )}
             </ComposedChart>
@@ -4915,6 +4861,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
                   <Tooltip
                     cursor={false}
+                    animationDuration={0}
+                    isAnimationActive={false}
                     content={
                       <MomentumTooltip
                         momentumPeriod={momentumPeriod}
@@ -4974,7 +4922,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             className={`
               absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 
               px-1 py-1
-              transition-all duration-300 ease-out pointer-events-none
+              pointer-events-none
               ${isChartHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2'}
             `}
           >
@@ -5134,10 +5082,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 ref={simRangeButtonRef}
                 onClick={() => setShowSimRangeMenu((v) => !v)}
                 className={`
-                  flex items-center gap-2 px-2 py-1 rounded-md transition
+                  flex items-center gap-2 px-2 py-1 rounded-md transition border
                   ${isDarkMode
-                    ? "text-white/80 hover:text-white hover:bg-white/5"
-                    : "text-slate-700 hover:text-slate-900 hover:bg-slate-100"
+                    ? "text-white/80 hover:text-white hover:bg-white/5 border-slate-700/50"
+                    : "text-slate-700 hover:text-slate-900 hover:bg-slate-100 border-gray-200"
                   }
                 `}
               >
@@ -5988,6 +5936,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       <Tooltip
                         cursor={false}
                         animationDuration={0}
+                        isAnimationActive={false}
                         content={() => {
                           if (!hoveredDate) return null;
                           const point = simulationEquityData.find((p) => p.date === hoveredDate);
@@ -6126,6 +6075,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     Simulation Comparison
                   </h4>
                   
+                  {/* Common simulation info - outside table */}
+                  {simulationRuns.length > 0 && (
+                    <div className={`mb-3 flex gap-6 text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                      <div>
+                        <span className="font-medium">Days:</span> <span className="font-mono ml-1">{simulationRuns[0].days}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium">First Date:</span> <span className="font-mono ml-1">{simulationRuns[0].firstDate}</span>
+                      </div>
+                      <div>
+                        <span className="font-medium">Last Date:</span> <span className="font-mono ml-1">{simulationRuns[0].lastDate}</span>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className={`p-4 rounded-xl border ${
                     isDarkMode 
                       ? 'bg-transparent border-slate-700/50' 
@@ -6139,66 +6103,216 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       <table className={`min-w-full text-[11px] ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
                         <thead className={`border-b ${isDarkMode ? 'text-slate-400 border-slate-700/70' : 'text-gray-500 border-gray-200'}`}>
                           <tr>
-                            <th className="py-1 pr-3 text-left">Label</th>
-                            <th className="py-1 pr-3 text-right">λ</th>
-                            <th className="py-1 pr-3 text-right">Train%</th>
-                            <th className="py-1 pr-3 text-right">Return</th>
-                            <th className="py-1 pr-3 text-right">Max DD</th>
-                            <th className="py-1 pr-3 text-right">Trades</th>
-                            <th className="py-1 pr-3 text-right">Stop-outs</th>
-                            <th className="py-1 pr-3 text-right">Days</th>
-                            <th className="py-1 pr-3 text-right">First Date</th>
-                            <th className="py-1 pr-3 text-right">Last Date</th>
+                            <th className="py-1 pr-3 text-left">Metric</th>
+                            {simulationRuns.map((run) => (
+                              <th key={run.id} className="py-1 pr-3 text-right">{run.label}</th>
+                            ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {simulationRuns.map((run) => (
-                            <tr
-                              key={run.id}
-                              className={`border-b transition-colors ${
-                                isDarkMode 
-                                  ? 'border-slate-800/60 hover:bg-slate-800/70'
-                                  : 'border-gray-100 hover:bg-gray-50'
-                              }`}
-                            >
-                              <td className="py-1.5 pr-3 font-medium">{run.label}</td>
-                              <td className="py-1.5 pr-3 text-right font-mono">
+                          {/* λ row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium">λ</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
                                 {run.lambda != null ? run.lambda.toFixed(2) : "—"}
                               </td>
-                              <td className="py-1.5 pr-3 text-right font-mono">
+                            ))}
+                          </tr>
+                          {/* Train% row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium">Train%</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
                                 {run.trainFraction != null
                                   ? `${(run.trainFraction * 100).toFixed(0)}%`
                                   : "—"}
                               </td>
-                              <td className={`py-1.5 pr-3 text-right font-mono ${
+                            ))}
+                          </tr>
+                          {/* Return row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium">Return</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-1.5 pr-3 text-right font-mono ${
                                 run.returnPct >= 0 ? 'text-emerald-500' : 'text-rose-500'
                               }`}>
                                 {(run.returnPct * 100).toFixed(1)}%
                               </td>
-                              <td
-                                className={`py-1.5 pr-3 text-right font-mono ${
-                                  run.maxDrawdown * 100 > 50 ? "text-rose-400" : isDarkMode ? "text-slate-200" : "text-gray-700"
-                                }`}
-                              >
+                            ))}
+                          </tr>
+                          {/* Max DD row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium">Max DD</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-1.5 pr-3 text-right font-mono ${
+                                run.maxDrawdown * 100 > 50 ? "text-rose-400" : isDarkMode ? "text-slate-200" : "text-gray-700"
+                              }`}>
                                 {(run.maxDrawdown * 100).toFixed(1)}%
                               </td>
-                              <td className="py-1.5 pr-3 text-right font-mono">
+                            ))}
+                          </tr>
+                          {/* Trades row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium">Trades</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
                                 {run.tradeCount}
                               </td>
-                              <td className={`py-1.5 pr-3 text-right font-mono ${run.stopOutEvents > 0 ? 'text-rose-400' : ''}`}>
+                            ))}
+                          </tr>
+                          {/* Stop-outs row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium">Stop-outs</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-1.5 pr-3 text-right font-mono ${run.stopOutEvents > 0 ? 'text-rose-400' : ''}`}>
                                 {run.stopOutEvents}
                               </td>
-                              <td className="py-1.5 pr-3 text-right font-mono">
-                                {run.days}
+                            ))}
+                          </tr>
+                          
+                          {/* Volatility Section Header */}
+                          <tr className={`${isDarkMode ? 'bg-slate-800/40' : 'bg-gray-50'}`}>
+                            <td colSpan={simulationRuns.length + 1} className="py-2 pr-3 font-semibold text-xs uppercase tracking-wider">
+                              Volatility
+                            </td>
+                          </tr>
+                          
+                          {/* GBM row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">GBM</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
                               </td>
-                              <td className="py-1.5 pr-3 text-right font-mono">
-                                {run.firstDate}
+                            ))}
+                          </tr>
+                          
+                          {/* GARCH Normal row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">GARCH Normal</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
                               </td>
-                              <td className="py-1.5 pr-3 text-right font-mono">
-                                {run.lastDate}
+                            ))}
+                          </tr>
+                          
+                          {/* GARCH Student row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">GARCH (Student)</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
                               </td>
-                            </tr>
-                          ))}
+                            ))}
+                          </tr>
+                          
+                          {/* HAR-RV row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">HAR-RV</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
+                              </td>
+                            ))}
+                          </tr>
+                          
+                          {/* Range Parkinson row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">Range (Parkinson)</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
+                              </td>
+                            ))}
+                          </tr>
+                          
+                          {/* Range Garman-Klass row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">Range (Garman-Klass)</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
+                              </td>
+                            ))}
+                          </tr>
+                          
+                          {/* Range Rogers-Satchell row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">Range (Rogers-Satchell)</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
+                              </td>
+                            ))}
+                          </tr>
+                          
+                          {/* Range Yang-Zhang row */}
+                          <tr className={`border-b transition-colors ${
+                            isDarkMode 
+                              ? 'border-slate-800/60 hover:bg-slate-800/70'
+                              : 'border-gray-100 hover:bg-gray-50'
+                          }`}>
+                            <td className="py-1.5 pr-3 font-medium pl-4">Range (Yang-Zhang)</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className="py-1.5 pr-3 text-right font-mono">
+                                —
+                              </td>
+                            ))}
+                          </tr>
                         </tbody>
                       </table>
                     </div>
@@ -7387,7 +7501,6 @@ const AnimatedPriceDot = (props: any) => {
       strokeWidth={1.5}
       style={{
         filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6)) drop-shadow(0 0 2px rgba(${glowColor}, 0.4))`,
-        transition: 'all 0.12s ease-out',
       }}
     />
   );

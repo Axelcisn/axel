@@ -6016,7 +6016,7 @@ export default function TimingPage({ params }: TimingPageProps) {
                 {companyName || tickerDisplay}
               </h1>
               <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-                <div className="inline-flex items-center gap-2 rounded-full border border-slate-700 bg-black/40 px-3 py-1 text-slate-200">
+                <div className="inline-flex items-center gap-2 rounded-full border border-slate-700/30 backdrop-blur-xl bg-transparent px-3 py-1 text-slate-200">
                   <span className="font-medium">{tickerDisplay}</span>
                 <span className="text-slate-500">·</span>
                 <span>{exchangeDisplay}</span>
