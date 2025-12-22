@@ -27,17 +27,9 @@ import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tra
 import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
 import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
 import { applyActivityMaskToEquitySeries, computeTradeActivityWindow } from "@/lib/backtest/equityActivity";
-import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
 import type { MomentumScorePoint } from "@/lib/indicators/momentum";
 import type { AdxPoint } from "@/lib/indicators/adx";
-
-// Professional cool palette for EWMA overlays
-const SHORT_EWMA_COLOR = '#F22973'; // pink (updated)
-const LONG_EWMA_COLOR  = '#6366F1'; // indigo
-const EWMA_BIASED_COLOR = '#06B6D4'; // cyan for biased EWMA
-const EWMA_BIASED_MAX_COLOR = '#FACC15'; // yellow for biased max
-const EWMA_BIASED_COLOR_RGB = '6, 182, 212';
-const EWMA_BIASED_MAX_COLOR_RGB = '250, 204, 21';
+import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
 
 const SYNC_ID = "timing-sync";
 const CHART_MARGIN = { top: 8, right: 0, left: 0, bottom: 0 };
@@ -90,14 +82,6 @@ const CheckIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
-const makeEwmaDot = (color: string) => (props: any) => {
-  const dot = AnimatedPriceDot(props);
-  if (!dot) return dot;
-  return React.cloneElement(dot as React.ReactElement, {
-    fill: color,
-  });
-};
-
 // Helper function to calculate target date (Date t+h) accounting for business days
 function calculateTargetDate(dateT: string | null, horizon: number): string | null {
   if (!dateT) return null;
@@ -146,6 +130,8 @@ interface ChartPoint {
   volumeColor?: string;
   volumeStroke?: string;
   isFuture?: boolean;
+  momentumScore?: number;
+  adxValue?: number;
   equity?: number | null;
   equityDelta?: number | null;
   // Forecast band values
@@ -167,57 +153,23 @@ interface ChartPoint {
   forecastUncondVar?: number | null;
   forecastGarchDistribution?: string | null;
 
-  // === EWMA Unbiased ===
-  // Past H-day forecast: made at t-H, targeting t (the hovered date)
-  ewma_past_forecast?: number | null;
-  ewma_past_lower?: number | null;
-  ewma_past_upper?: number | null;
-  ewma_past_origin_date?: string | null;  // t-H
-  ewma_past_target_date?: string | null;  // t
-  ewma_past_realized?: number | null;     // close(t) for error
-
-  // Current H-day forecast: made at t, targeting t+H
-  ewma_future_forecast?: number | null;
-  ewma_future_lower?: number | null;
-  ewma_future_upper?: number | null;
-  ewma_future_origin_date?: string | null; // t
-  ewma_future_target_date?: string | null; // t+H
-
-  // Keep legacy fields for rendering lines/bands
-  ewma_forecast?: number | null;
-  ewma_lower?: number | null;
-  ewma_upper?: number | null;
-  ewma_origin_date?: string | null;
-  ewma_realized?: number | null;
-
-  // === EWMA Biased ===
-  ewma_biased_past_forecast?: number | null;
-  ewma_biased_past_lower?: number | null;
-  ewma_biased_past_upper?: number | null;
-  ewma_biased_past_origin_date?: string | null;
-  ewma_biased_past_target_date?: string | null;
-  ewma_biased_past_realized?: number | null;
-
-  ewma_biased_future_forecast?: number | null;
-  ewma_biased_future_lower?: number | null;
-  ewma_biased_future_upper?: number | null;
-  ewma_biased_future_origin_date?: string | null;
-  ewma_biased_future_target_date?: string | null;
-
-  ewma_biased_forecast?: number | null;
-  ewma_biased_lower?: number | null;
-  ewma_biased_upper?: number | null;
-  ewma_biased_origin_date?: string | null;
-  ewma_biased_realized?: number | null;
-
   // Trend overlays (simple EWMA pair)
   trendEwmaShort?: number | null;
   trendEwmaLong?: number | null;
-
-  // === EWMA crossover overlays ===
-  ewma_short?: number | null;
-  ewma_long?: number | null;
 };
+
+export interface TrendEwmaPoint {
+  date: string;
+  value: number;
+}
+
+export interface TrendEwmaSignal {
+  date: string;
+  type: "bullish" | "bearish";
+}
+
+const TREND_EWMA_SHORT_COLOR = "#facc15"; // amber/yellow
+const TREND_EWMA_LONG_COLOR = "#3b82f6";  // blue
 
 /**
  * Normalize a date-like string into YYYY-MM-DD to keep chart + overlay data aligned.
@@ -239,18 +191,6 @@ interface ForecastOverlayProps {
   volModel?: string;
   coverage?: number;
   conformalState?: any | null;
-}
-
-/** EWMA Walker path point for chart overlay */
-export interface EwmaWalkerPathPoint {
-  date_t: string;
-  date_tp1: string;
-  S_t: number;
-  S_tp1: number;
-  y_hat_tp1: number;
-  L_tp1: number;
-  U_tp1: number;
-  sigma_t: number;
 }
 
 type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
@@ -306,39 +246,11 @@ interface HorizonCoverageProps {
   // Model parameters
   windowSize?: number;
   onWindowSizeChange?: (size: number) => void;
-  ewmaLambda?: number;
-  onEwmaLambdaChange?: (lambda: number) => void;
   degreesOfFreedom?: number;
   onDegreesOfFreedomChange?: (df: number) => void;
   // GBM parameters
   gbmLambda?: number;
   onGbmLambdaChange?: (lambda: number) => void;
-}
-
-/** EWMA Walker summary statistics for hover card */
-export interface EwmaSummary {
-  coverage: number;
-  targetCoverage: number;
-  intervalScore: number;
-  avgWidth: number;
-  zMean: number;
-  zStd: number;
-  directionHitRate: number;
-  nPoints: number;
-}
-
-/** Props for EWMA Reaction Map dropdown controls */
-export interface EwmaReactionMapDropdownProps {
-  reactionLambda: number;
-  setReactionLambda: (v: number) => void;
-  reactionTrainFraction: number;
-  setReactionTrainFraction: (v: number) => void;
-  onMaximize: () => void;
-  onReset: () => void;  // Reset callback to clear maximized state
-  isLoadingReaction: boolean;
-  isOptimizingReaction: boolean;
-  isMaximized: boolean;  // Whether the biased EWMA has been optimized
-  hasOptimizationResults: boolean;  // Whether optimization results are available to apply
 }
 
 /** Trade information from Trading212 simulation */
@@ -400,19 +312,6 @@ export type TrendOverlayState = {
   adx: boolean;
 };
 
-interface TrendEwmaPoint {
-  date: string;
-  value: number;
-}
-
-interface TrendEwmaSignal {
-  date: string;
-  type: 'bullish' | 'bearish';
-}
-
-const TREND_EWMA_SHORT_COLOR = "#fbbf24"; // Yellow (amber-400)
-const TREND_EWMA_LONG_COLOR = "#3b82f6";  // Blue
-
 interface PriceChartProps {
   symbol: string;
   className?: string;
@@ -422,35 +321,20 @@ interface PriceChartProps {
   forecastOverlay?: ForecastOverlayProps;
   volSelectionKey?: string;  // Stable key for vol model selection (for transition tracking)
   isVolForecastLoading?: boolean;  // True while volatility forecast is being fetched
-  ewmaPath?: EwmaWalkerPathPoint[] | null;
-  ewmaSummary?: EwmaSummary | null;
-  ewmaBiasedPath?: EwmaWalkerPathPoint[] | null;
-  ewmaBiasedSummary?: EwmaSummary | null;
-  /**
-   * Optional dedicated max-config biased EWMA path (keeps baseline params untouched).
-   */
-  ewmaBiasedMaxPath?: EwmaWalkerPathPoint[] | null;
-  ewmaBiasedMaxSummary?: EwmaSummary | null;
-  ewmaShortSeries?: EwmaPoint[];
-  ewmaLongSeries?: EwmaPoint[];
-  ewmaShortWindow?: number;
-  ewmaLongWindow?: number;
   momentumScoreSeries?: MomentumScorePoint[];
   momentumPeriod?: number;
   adxSeries?: AdxPoint[];
   adxPeriod?: number;
   trendOverlays?: TrendOverlayState;
-  trendEwmaShort?: TrendEwmaPoint[];
-  trendEwmaLong?: TrendEwmaPoint[];
-  trendEwmaCrossSignals?: TrendEwmaSignal[];
-  onToggleEwmaTrend?: () => void;
-  onLoadEwmaUnbiased?: () => void;
-  onLoadEwmaBiased?: () => void;
-  onLoadEwmaBiasedMax?: () => void;
-  isLoadingEwmaBiased?: boolean;
-  isLoadingEwmaBiasedMax?: boolean;
-  onSelectBiasedMaxObjective?: (obj: "calmar") => void;
-  ewmaReactionMapDropdown?: EwmaReactionMapDropdownProps;  // Dropdown controls for (⋯) button
+  showTrendEwma?: boolean;
+  onToggleEwmaTrend?: (next: boolean) => void;
+  ewmaShortWindow?: number;
+  ewmaLongWindow?: number;
+  ewmaShortSeries?: EwmaPoint[] | null;
+  ewmaLongSeries?: EwmaPoint[] | null;
+  trendEwmaShort?: TrendEwmaPoint[] | null;
+  trendEwmaLong?: TrendEwmaPoint[] | null;
+  trendEwmaCrossSignals?: TrendEwmaSignal[] | null;
   horizonCoverage?: HorizonCoverageProps;
   tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
   t212AccountHistory?: Trading212AccountSnapshot[] | null;  // Equity curve from Trading212 simulation
@@ -464,7 +348,6 @@ interface PriceChartProps {
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
   t212ThresholdFrac: number;
   t212CostBps: number;
-  ewmaShrinkK: number;
   t212ZMode: "auto" | "manual" | "optimize";
   t212SignalRule: "bps" | "z";
   t212ZDisplayThresholds?: {
@@ -516,7 +399,6 @@ interface PriceChartProps {
   onChangeT212PositionFraction?: (v: number) => void;
   onChangeT212ThresholdPct?: (v: number) => void;
   onChangeT212CostBps?: (v: number) => void;
-  onChangeEwmaShrinkK?: (v: number) => void;
   onOptimizeZThresholds?: () => void;
   hasMaxRun?: boolean;
   trendWeight?: number | null;
@@ -553,39 +435,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   forecastOverlay,
   volSelectionKey,
   isVolForecastLoading,
-  ewmaPath,
-  ewmaSummary,
-  ewmaBiasedPath,
-  ewmaBiasedSummary,
-  ewmaBiasedMaxPath,
-  ewmaBiasedMaxSummary,
-  ewmaShortSeries,
-  ewmaLongSeries,
-  ewmaShortWindow,
-  ewmaLongWindow,
   momentumScoreSeries,
   momentumPeriod,
   adxSeries,
   adxPeriod,
   trendOverlays,
+  showTrendEwma: showTrendEwmaProp,
+  onToggleEwmaTrend,
+  ewmaShortWindow,
+  ewmaLongWindow,
+  ewmaShortSeries,
+  ewmaLongSeries,
   trendEwmaShort,
   trendEwmaLong,
   trendEwmaCrossSignals,
-  onToggleEwmaTrend,
-  onLoadEwmaUnbiased,
-  onLoadEwmaBiased,
-  onLoadEwmaBiasedMax,
-  isLoadingEwmaBiased,
-  isLoadingEwmaBiasedMax,
-  onSelectBiasedMaxObjective,
-  ewmaReactionMapDropdown,
   horizonCoverage,
   t212InitialEquity,
   t212Leverage,
   t212PositionFraction,
   t212ThresholdFrac,
   t212CostBps,
-  ewmaShrinkK,
   t212ZMode,
   t212SignalRule,
   t212ZDisplayThresholds,
@@ -598,7 +467,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onChangeT212PositionFraction,
   onChangeT212ThresholdPct,
   onChangeT212CostBps,
-  onChangeEwmaShrinkK,
   onOptimizeZThresholds,
   tradeOverlays,
   t212AccountHistory,
@@ -618,121 +486,30 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
-  const showTrendEwma = trendOverlays?.ewma ?? false;
-  const shortSeries = useMemo(() => ewmaShortSeries ?? [], [ewmaShortSeries]);
-  const longSeries = useMemo(() => ewmaLongSeries ?? [], [ewmaLongSeries]);
-  const trendShortSeries = useMemo(() => trendEwmaShort ?? [], [trendEwmaShort]);
-  const trendLongSeries = useMemo(() => trendEwmaLong ?? [], [trendEwmaLong]);
   const momentumSeries = useMemo(() => momentumScoreSeries ?? [], [momentumScoreSeries]);
   const adxSeriesSafe = useMemo(() => adxSeries ?? [], [adxSeries]);
-  const hasEwmaShort = showTrendEwma && trendShortSeries.length > 0;
-  const hasEwmaLong = showTrendEwma && trendLongSeries.length > 0;
-  const shortWindowLabel = ewmaShortWindow;
-  const longWindowLabel = ewmaLongWindow;
   const hasMomentumScore = momentumSeries.length > 0;
   const hasMomentumScorePane = hasMomentumScore || adxSeriesSafe.length > 0;
-  const showUnbiasedEwma = simulationMode.baseMode === "unbiased";
-  const showBiasedEwma = simulationMode.baseMode === "biased" || simulationMode.baseMode === "max";
-  const isMaxBaseMode = simulationMode.baseMode === "max";
-  const ewmaHasOptimizationResults = ewmaReactionMapDropdown?.hasOptimizationResults ?? false;
-  const ewmaIsMaximizedFlag = ewmaReactionMapDropdown?.isMaximized ?? false;
-  const ewmaOnMaximize = ewmaReactionMapDropdown?.onMaximize;
-  const ewmaOnReset = ewmaReactionMapDropdown?.onReset;
-  const activeEwmaBiasedPath = useMemo(() => {
-    if (simulationMode.baseMode === "max") {
-      if (ewmaBiasedMaxPath && ewmaBiasedMaxPath.length > 0) {
-        return ewmaBiasedMaxPath;
-      }
-      return ewmaBiasedPath;
-    }
-    return ewmaBiasedPath;
-  }, [simulationMode.baseMode, ewmaBiasedMaxPath, ewmaBiasedPath]);
+  const showTrendEwma = trendOverlays?.ewma ?? (showTrendEwmaProp ?? true);
+  const trendShortSeries = useMemo(() => trendEwmaShort ?? ewmaShortSeries ?? null, [ewmaShortSeries, trendEwmaShort]);
+  const trendLongSeries = useMemo(() => trendEwmaLong ?? ewmaLongSeries ?? null, [ewmaLongSeries, trendEwmaLong]);
+  const trendEwmaShortMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (trendShortSeries ?? []).forEach((p) => {
+      if (!Number.isFinite(p.value)) return;
+      map.set(normalizeDateString(p.date), p.value);
+    });
+    return map;
+  }, [trendShortSeries]);
+  const trendEwmaLongMap = useMemo(() => {
+    const map = new Map<string, number>();
+    (trendLongSeries ?? []).forEach((p) => {
+      if (!Number.isFinite(p.value)) return;
+      map.set(normalizeDateString(p.date), p.value);
+    });
+    return map;
+  }, [trendLongSeries]);
 
-  // One-shot request tracking to prevent duplicate loads while in-flight
-  const requestedRef = useRef({ unbiased: false, biased: false, max: false });
-
-  // Reset request flags when symbol changes
-  useEffect(() => {
-    requestedRef.current = { unbiased: false, biased: false, max: false };
-  }, [symbol]);
-
-  // Reset specific request flag when mode is disabled
-  useEffect(() => {
-    if (!showUnbiasedEwma) {
-      requestedRef.current.unbiased = false;
-    }
-  }, [showUnbiasedEwma]);
-
-  useEffect(() => {
-    if (!showBiasedEwma) {
-      requestedRef.current.biased = false;
-      requestedRef.current.max = false;
-    }
-  }, [showBiasedEwma]);
-
-  // Ensure the active EWMA path for the selected base mode is loaded
-  // Callbacks are now stable from parent, safe to include in dependencies
-  // One-shot refs prevent duplicate calls while loading
-  useEffect(() => {
-    // Dev-only guard: log trigger key to verify effect runs only when intended
-    if (process.env.NODE_ENV !== "production") {
-      const triggerKey = `${symbol}-mode:${simulationMode.baseMode}-unbiased:${showUnbiasedEwma}-biased:${showBiasedEwma}-paths:${ewmaPath?.length ?? 0}/${ewmaBiasedPath?.length ?? 0}/${ewmaBiasedMaxPath?.length ?? 0}-loading:${isLoadingEwmaBiased}/${isLoadingEwmaBiasedMax}-requested:${requestedRef.current.unbiased}/${requestedRef.current.biased}/${requestedRef.current.max}`;
-      console.debug("[PriceChart EWMA Load Effect]", triggerKey);
-    }
-
-    // Compute whether we have data for each mode
-    const hasUnbiased = (ewmaPath?.length ?? 0) > 0;
-    const hasBiased = (ewmaBiasedPath?.length ?? 0) > 0;
-    const hasMax = (ewmaBiasedMaxPath?.length ?? 0) > 0;
-
-    if (showUnbiasedEwma) {
-      // Load unbiased if: no data, not loading, not already requested, callback exists
-      if (!hasUnbiased && !requestedRef.current.unbiased && onLoadEwmaUnbiased) {
-        requestedRef.current.unbiased = true;
-        onLoadEwmaUnbiased();
-      }
-    } else if (showBiasedEwma) {
-      const wantsMax = simulationMode.baseMode === "max";
-      
-      if (wantsMax) {
-        // Load max path if: no data, not loading, not already requested, callback exists
-        if (
-          !hasMax &&
-          !isLoadingEwmaBiasedMax &&
-          !requestedRef.current.max &&
-          onLoadEwmaBiasedMax
-        ) {
-          requestedRef.current.max = true;
-          onLoadEwmaBiasedMax();
-        }
-      } else {
-        // Load standard biased path if: no data, not loading, not already requested, callback exists
-        if (
-          !hasBiased &&
-          !isLoadingEwmaBiased &&
-          !requestedRef.current.biased &&
-          onLoadEwmaBiased
-        ) {
-          requestedRef.current.biased = true;
-          onLoadEwmaBiased();
-        }
-      }
-    }
-  }, [
-    symbol,
-    showUnbiasedEwma,
-    showBiasedEwma,
-    ewmaPath,
-    ewmaBiasedPath,
-    ewmaBiasedMaxPath,
-    onLoadEwmaUnbiased,
-    onLoadEwmaBiased,
-    onLoadEwmaBiasedMax,
-    isLoadingEwmaBiased,
-    isLoadingEwmaBiasedMax,
-    simulationMode.baseMode,
-  ]);
-  
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
   const [showRangeDropdown, setShowRangeDropdown] = useState(false);
@@ -740,11 +517,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Model Settings dropdown state (⋯ button next to Model)
   const [showModelSettingsDropdown, setShowModelSettingsDropdown] = useState(false);
   const modelSettingsDropdownRef = useRef<HTMLDivElement>(null);
+  
+  // Main Settings dropdown state (consolidated settings button next to List of trades)
+  const [showMainSettingsDropdown, setShowMainSettingsDropdown] = useState(false);
+  const mainSettingsDropdownRef = useRef<HTMLDivElement>(null);
 
   // Simulation Settings dropdown state
-  const [showSimulationSettingsDropdown, setShowSimulationSettingsDropdown] = useState(false);
-  const [showBiasedMaxObjectiveMenu, setShowBiasedMaxObjectiveMenu] = useState(false);
-  const simulationSettingsDropdownRef = useRef<HTMLDivElement>(null);
   const simRangeDropdownRef = useRef<HTMLDivElement>(null);
   const simRangeButtonRef = useRef<HTMLButtonElement>(null);
   const [simRangeMenuWidth, setSimRangeMenuWidth] = useState<number | null>(null);
@@ -752,7 +530,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [positionPctInput, setPositionPctInput] = useState<string>(() => `${(t212PositionFraction ?? 0) * 100}`);
   const [thresholdInput, setThresholdInput] = useState<string>(() => `${t212ThresholdFrac * 10000}`);
   const [costInput, setCostInput] = useState<string>(() => `${t212CostBps}`);
-  const [shrinkKInput, setShrinkKInput] = useState<string>(() => `${ewmaShrinkK}`);
   const [confirmApplyOptimized, setConfirmApplyOptimized] = useState(false);
 
   useEffect(() => {
@@ -772,18 +549,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [t212CostBps]);
 
   useEffect(() => {
-    setShrinkKInput(`${ewmaShrinkK}`);
-  }, [ewmaShrinkK]);
-
-  useEffect(() => {
     setConfirmApplyOptimized(false);
   }, [t212ZOptimized, t212ZMode]);
-
-  useEffect(() => {
-    if (simulationMode.baseMode !== "max") {
-      setShowBiasedMaxObjectiveMenu(false);
-    }
-  }, [simulationMode.baseMode]);
 
   useEffect(() => {
     if (!confirmApplyOptimized) return;
@@ -847,20 +614,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       setCostInput(`${clamped}`);
     },
     [onChangeT212CostBps, t212CostBps]
-  );
-
-  const commitShrinkK = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num)) {
-        setShrinkKInput(`${ewmaShrinkK}`);
-        return;
-      }
-      const clamped = Math.max(0, Math.min(1, Math.round(num * 100) / 100));
-      onChangeEwmaShrinkK?.(clamped);
-      setShrinkKInput(`${clamped}`);
-    },
-    [ewmaShrinkK, onChangeEwmaShrinkK]
   );
 
   const formatScoreDisplay = useCallback((value: number) => {
@@ -960,18 +713,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showModelSettingsDropdown]);
   
-  // Click outside to close Simulation settings dropdown
-  useEffect(() => {
-    if (!showSimulationSettingsDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (simulationSettingsDropdownRef.current && !simulationSettingsDropdownRef.current.contains(e.target as Node)) {
-        setShowSimulationSettingsDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showSimulationSettingsDropdown]);
-  
   useEffect(() => {
     if (!showSimRangeMenu) return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -1053,8 +794,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         elapsedMs: Math.round(elapsedMs),
         symbol,
         selectedRange,
-        showUnbiasedEwma,
-        showBiasedEwma,
       });
       renderCounterRef.current = 0;
       renderStartRef.current = performance.now();
@@ -1917,24 +1656,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return generatedFuture;
   }, [lastDateStr, allDates, h]);
 
-  const ewmaShortMap = useMemo(() => {
-    const map = new Map<string, number>();
-    shortSeries.forEach((p) => {
-      if (!Number.isFinite(p.value)) return;
-      map.set(normalizeDateString(p.date), p.value);
-    });
-    return map;
-  }, [shortSeries]);
-
-  const ewmaLongMap = useMemo(() => {
-    const map = new Map<string, number>();
-    longSeries.forEach((p) => {
-      if (!Number.isFinite(p.value)) return;
-      map.set(normalizeDateString(p.date), p.value);
-    });
-    return map;
-  }, [longSeries]);
-
   const momentumMap = useMemo(() => {
     const map = new Map<string, number>();
     momentumSeries.forEach((p) => {
@@ -1952,35 +1673,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
     return map;
   }, [adxSeriesSafe]);
-
-  const trendEwmaShortMap = useMemo(() => {
-    if (!showTrendEwma) return null;
-    const map = new Map<string, number>();
-    trendShortSeries.forEach((p) => {
-      if (!Number.isFinite(p.value)) return;
-      map.set(normalizeDateString(p.date), p.value);
-    });
-    const keys = Array.from(map.keys());
-    const values = Array.from(map.values());
-    console.log("[PriceChart] trendEwmaShortMap:", {
-      size: map.size,
-      firstDates: keys.slice(0, 3),
-      lastDates: keys.slice(-3),
-      firstValues: values.slice(0, 3),
-      lastValues: values.slice(-3),
-    });
-    return map;
-  }, [trendShortSeries, showTrendEwma]);
-
-  const trendEwmaLongMap = useMemo(() => {
-    if (!showTrendEwma) return null;
-    const map = new Map<string, number>();
-    trendLongSeries.forEach((p) => {
-      if (!Number.isFinite(p.value)) return;
-      map.set(normalizeDateString(p.date), p.value);
-    });
-    return map;
-  }, [trendLongSeries, showTrendEwma]);
 
   const priceByDate = useMemo(() => {
     const map = new Map<string, PricePoint>();
@@ -2008,12 +1700,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         low,
         close,
         volume,
-        ewma_short: showTrendEwma ? ewmaShortMap.get(date) ?? null : null,
-        ewma_long: showTrendEwma ? ewmaLongMap.get(date) ?? null : null,
-        trendEwmaShort:
-          showTrendEwma && trendEwmaShortMap ? trendEwmaShortMap.get(date) ?? null : null,
-        trendEwmaLong:
-          showTrendEwma && trendEwmaLongMap ? trendEwmaLongMap.get(date) ?? null : null,
+        trendEwmaShort: trendEwmaShortMap.get(date) ?? null,
+        trendEwmaLong: trendEwmaLongMap.get(date) ?? null,
         momentumScore: momentumMap.get(date),
         adxValue: adxMap.get(date),
         volumeColor: isBullish ? "rgba(52, 211, 153, 0.35)" : "rgba(251, 113, 133, 0.35)",
@@ -2023,78 +1711,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [
     adxMap,
-    ewmaLongMap,
-    ewmaShortMap,
-    momentumMap,
-    priceByDate,
-    showTrendEwma,
-    syncedDates,
     trendEwmaLongMap,
     trendEwmaShortMap,
+    momentumMap,
+    priceByDate,
+    syncedDates,
   ]);
-
-  const trendCrossPoints = useMemo(() => {
-    if (!showTrendEwma) return [];
-    if (!chartData || chartData.length === 0) return [];
-    if (!trendEwmaCrossSignals || trendEwmaCrossSignals.length === 0) return [];
-
-    return trendEwmaCrossSignals
-      .map((signal) => {
-        const dataPoint = chartData.find(
-          (d) => normalizeDateString(d.date) === normalizeDateString(signal.date)
-        );
-        if (!dataPoint || dataPoint.close == null) return null;
-        const date = dataPoint.date;
-
-        // Scatter uses the chart's X-axis dataKey ("date"), so include it explicitly
-        return {
-          date,
-          x: date,
-          y: dataPoint.close,
-          type: signal.type as "bullish" | "bearish",
-        };
-      })
-      .filter(
-        (
-          p
-        ): p is {
-          date: string;
-          x: string;
-          y: number;
-          type: "bullish" | "bearish";
-        } => !!p
-      );
-  }, [chartData, trendEwmaCrossSignals, showTrendEwma]);
-
-  useEffect(() => {
-    if (!showTrendEwma) return;
-    if (trendCrossPoints.length > 0) {
-      console.log("[PriceChart] trendCrossPoints sample", {
-        range: selectedRange,
-        sample: trendCrossPoints.slice(0, 5),
-      });
-    }
-    const invalidCross = trendCrossPoints.filter(
-      (p) => p.y == null || Number.isNaN(p.y) || p.x == null
-    );
-    if (invalidCross.length > 0) {
-      console.log("[PriceChart] invalid trendCrossPoints", {
-        range: selectedRange,
-        sample: invalidCross.slice(0, 5),
-      });
-    }
-  }, [trendCrossPoints, showTrendEwma, selectedRange]);
-
-  // Check if chartData actually has any trend EWMA values (not just if props have data)
-  const chartHasTrendEwmaShort = useMemo(() => {
-    return chartData.some(p => p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort));
-  }, [chartData]);
-
-  const chartHasTrendEwmaLong = useMemo(() => {
-    return chartData.some(p => p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong));
-  }, [chartData]);
-
-  const hasTrendEwmaData = chartHasTrendEwmaShort || chartHasTrendEwmaLong;
 
   const renderTrendArrow = useCallback((props: any): React.ReactElement => {
     const { cx, cy, payload } = props;
@@ -2116,288 +1738,32 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return <g />;
   }, []);
 
-  // Merge EWMA forecast paths (neutral and biased) into chartData for overlay
-  const chartDataWithEwma = useMemo(() => {
-    const showNeutral = showUnbiasedEwma && ewmaPath && ewmaPath.length > 0;
-    const showBiased = showBiasedEwma && activeEwmaBiasedPath && activeEwmaBiasedPath.length > 0;
-    
-    if (!showNeutral && !showBiased) {
-      return chartData;
-    }
+  const trendCrossPoints = useMemo(() => {
+    if (!trendEwmaCrossSignals || trendEwmaCrossSignals.length === 0) return [];
+    return trendEwmaCrossSignals
+      .map((signal) => {
+        const date = normalizeDateString(signal.date);
+        const price = priceByDate.get(date)?.close ?? null;
+        if (price == null) return null;
+        return { x: date, y: price, type: signal.type };
+      })
+      .filter(
+        (p): p is { x: string; y: number; type: "bullish" | "bearish" } => p != null
+      );
+  }, [priceByDate, trendEwmaCrossSignals]);
 
-    // Build maps of date_tp1 -> EWMA values (forecast, lower, upper)
-    // The EWMA walker forecasts FOR date_tp1 (target date, t+h) using data available at date_t
-    // So we plot y_hat_tp1 at date_tp1 (the h-step target date)
-    
-    // Past map: key = target date (t), value = forecast made at t-H
-    const ewmaPastMap = new Map<
-      string,
-      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string; realized: number }
-    >();
+  const chartHasTrendEwmaShort = useMemo(
+    () => chartData.some((p) => p.trendEwmaShort != null),
+    [chartData]
+  );
+  const chartHasTrendEwmaLong = useMemo(
+    () => chartData.some((p) => p.trendEwmaLong != null),
+    [chartData]
+  );
+  const hasTrendEwmaData = chartHasTrendEwmaShort || chartHasTrendEwmaLong;
 
-    // Future map: key = origin date (t), value = forecast made at t for t+H
-    const ewmaFutureMap = new Map<
-      string,
-      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string }
-    >();
-
-    if (showNeutral && ewmaPath) {
-      ewmaPath.forEach(point => {
-        const targetDate = normalizeDateString(point.date_tp1);
-        const originDate = normalizeDateString(point.date_t);
-
-        // Past: we view this as the H-day forecast *for* targetDate
-        ewmaPastMap.set(targetDate, {
-          forecast: point.y_hat_tp1,
-          lower: point.L_tp1,
-          upper: point.U_tp1,
-          originDate: originDate,
-          targetDate,
-          realized: point.S_tp1,
-        });
-
-        // Future: we can also see this as "from originDate to targetDate"
-        // keying by originDate gives us the forecast t -> t+H
-        ewmaFutureMap.set(originDate, {
-          forecast: point.y_hat_tp1,
-          lower: point.L_tp1,
-          upper: point.U_tp1,
-          originDate,
-          targetDate,
-        });
-      });
-    }
-
-    // Biased EWMA maps
-    const ewmaBiasedPastMap = new Map<
-      string,
-      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string; realized: number }
-    >();
-    const ewmaBiasedFutureMap = new Map<
-      string,
-      { forecast: number; lower: number; upper: number; originDate: string; targetDate: string }
-    >();
-
-    if (showBiased && activeEwmaBiasedPath) {
-      activeEwmaBiasedPath.forEach(point => {
-        const targetDate = normalizeDateString(point.date_tp1);
-        const originDate = normalizeDateString(point.date_t);
-
-        ewmaBiasedPastMap.set(targetDate, {
-          forecast: point.y_hat_tp1,
-          lower: point.L_tp1,
-          upper: point.U_tp1,
-          originDate,
-          targetDate,
-          realized: point.S_tp1,
-        });
-
-        ewmaBiasedFutureMap.set(originDate, {
-          forecast: point.y_hat_tp1,
-          lower: point.L_tp1,
-          upper: point.U_tp1,
-          originDate,
-          targetDate,
-        });
-      });
-    }
-
-    // Build a sorted list of all forecasts by origin date for finding "latest unrealized" forecast
-    const allEwmaForecasts = showNeutral && ewmaPath 
-      ? ewmaPath.map(point => ({
-          originDate: normalizeDateString(point.date_t),
-          targetDate: normalizeDateString(point.date_tp1),
-          forecast: point.y_hat_tp1,
-          lower: point.L_tp1,
-          upper: point.U_tp1,
-        })).sort((a, b) => a.originDate.localeCompare(b.originDate))
-      : [];
-
-    const allEwmaBiasedForecasts = showBiased && activeEwmaBiasedPath
-      ? activeEwmaBiasedPath.map(point => ({
-          originDate: normalizeDateString(point.date_t),
-          targetDate: normalizeDateString(point.date_tp1),
-          forecast: point.y_hat_tp1,
-          lower: point.L_tp1,
-          upper: point.U_tp1,
-        })).sort((a, b) => a.originDate.localeCompare(b.originDate))
-      : [];
-
-    // Helper to find the most recent forecast made ON or BEFORE currentDate whose target is > currentDate
-    const findCurrentUnrealizedForecast = (
-      forecasts: typeof allEwmaForecasts,
-      currentDate: string
-    ) => {
-      // Find forecasts where:
-      // 1. originDate <= currentDate (made on or before the hovered date)
-      // 2. targetDate > currentDate (not yet realized)
-      // Return the one with the latest originDate (most recent forecast made up to this date)
-      let best: typeof forecasts[0] | null = null;
-      for (const f of forecasts) {
-        if (f.originDate <= currentDate && f.targetDate > currentDate) {
-          if (!best || f.originDate > best.originDate) {
-            best = f;
-          }
-        }
-      }
-      return best;
-    };
-
-    // Add EWMA fields to chartData points
-    const result: ChartPoint[] = chartData.map(point => {
-      const chartDate = normalizeDateString(point.date);
-      
-      const past = ewmaPastMap.get(chartDate);
-      const future = ewmaFutureMap.get(chartDate);
-      const biasedPast = ewmaBiasedPastMap.get(chartDate);
-      const biasedFuture = ewmaBiasedFutureMap.get(chartDate);
-
-      // For the "future" column, if no forecast was made ON this date,
-      // find the most recent forecast made on or before this date whose target is still unrealized
-      const unrealizedEwma = !future ? findCurrentUnrealizedForecast(allEwmaForecasts, chartDate) : null;
-      const unrealizedBiased = !biasedFuture ? findCurrentUnrealizedForecast(allEwmaBiasedForecasts, chartDate) : null;
-
-      const effectiveFuture = future || (unrealizedEwma ? {
-        forecast: unrealizedEwma.forecast,
-        lower: unrealizedEwma.lower,
-        upper: unrealizedEwma.upper,
-        originDate: unrealizedEwma.originDate,
-        targetDate: unrealizedEwma.targetDate,
-      } : null);
-
-      const effectiveBiasedFuture = biasedFuture || (unrealizedBiased ? {
-        forecast: unrealizedBiased.forecast,
-        lower: unrealizedBiased.lower,
-        upper: unrealizedBiased.upper,
-        originDate: unrealizedBiased.originDate,
-        targetDate: unrealizedBiased.targetDate,
-      } : null);
-
-      return {
-        ...point,
-
-        // Unbiased EWMA - past H-day forecast (t-H -> t)
-        ewma_past_forecast: past?.forecast ?? null,
-        ewma_past_lower: past?.lower ?? null,
-        ewma_past_upper: past?.upper ?? null,
-        ewma_past_origin_date: past?.originDate ?? null,
-        ewma_past_target_date: past?.targetDate ?? null,
-        ewma_past_realized: past?.realized ?? null,
-
-        // Unbiased EWMA - current H-day forecast (t -> t+H, or latest unrealized)
-        ewma_future_forecast: effectiveFuture?.forecast ?? null,
-        ewma_future_lower: effectiveFuture?.lower ?? null,
-        ewma_future_upper: effectiveFuture?.upper ?? null,
-        ewma_future_origin_date: effectiveFuture?.originDate ?? null,
-        ewma_future_target_date: effectiveFuture?.targetDate ?? null,
-
-        // Keep legacy fields pointing to "past" so existing lines/bands keep working
-        ewma_forecast: past?.forecast ?? null,
-        ewma_lower: past?.lower ?? null,
-        ewma_upper: past?.upper ?? null,
-        ewma_origin_date: past?.originDate ?? null,
-        ewma_realized: past?.realized ?? null,
-
-        // Biased EWMA - past
-        ewma_biased_past_forecast: biasedPast?.forecast ?? null,
-        ewma_biased_past_lower: biasedPast?.lower ?? null,
-        ewma_biased_past_upper: biasedPast?.upper ?? null,
-        ewma_biased_past_origin_date: biasedPast?.originDate ?? null,
-        ewma_biased_past_target_date: biasedPast?.targetDate ?? null,
-        ewma_biased_past_realized: biasedPast?.realized ?? null,
-
-        // Biased EWMA - future (or latest unrealized)
-        ewma_biased_future_forecast: effectiveBiasedFuture?.forecast ?? null,
-        ewma_biased_future_lower: effectiveBiasedFuture?.lower ?? null,
-        ewma_biased_future_upper: effectiveBiasedFuture?.upper ?? null,
-        ewma_biased_future_origin_date: effectiveBiasedFuture?.originDate ?? null,
-        ewma_biased_future_target_date: effectiveBiasedFuture?.targetDate ?? null,
-
-        // Legacy biased fields
-        ewma_biased_forecast: biasedPast?.forecast ?? null,
-        ewma_biased_lower: biasedPast?.lower ?? null,
-        ewma_biased_upper: biasedPast?.upper ?? null,
-        ewma_biased_origin_date: biasedPast?.originDate ?? null,
-        ewma_biased_realized: biasedPast?.realized ?? null,
-      };
-    });
-
-    // Helper function to interpolate gaps for a given set of fields
-    const interpolateGaps = (
-      data: ChartPoint[],
-      forecastKey: 'ewma_forecast' | 'ewma_biased_forecast',
-      lowerKey: 'ewma_lower' | 'ewma_biased_lower',
-      upperKey: 'ewma_upper' | 'ewma_biased_upper'
-    ) => {
-      for (let i = 0; i < data.length; i++) {
-        if (data[i][forecastKey] != null) continue;
-
-        const gapStartIndex = i - 1;
-        if (gapStartIndex < 0 || data[gapStartIndex][forecastKey] == null) {
-          continue;
-        }
-
-        let gapEndIndex = i;
-        while (
-          gapEndIndex < data.length &&
-          data[gapEndIndex][forecastKey] == null
-        ) {
-          gapEndIndex++;
-        }
-
-        if (gapEndIndex >= data.length || data[gapEndIndex][forecastKey] == null) {
-          break;
-        }
-
-        const prev = data[gapStartIndex];
-        const next = data[gapEndIndex];
-        const totalSteps = gapEndIndex - gapStartIndex;
-
-        for (let step = 1; step < totalSteps; step++) {
-          const idx = gapStartIndex + step;
-          const t = step / totalSteps;
-
-          const prevLower = prev[lowerKey];
-          const nextLower = next[lowerKey];
-          const interpolatedLower: number | null =
-            prevLower != null && nextLower != null
-              ? prevLower + t * (nextLower - prevLower)
-              : null;
-              
-          const prevUpper = prev[upperKey];
-          const nextUpper = next[upperKey];
-          const interpolatedUpper: number | null =
-            prevUpper != null && nextUpper != null
-              ? prevUpper + t * (nextUpper - prevUpper)
-              : null;
-
-          const prevForecast = prev[forecastKey]!;
-          const nextForecast = next[forecastKey]!;
-
-          data[idx] = {
-            ...data[idx],
-            [forecastKey]: prevForecast + t * (nextForecast - prevForecast),
-            [lowerKey]: interpolatedLower,
-            [upperKey]: interpolatedUpper,
-          };
-        }
-
-        i = gapEndIndex;
-      }
-    };
-
-    // Interpolate gaps for neutral EWMA
-    if (showNeutral) {
-      interpolateGaps(result, 'ewma_forecast', 'ewma_lower', 'ewma_upper');
-    }
-    
-    // Interpolate gaps for biased EWMA
-    if (showBiased) {
-      interpolateGaps(result, 'ewma_biased_forecast', 'ewma_biased_lower', 'ewma_biased_upper');
-    }
-
-    return result;
-  }, [chartData, ewmaPath, showUnbiasedEwma, activeEwmaBiasedPath, showBiasedEwma]);
+  // Trend overlays are merged directly into chartData; keep alias for downstream code
+  const chartDataWithEwma = chartData;
 
   // Find last chart points
   const lastChartPoint = chartDataWithEwma[chartDataWithEwma.length - 1];
@@ -2786,7 +2152,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   // Create chart data with forecast band for rendering the connecting lines and filled area
   const chartDataWithForecastBand = useMemo(() => {
     // Start with the EWMA-merged data - ALWAYS null out forecast fields to prevent undefined/0 leakage
-    let data = chartDataWithEwma.map(point => ({
+    let data = chartData.map(point => ({
       ...point,
       forecastCenter: null as number | null,
       forecastLower: null as number | null,
@@ -2948,7 +2314,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     }
     
     return data;
-  }, [chartDataWithEwma, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName, forecastModelMethod, forecastWindowN, syncedDateSet]);
+  }, [chartData, fullData, overlayDate, overlayCenter, overlayLower, overlayUpper, overlayMuStar, overlaySigma, overlayOmega, overlayAlpha, overlayBeta, overlayAlphaPlusBeta, overlayUncondVar, overlayGarchDistribution, lastHistoricalPoint, forecastModelName, forecastModelMethod, forecastWindowN, syncedDateSet]);
 
   // Dev logging: Verify band data after computation
   useEffect(() => {
@@ -2992,7 +2358,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [chartDataWithForecastBand, forecastOverlay, overlayDate]);
 
-  // Compute Y-axis domain from the forecast band dataset (includes price + forecast + EWMA)
+  // Compute Y-axis domain from the forecast band dataset (includes price + forecast + trend EWMA)
   // CRITICAL: Never use 0-based fallbacks - always base on actual price data
   const priceYDomain = useMemo(() => {
     const values: number[] = [];
@@ -3011,16 +2377,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       if (p.forecastUpper != null && Number.isFinite(p.forecastUpper) && p.forecastUpper > 0) values.push(p.forecastUpper);
       
       // Priority 3: EWMA overlays (only if enabled)
-      if (showUnbiasedEwma) {
-        if (p.ewma_forecast != null && Number.isFinite(p.ewma_forecast) && p.ewma_forecast > 0) values.push(p.ewma_forecast);
-        if (p.ewma_lower != null && Number.isFinite(p.ewma_lower) && p.ewma_lower > 0) values.push(p.ewma_lower);
-        if (p.ewma_upper != null && Number.isFinite(p.ewma_upper) && p.ewma_upper > 0) values.push(p.ewma_upper);
-      }
-      if (showBiasedEwma) {
-        if (p.ewma_biased_forecast != null && Number.isFinite(p.ewma_biased_forecast) && p.ewma_biased_forecast > 0) values.push(p.ewma_biased_forecast);
-        if (p.ewma_biased_lower != null && Number.isFinite(p.ewma_biased_lower) && p.ewma_biased_lower > 0) values.push(p.ewma_biased_lower);
-        if (p.ewma_biased_upper != null && Number.isFinite(p.ewma_biased_upper) && p.ewma_biased_upper > 0) values.push(p.ewma_biased_upper);
-      }
       if (showTrendEwma) {
         if (p.trendEwmaShort != null && Number.isFinite(p.trendEwmaShort) && p.trendEwmaShort > 0) values.push(p.trendEwmaShort);
         if (p.trendEwmaLong != null && Number.isFinite(p.trendEwmaLong) && p.trendEwmaLong > 0) values.push(p.trendEwmaLong);
@@ -3056,7 +2412,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const padding = (max - min) * 0.03;
     
     return [min - padding, max + padding];
-  }, [chartDataWithForecastBand, lastHistoricalPoint, showUnbiasedEwma, showBiasedEwma, showTrendEwma]);
+  }, [chartDataWithForecastBand, lastHistoricalPoint, showTrendEwma]);
 
   // Dev logging: Verify Y-axis domain doesn't include 0 when band is active
   useEffect(() => {
@@ -3419,11 +2775,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     console.log('[SIM-CHART] data source', {
       simulationMode,
       activeT212RunId,
-      ewmaModeState: {
-        showUnbiasedEwma,
-        showBiasedEwma,
-        ewmaIsMaximized: ewmaIsMaximizedFlag,
-      },
       equityPanelSample: equityPanelData.slice(0, 3),
       filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
       priceChartSample: chartDataWithForecastBand.slice(0, 3),
@@ -3432,9 +2783,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [
     simulationMode,
     activeT212RunId,
-    showUnbiasedEwma,
-    showBiasedEwma,
-    ewmaIsMaximizedFlag,
     equityPanelData,
     filteredEquityPanelData,
     chartDataWithForecastBand,
@@ -4046,15 +3394,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       };
     });
   }, [perfInitialEquity, tradeSummary.allTrades]);
-
-  // Stable reference for ewma maximized state
-  const ewmaIsMaximized = isMaxBaseMode || ewmaIsMaximizedFlag;
-  const ewmaBiasedBandFillId = ewmaIsMaximized ? "url(#ewmaBiasedBandFillMax)" : "url(#ewmaBiasedBandFill)";
-  const ewmaBiasedStrokeColor = ewmaIsMaximized
-    ? `rgba(${EWMA_BIASED_MAX_COLOR_RGB}, 0.4)`
-    : `rgba(${EWMA_BIASED_COLOR_RGB}, 0.3)`;
-  const ewmaBiasedLineColor = ewmaIsMaximized ? EWMA_BIASED_MAX_COLOR : EWMA_BIASED_COLOR;
-  const ewmaBiasedGlowFilter = ewmaIsMaximized ? "url(#ewmaBiasedGlowMax)" : "url(#ewmaBiasedGlow)";
 
   // === Trade Marker Types and Data ===
   type TradeMarkerType = 'entry' | 'exit' | 'pair';
@@ -4755,16 +4094,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.4}/>
                 <stop offset="100%" stopColor="#93C5FD" stopOpacity={0.8}/>
               </linearGradient>
-              {/* EWMA line glow filter */}
-              <filter id="ewmaGlow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2" result="blur"/>
-                <feFlood floodColor="#A855F7" floodOpacity="0.4" result="color"/>
-                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
-                <feMerge>
-                  <feMergeNode in="shadow"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
               {/* Trend EWMA short (yellow) glow filter */}
               <filter id="trendEwmaShortGlow" x="-30%" y="-30%" width="160%" height="160%">
                 <feGaussianBlur stdDeviation="3" result="blur"/>
@@ -4779,98 +4108,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               <filter id="trendEwmaLongGlow" x="-30%" y="-30%" width="160%" height="160%">
                 <feGaussianBlur stdDeviation="3" result="blur"/>
                 <feFlood floodColor="#3b82f6" floodOpacity="0.6" result="color"/>
-                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
-                <feMerge>
-                  <feMergeNode in="shadow"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
-              {/* EWMA band gradient fill - soft purple */}
-              <linearGradient
-                id="ewmaBandFill"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop
-                  offset="0%"
-                  stopColor="#A855F7"
-                  stopOpacity={0.25}
-                />
-                <stop
-                  offset="50%"
-                  stopColor="#A855F7"
-                  stopOpacity={0.15}
-                />
-                <stop
-                  offset="100%"
-                  stopColor="#A855F7"
-                  stopOpacity={0.25}
-                />
-              </linearGradient>
-              {/* EWMA Biased band gradient fill - cyan for contrast */}
-              <linearGradient
-                id="ewmaBiasedBandFill"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop
-                  offset="0%"
-                  stopColor={EWMA_BIASED_COLOR}
-                  stopOpacity={0.25}
-                />
-                <stop
-                  offset="50%"
-                  stopColor={EWMA_BIASED_COLOR}
-                  stopOpacity={0.15}
-                />
-                <stop
-                  offset="100%"
-                  stopColor={EWMA_BIASED_COLOR}
-                  stopOpacity={0.25}
-                />
-              </linearGradient>
-              {/* EWMA Biased Max band gradient fill - fuchsia for contrast */}
-              <linearGradient
-                id="ewmaBiasedBandFillMax"
-                x1="0"
-                y1="0"
-                x2="0"
-                y2="1"
-              >
-                <stop
-                  offset="0%"
-                  stopColor={EWMA_BIASED_MAX_COLOR}
-                  stopOpacity={0.25}
-                />
-                <stop
-                  offset="50%"
-                  stopColor={EWMA_BIASED_MAX_COLOR}
-                  stopOpacity={0.15}
-                />
-                <stop
-                  offset="100%"
-                  stopColor={EWMA_BIASED_MAX_COLOR}
-                  stopOpacity={0.25}
-                />
-              </linearGradient>
-              {/* Glow filter for biased EWMA line */}
-              <filter id="ewmaBiasedGlow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="3" result="blur"/>
-                <feFlood floodColor={EWMA_BIASED_COLOR} floodOpacity="0.4" result="color"/>
-                <feComposite in="color" in2="blur" operator="in" result="shadow"/>
-                <feMerge>
-                  <feMergeNode in="shadow"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
-              {/* Glow filter for biased EWMA line (max run) */}
-              <filter id="ewmaBiasedGlowMax" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="3" result="blur"/>
-                <feFlood floodColor={EWMA_BIASED_MAX_COLOR} floodOpacity="0.4" result="color"/>
                 <feComposite in="color" in2="blur" operator="in" result="shadow"/>
                 <feMerge>
                   <feMergeNode in="shadow"/>
@@ -5474,107 +4711,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               ))}
             </Bar>
             
-            {/* EWMA Band - Upper boundary area */}
-            {/* EWMA Band - Upper boundary area */}
-            {showUnbiasedEwma && (
-              <Area
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_upper"
-                stroke="rgba(168, 85, 247, 0.3)"
-                strokeWidth={1}
-                fill="url(#ewmaBandFill)"
-                fillOpacity={1}
-                dot={false}
-                activeDot={false}
-                connectNulls={true}
-                isAnimationActive={false}
-              />
-            )}
-            
-            {/* EWMA Band - Lower boundary masks the upper area */}
-            {showUnbiasedEwma && (
-              <Area
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_lower"
-                stroke="rgba(168, 85, 247, 0.3)"
-                strokeWidth={1}
-                fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
-                fillOpacity={1}
-                dot={false}
-                activeDot={false}
-                connectNulls={true}
-                isAnimationActive={false}
-              />
-            )}
-            
-            {/* EWMA Forecast Path Overlay - Center Line */}
-            {showUnbiasedEwma && (
-              <Line
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_forecast"
-                stroke="#A855F7"
-                strokeWidth={2.5}
-                dot={false}
-                activeDot={<AnimatedEwmaDot />}
-                connectNulls={true}
-                isAnimationActive={false}
-                filter="url(#ewmaGlow)"
-              />
-            )}
-            
-            {/* EWMA Biased Band - Upper boundary area */}
-            {showBiasedEwma && (
-              <Area
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_biased_upper"
-                stroke={ewmaBiasedStrokeColor}
-                strokeWidth={1}
-                fill={ewmaBiasedBandFillId}
-                fillOpacity={1}
-                dot={false}
-                activeDot={false}
-                connectNulls={true}
-                isAnimationActive={false}
-              />
-            )}
-            
-            {/* EWMA Biased Band - Lower boundary masks the upper area */}
-            {showBiasedEwma && (
-              <Area
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_biased_lower"
-                stroke={ewmaBiasedStrokeColor}
-                strokeWidth={1}
-                fill={isDarkMode ? "#0D0D0D" : "#ffffff"}
-                fillOpacity={1}
-                dot={false}
-                activeDot={false}
-                connectNulls={true}
-                isAnimationActive={false}
-              />
-            )}
-            
-            {/* EWMA Biased Forecast Path Overlay - Center Line */}
-            {showBiasedEwma && (
-              <Line
-                yAxisId="price"
-                type="monotone"
-                dataKey="ewma_biased_forecast"
-                stroke={ewmaBiasedLineColor}
-                strokeWidth={2.5}
-                dot={false}
-                activeDot={createAnimatedEwmaBiasedDot({ isMaximized: ewmaIsMaximized })}
-                connectNulls={true}
-                isAnimationActive={false}
-                filter={ewmaBiasedGlowFilter}
-              />
-            )}
-            
             {/* Trading212 Trade Markers using ReferenceDot for perfect alignment */}
             {tradeMarkers.map((m, idx) => {
               const y = getMarkerY(m);
@@ -5956,9 +5092,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     overlayCenter,
     overlayLower,
     overlayUpper,
-    showUnbiasedEwma,
-    showBiasedEwma,
-    ewmaIsMaximized,
     tradeMarkers,
     getMarkerY,
     trading212EventsByDate,
@@ -5978,16 +5111,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     zoomOut,
     resetViewWindow,
     hoveredDate,
-    hasEwmaShort,
-    hasEwmaLong,
     showTrendEwma,
     hasTrendEwmaData,
     chartHasTrendEwmaShort,
     chartHasTrendEwmaLong,
     trendCrossPoints,
     renderTrendArrow,
-    shortWindowLabel,
-    longWindowLabel,
     hasMomentumScore,
     momentumPeriod,
     selectedRange,
@@ -5995,1038 +5124,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
   return (
     <div className={containerClasses}>
-      {/* Controls Row: Horizon/Coverage on left, model controls on right */}
-      <div className="flex justify-between items-center mb-2">
-        {/* Left side: Horizon and Coverage */}
-        {horizonCoverage && (
-          <div className="flex items-start gap-4">
-            {/* Horizon */}
-            <div className="flex flex-col gap-0.5">
-              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Horizon</span>
-              <div className="flex items-center gap-1">
-                {[1, 2, 3, 5].map((days) => (
-                  <button
-                    key={days}
-                    onClick={() => horizonCoverage.onHorizonChange(days)}
-                    disabled={horizonCoverage.isLoading}
-                    className={`px-2.5 py-0.5 text-xs rounded-full transition-colors ${
-                      horizonCoverage.h === days 
-                        ? 'bg-blue-600 text-white' 
-                        : horizonCoverage.isLoading
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : isDarkMode 
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {days}D
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {/* Vertical Divider */}
-            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-            
-            {/* Coverage */}
-            <div className="flex flex-col gap-0.5">
-              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Coverage</span>
-              <div className="flex items-center gap-1">
-                {[0.90, 0.95, 0.99].map((cov) => (
-                  <button
-                    key={cov}
-                    onClick={() => horizonCoverage.onCoverageChange(cov)}
-                    disabled={horizonCoverage.isLoading}
-                    className={`px-2.5 py-0.5 text-xs rounded-full transition-colors ${
-                      horizonCoverage.coverage === cov 
-                        ? 'bg-blue-600 text-white' 
-                        : horizonCoverage.isLoading
-                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                          : isDarkMode 
-                            ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}
-                  >
-                    {(cov * 100).toFixed(0)}%
-                  </button>
-                ))}
-              </div>
-            </div>
-            
-            {/* Vertical Divider - before Model */}
-            {horizonCoverage.volModel && horizonCoverage.onModelChange && (
-              <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-            )}
-            
-            {/* Volatility Model */}
-            {horizonCoverage.volModel && horizonCoverage.onModelChange && (
-              <div className="flex flex-col gap-0.5">
-                <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Volatility Model</span>
-                <div className="flex items-center gap-1">
-                  {/* GBM Button */}
-                  {(() => {
-                    const isSelected = horizonCoverage.volModel === 'GBM';
-                    const isBest = horizonCoverage.recommendedModel?.volModel === 'GBM';
-                    return (
-                      <button
-                        onClick={() => horizonCoverage.onModelChange!('GBM')}
-                        disabled={horizonCoverage.isLoading}
-                        className={`px-2.5 py-0.5 text-xs rounded-full transition-colors ${
-                          isSelected 
-                            ? isBest
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-blue-600 text-white' 
-                            : horizonCoverage.isLoading
-                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                              : isBest
-                                ? isDarkMode 
-                                  ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                : isDarkMode 
-                                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        GBM
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* GARCH Button with Dropdown */}
-                  {(() => {
-                    const isSelected = horizonCoverage.volModel === 'GARCH';
-                    const isBest = horizonCoverage.recommendedModel?.volModel === 'GARCH';
-                    return (
-                      <div className="relative">
-                        <button
-                          onClick={() => {
-                            if (horizonCoverage.volModel === 'GARCH') {
-                              setShowGarchDropdown(!showGarchDropdown);
-                              setShowRangeDropdown(false);
-                            } else {
-                              horizonCoverage.onModelChange!('GARCH');
-                              setShowGarchDropdown(true);
-                              setShowRangeDropdown(false);
-                            }
-                          }}
-                          disabled={horizonCoverage.isLoading}
-                          className={`px-2 py-0.5 text-xs rounded-full transition-colors flex items-center gap-1 ${
-                            isSelected 
-                              ? isBest
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-blue-600 text-white' 
-                              : horizonCoverage.isLoading
-                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                : isBest
-                                  ? isDarkMode 
-                                    ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                  : isDarkMode 
-                                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          GARCH
-                          {isSelected && (
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          )}
-                        </button>
-                        
-                        {/* GARCH Dropdown */}
-                        {showGarchDropdown && isSelected && horizonCoverage.onGarchEstimatorChange && (
-                          <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg shadow-lg border z-50 min-w-[140px] ${
-                            isDarkMode 
-                              ? 'bg-gray-800 border-gray-600' 
-                              : 'bg-white border-gray-200'
-                          }`}>
-                            <div className={`px-3 py-1 text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              Distribution
-                            </div>
-                            {(['Normal', 'Student-t'] as GarchEstimator[]).map((est) => {
-                              const isEstSelected = horizonCoverage.garchEstimator === est;
-                              const isEstBest = isBest && horizonCoverage.recommendedModel?.garchEstimator === est;
-                              return (
-                                <button
-                                  key={est}
-                                  onClick={() => {
-                                    horizonCoverage.onGarchEstimatorChange!(est);
-                                    setShowGarchDropdown(false);
-                                  }}
-                                  className={`w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between ${
-                                    isEstSelected
-                                      ? isEstBest
-                                        ? 'bg-emerald-600 text-white'
-                                        : isDarkMode 
-                                          ? 'bg-blue-600 text-white'
-                                          : 'bg-blue-500 text-white'
-                                      : isEstBest
-                                        ? isDarkMode
-                                          ? 'text-emerald-400 hover:bg-gray-700'
-                                          : 'text-emerald-600 hover:bg-gray-100'
-                                        : isDarkMode 
-                                          ? 'text-gray-300 hover:bg-gray-700'
-                                          : 'text-gray-700 hover:bg-gray-100'
-                                  }`}
-                                >
-                                  <span>{est}</span>
-                                  {isEstBest && <span className="text-yellow-400">★</span>}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  
-                  {/* HAR-RV Button */}
-                  {(() => {
-                    const isSelected = horizonCoverage.volModel === 'HAR-RV';
-                    const isBest = horizonCoverage.recommendedModel?.volModel === 'HAR-RV';
-                    return (
-                      <button
-                        onClick={() => {
-                          horizonCoverage.onModelChange!('HAR-RV');
-                          setShowGarchDropdown(false);
-                          setShowRangeDropdown(false);
-                        }}
-                        disabled={horizonCoverage.isLoading}
-                        className={`px-2 py-0.5 text-xs rounded-full transition-colors ${
-                          isSelected 
-                            ? isBest
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-blue-600 text-white' 
-                            : horizonCoverage.isLoading
-                              ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                              : isBest
-                                ? isDarkMode 
-                                  ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                : isDarkMode 
-                                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        HAR-RV
-                      </button>
-                    );
-                  })()}
-                  
-                  {/* Range Button with Dropdown */}
-                  {(() => {
-                    const isSelected = horizonCoverage.volModel === 'Range';
-                    const isBest = horizonCoverage.recommendedModel?.volModel === 'Range';
-                    return (
-                      <div className="relative">
-                        <button
-                          onClick={() => {
-                            if (horizonCoverage.volModel === 'Range') {
-                              setShowRangeDropdown(!showRangeDropdown);
-                              setShowGarchDropdown(false);
-                            } else {
-                              horizonCoverage.onModelChange!('Range');
-                              setShowRangeDropdown(true);
-                              setShowGarchDropdown(false);
-                            }
-                          }}
-                          disabled={horizonCoverage.isLoading}
-                          className={`px-2 py-0.5 text-xs rounded-full transition-colors flex items-center gap-1 ${
-                            isSelected 
-                              ? isBest
-                                ? 'bg-emerald-600 text-white'
-                                : 'bg-blue-600 text-white' 
-                              : horizonCoverage.isLoading
-                                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                : isBest
-                                  ? isDarkMode 
-                                    ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                  : isDarkMode 
-                                    ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          Range
-                          {isSelected && (
-                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          )}
-                        </button>
-                        
-                        {/* Range Dropdown */}
-                        {showRangeDropdown && isSelected && horizonCoverage.onRangeEstimatorChange && (
-                          <div className={`absolute top-full left-0 mt-1 py-1 rounded-lg shadow-lg border z-50 min-w-[160px] ${
-                            isDarkMode 
-                              ? 'bg-gray-800 border-gray-600' 
-                              : 'bg-white border-gray-200'
-                          }`}>
-                            <div className={`px-3 py-1 text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                              Estimator
-                            </div>
-                            {([
-                              { value: 'P', label: 'Parkinson' },
-                              { value: 'GK', label: 'Garman-Klass' },
-                              { value: 'RS', label: 'Rogers-Satchell' },
-                              { value: 'YZ', label: 'Yang-Zhang' },
-                            ] as { value: RangeEstimator; label: string }[]).map(({ value, label }) => {
-                              const isEstSelected = horizonCoverage.rangeEstimator === value;
-                              const isEstBest = isBest && horizonCoverage.recommendedModel?.rangeEstimator === value;
-                              return (
-                                <button
-                                  key={value}
-                                  onClick={() => {
-                                    horizonCoverage.onRangeEstimatorChange!(value);
-                                    setShowRangeDropdown(false);
-                                  }}
-                                  className={`w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between ${
-                                    isEstSelected
-                                      ? isEstBest
-                                        ? 'bg-emerald-600 text-white'
-                                        : isDarkMode 
-                                          ? 'bg-blue-600 text-white'
-                                          : 'bg-blue-500 text-white'
-                                      : isEstBest
-                                        ? isDarkMode
-                                          ? 'text-emerald-400 hover:bg-gray-700'
-                                          : 'text-emerald-600 hover:bg-gray-100'
-                                        : isDarkMode 
-                                          ? 'text-gray-300 hover:bg-gray-700'
-                                          : 'text-gray-700 hover:bg-gray-100'
-                                  }`}
-                                >
-                                  <span>{label}</span>
-                                  {isEstBest && <span className="text-yellow-400">★</span>}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
-                  
-                  {/* Model Settings Button (⋯) */}
-                  <div className="relative" ref={modelSettingsDropdownRef}>
-                    <button
-                      onClick={() => setShowModelSettingsDropdown(!showModelSettingsDropdown)}
-                      className={`
-                        w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
-                        ${showModelSettingsDropdown
-                          ? (isDarkMode ? 'border-gray-400 text-white' : 'border-gray-500 text-gray-900')
-                          : (isDarkMode ? 'border-gray-500 text-gray-300 hover:border-gray-400' : 'border-gray-300 text-gray-700 hover:border-gray-400')
-                        }
-                      `}
-                      title="Model Settings"
-                    >
-                      ⋯
-                    </button>
-
-                    {/* Model Settings Dropdown */}
-                    {showModelSettingsDropdown && (
-                      <div 
-                        className={`
-                          absolute top-10 right-0 z-50 min-w-[160px] px-3 py-2 rounded-xl shadow-xl backdrop-blur-sm border
-                          ${isDarkMode 
-                            ? 'bg-gray-900/80 border-gray-500/30' 
-                            : 'bg-white/80 border-gray-400/30'
-                          }
-                        `}
-                      >
-                        <div className="space-y-2 text-xs">
-                          {/* Window - always shown */}
-                          {horizonCoverage.onWindowSizeChange && (
-                            <div className="flex items-center justify-between gap-4">
-                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>Window</span>
-                              <input
-                                type="number"
-                                min={50}
-                                max={5000}
-                                step={50}
-                                value={horizonCoverage.windowSize ?? 1000}
-                                onChange={(e) => horizonCoverage.onWindowSizeChange!(parseInt(e.target.value) || 1000)}
-                                disabled={horizonCoverage.isLoading}
-                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-blue-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                }`}
-                              />
-                            </div>
-                          )}
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-1">
-                                  <span
-                                    className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}
-                                    title="Entry spread cost in basis points. 1 bp = 0.01%."
-                                  >
-                                  Cost (bps)
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={500}
-                                step={1}
-                                value={costInput}
-                                onChange={(e) => setCostInput(e.target.value)}
-                                onBlur={(e) => commitCost(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    commitCost((e.target as HTMLInputElement).value);
-                                  }
-                                }}
-                                className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-amber-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                }`}
-                              />
-                              <span className={isDarkMode ? "text-gray-400" : "text-gray-500"}>bps</span>
-                            </div>
-                          </div>
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-1">
-                                <span
-                                  className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}
-                                  title="Scales bucket drift: μ_bucket = k * mean_forward_return(bucket). Lower k = more conservative."
-                                >
-                                  Shrink k
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={1}
-                                step={0.05}
-                                value={shrinkKInput}
-                                onChange={(e) => setShrinkKInput(e.target.value)}
-                                onBlur={(e) => commitShrinkK(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    commitShrinkK((e.target as HTMLInputElement).value);
-                                  }
-                                }}
-                                className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-amber-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                }`}
-                              />
-                            </div>
-                          </div>
-
-                          {/* GBM Lambda - only for GBM */}
-                          {horizonCoverage.volModel === 'GBM' && horizonCoverage.onGbmLambdaChange && (
-                            <div className="flex items-center justify-between gap-4">
-                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>λ Drift</span>
-                              <input
-                                type="number"
-                                min={0}
-                                max={1}
-                                step={0.01}
-                                value={horizonCoverage.gbmLambda ?? 0}
-                                onChange={(e) => horizonCoverage.onGbmLambdaChange!(parseFloat(e.target.value) || 0)}
-                                disabled={horizonCoverage.isLoading}
-                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-blue-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                }`}
-                              />
-                            </div>
-                          )}
-
-                          {/* DoF - only for GARCH Student-t */}
-                          {horizonCoverage.volModel === 'GARCH' && horizonCoverage.garchEstimator === 'Student-t' && horizonCoverage.onDegreesOfFreedomChange && (
-                            <div className="flex items-center justify-between gap-4">
-                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>DoF</span>
-                              <input
-                                type="number"
-                                min={3}
-                                max={30}
-                                step={0.5}
-                                value={horizonCoverage.degreesOfFreedom ?? 5}
-                                onChange={(e) => horizonCoverage.onDegreesOfFreedomChange!(parseFloat(e.target.value) || 5)}
-                                disabled={horizonCoverage.isLoading}
-                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-blue-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                }`}
-                              />
-                            </div>
-                          )}
-
-                          {/* EWMA Lambda - only for Range */}
-                          {horizonCoverage.volModel === 'Range' && horizonCoverage.onEwmaLambdaChange && (
-                            <div className="flex items-center justify-between gap-4">
-                              <span className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>EWMA λ</span>
-                              <input
-                                type="number"
-                                min={0.5}
-                                max={0.99}
-                                step={0.01}
-                                value={horizonCoverage.ewmaLambda ?? 0.94}
-                                onChange={(e) => horizonCoverage.onEwmaLambdaChange!(parseFloat(e.target.value) || 0.94)}
-                                disabled={horizonCoverage.isLoading}
-                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-blue-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                }`}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Vertical Divider - before Simulation */}
-            <div className={`w-px self-stretch ${isDarkMode ? 'bg-gray-600' : 'bg-gray-300'}`} />
-
-            {/* Simulation */}
-            <div className="flex flex-col gap-0.5">
-              <span className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>Simulation</span>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className={`
-                      px-3 py-1 text-xs rounded-full transition-colors font-medium
-                      ${simulationMode.baseMode === 'unbiased'
-                        ? 'bg-sky-500 text-white'
-                        : isDarkMode
-                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }
-                    `}
-                    onClick={() => onChangeSimulationMode?.({ baseMode: 'unbiased', withTrend: simulationMode.withTrend })}
-                  >
-                    Unbiased
-                  </button>
-                  <button
-                    type="button"
-                    className={`
-                      px-3 py-1 text-xs rounded-full transition-colors font-medium
-                      ${simulationMode.baseMode === 'biased'
-                        ? 'bg-sky-500 text-white'
-                        : isDarkMode 
-                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }
-                    `}
-                    onClick={() => onChangeSimulationMode?.({ baseMode: 'biased', withTrend: simulationMode.withTrend })}
-                  >
-                    Biased
-                  </button>
-                  <div className="relative">
-                    <button
-                      type="button"
-                      className={`
-                        px-3 py-1 text-xs rounded-full transition-colors font-medium
-                        ${!hasMaxRun
-                          ? 'bg-gray-700/60 text-gray-500 cursor-not-allowed'
-                          : simulationMode.baseMode === 'max'
-                            ? 'bg-sky-500 text-white'
-                            : isDarkMode 
-                              ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }
-                      `}
-                      disabled={!hasMaxRun}
-                      onClick={() => {
-                        if (!hasMaxRun) return;
-                        setShowBiasedMaxObjectiveMenu((prev) => !prev);
-                      }}
-                    >
-                      Biased (Max) ▾
-                    </button>
-                    {showBiasedMaxObjectiveMenu && hasMaxRun && (
-                      <div
-                        className={`
-                          absolute top-8 left-0 z-50 min-w-[180px] rounded-lg border shadow-xl p-3
-                          ${isDarkMode ? 'bg-slate-900 text-slate-100 border-slate-700' : 'bg-white text-gray-800 border-gray-200'}
-                        `}
-                      >
-                        <div className="text-[11px] font-semibold mb-2">Objective</div>
-                        <button
-                          className={`w-full text-left rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
-                            isDarkMode ? 'hover:bg-slate-800' : 'hover:bg-gray-100'
-                          }`}
-                          onClick={() => {
-                            onSelectBiasedMaxObjective?.("calmar");
-                            onChangeSimulationMode?.({ baseMode: 'max', withTrend: simulationMode.withTrend });
-                            setShowBiasedMaxObjectiveMenu(false);
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span>Calmar Ratio</span>
-                            <span
-                              className="text-[10px] text-slate-400"
-                              title={`Calmar = Return / MaxDrawdown\nReturn = finalEquity/initialEquity - 1\nIf MaxDrawdown = 0, score = Return`}
-                            >
-                              ⓘ
-                            </span>
-                          </div>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onChangeSimulationMode?.({
-                        baseMode: simulationMode.baseMode,
-                        withTrend: !simulationMode.withTrend,
-                      })
-                    }
-                    className={`
-                      px-3 py-1 text-xs rounded-full transition-colors font-medium
-                      ${simulationMode.withTrend
-                        ? 'bg-sky-500 text-white'
-                        : isDarkMode
-                          ? 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }
-                    `}
-                    title="Toggle Trend-tilted EWMA simulation on/off."
-                  >
-                    Trend
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {typeof trendWeight === 'number' && Number.isFinite(trendWeight) && (
-                    <span
-                      className={`
-                        rounded-full px-3 py-1 text-[10px] font-medium
-                        ${isDarkMode ? 'bg-slate-800 text-sky-200' : 'bg-slate-100 text-sky-700'}
-                      `}
-                      title={
-                        trendWeightUpdatedAt
-                          ? `Trend Weight calibrated on ${trendWeightUpdatedAt}.`
-                          : 'Global Trend Weight estimated from historical panel regression.'
-                      }
-                    >
-                      Trend Weight {trendWeight.toFixed(3)}
-                    </span>
-                  )}
-
-                  <div className="relative" ref={simulationSettingsDropdownRef}>
-                    <button
-                      onClick={() => setShowSimulationSettingsDropdown(!showSimulationSettingsDropdown)}
-                      className={`
-                        w-6 h-6 flex items-center justify-center text-sm rounded-full transition-colors border
-                        ${showSimulationSettingsDropdown
-                          ? isDarkMode 
-                            ? 'border-amber-500 text-amber-400' 
-                            : 'border-amber-500 text-amber-600'
-                          : isDarkMode 
-                            ? 'border-gray-500 text-gray-300 hover:border-gray-400' 
-                            : 'border-gray-300 text-gray-700 hover:border-gray-400'
-                        }
-                      `}
-                      title="Simulation Settings"
-                    >
-                      ⋯
-                    </button>
-
-                    {showSimulationSettingsDropdown && (
-                      <div 
-                        className={`
-                          absolute top-8 right-0 z-50 min-w-[220px] px-4 py-3 rounded-xl shadow-2xl backdrop-blur-xl border
-                          ${isDarkMode 
-                            ? 'bg-slate-800/40 border-slate-600/30 text-slate-100' 
-                            : 'bg-white/60 border-gray-200/50 text-gray-900'
-                          }
-                        `}
-                      >
-                        <div className="space-y-2 text-xs">
-                          <div className="flex items-center justify-between gap-4">
-                            <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Initial equity</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={1000000}
-                              step={100}
-                              value={equityInput}
-                              onChange={(e) => setEquityInput(e.target.value)}
-                              onBlur={(e) => commitInitialEquity(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  commitInitialEquity((e.target as HTMLInputElement).value);
-                                }
-                              }}
-                              className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                isDarkMode 
-                                  ? 'border-gray-600 text-white focus:border-amber-500' 
-                                  : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                              }`}
-                            />
-                          </div>
-                          <div className="flex items-center justify-between gap-4">
-                            <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Leverage</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={100}
-                              step={1}
-                              value={t212Leverage}
-                              onChange={(e) => {
-                                const val = Number(e.target.value);
-                                if (Number.isFinite(val) && val >= 1) {
-                                  onChangeT212Leverage?.(Math.min(100, val));
-                                }
-                              }}
-                              className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                isDarkMode 
-                                  ? 'border-gray-600 text-white focus:border-amber-500' 
-                                  : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                              }`}
-                            />
-                          </div>
-                          <div className="flex items-center justify-between gap-4">
-                            <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Position %</span>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                step={0.5}
-                                value={positionPctInput}
-                                onChange={(e) => setPositionPctInput(e.target.value)}
-                                onBlur={(e) => commitPositionPct(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    commitPositionPct((e.target as HTMLInputElement).value);
-                                  }
-                                }}
-                                className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-amber-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                }`}
-                              />
-                              <span className={isDarkMode ? "text-gray-400" : "text-gray-500"}>%</span>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between gap-4">
-                            <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Signal</span>
-                            <div className={`px-3 py-1 rounded-full text-[10px] font-semibold ${
-                              isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'
-                            }`}>
-                              Z
-                            </div>
-                          </div>
-
-                          {t212SignalRule === 'bps' ? (
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-1">
-                                  <span
-                                    className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}
-                                    title="Minimum |edge| to trade (no-trade band). 1 bp = 0.01%."
-                                  >
-                                    bps
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={500}
-                                  step={1}
-                                  value={thresholdInput}
-                                  onChange={(e) => setThresholdInput(e.target.value)}
-                                  onBlur={(e) => commitThreshold(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      commitThreshold((e.target as HTMLInputElement).value);
-                                    }
-                                  }}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-amber-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                  }`}
-                                />
-                                <span className={isDarkMode ? "text-gray-400" : "text-gray-500"}>bps</span>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between gap-4">
-                                <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>Z thresholds</span>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => onOptimizeZThresholds?.()}
-                                    className={`
-                                      px-3 py-1 rounded-full text-[10px] font-semibold transition-colors
-                                      ${isDarkMode ? 'bg-amber-500 text-slate-900' : 'bg-amber-500 text-white'}
-                                    `}
-                                  >
-                                    Optimize
-                                  </button>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z enter</span>
-                                <div className="flex items-center gap-2">
-                                  <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
-                                  <span className="font-mono tabular-nums text-right">
-                                    {t212ZDisplayThresholds
-                                      ? `${t212ZDisplayThresholds.enterLong.toFixed(3)} / ${t212ZDisplayThresholds.enterShort.toFixed(3)}`
-                                      : '—'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z exit</span>
-                                <div className="flex items-center gap-2">
-                                  <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
-                                  <span className="font-mono tabular-nums text-right">
-                                    {t212ZDisplayThresholds
-                                      ? `${t212ZDisplayThresholds.exitLong.toFixed(3)} / ${t212ZDisplayThresholds.exitShort.toFixed(3)}`
-                                      : '—'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex items-center justify-between gap-4">
-                                <span className={`${isDarkMode ? 'text-gray-300' : 'text-gray-600'} whitespace-nowrap`}>z flip</span>
-                                <div className="flex items-center gap-2">
-                                  <span className={`${isDarkMode ? 'text-slate-500' : 'text-gray-500'} text-[11px]`}>L / S</span>
-                                  <span className="font-mono tabular-nums text-right">
-                                    {t212ZDisplayThresholds
-                                      ? `${t212ZDisplayThresholds.flipLong.toFixed(3)} / ${t212ZDisplayThresholds.flipShort.toFixed(3)}`
-                                      : '—'}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="mt-2 space-y-1 text-[11px]">
-                                {t212ZMode === 'optimize' && isOptimizingZThresholds && (
-                                  <div className={`${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>Optimizing z thresholds…</div>
-                                )}
-                                {t212ZOptimizeError && (
-                                  <div className="text-rose-500">{t212ZOptimizeError}</div>
-                                )}
-                              </div>
-                              {t212ZMode === 'optimize' && t212ZOptimized && (
-                                <div className="mt-2 space-y-2">
-                                  {/* Header */}
-                                  <div className={`space-y-1 pb-1.5 pt-2 border-t ${isDarkMode ? 'border-slate-700/30' : 'border-gray-300/30'}`}>
-                                    <div className={`text-[11px] font-semibold ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>
-                                      WFO Optimize
-                                    </div>
-                                    <div className="flex flex-col gap-0.5">
-                                      {optimizedSelectionTier !== "strict" && (
-                                        <span
-                                          className={`
-                                            px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
-                                            ${isDarkMode
-                                              ? 'bg-amber-500/20 text-amber-200'
-                                              : 'bg-amber-50 text-amber-700'
-                                            }
-                                          `}
-                                        >
-                                          {optimizedSelectionTier === "fallbackAuto" ? "Fallback: Auto thresholds" : "Best-effort"}
-                                        </span>
-                                      )}
-                                      <span
-                                        className={`
-                                          px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
-                                          ${optimizedOrderingValid
-                                            ? isDarkMode
-                                              ? 'bg-emerald-500/20 text-emerald-300'
-                                              : 'bg-emerald-50 text-emerald-700'
-                                            : isDarkMode
-                                              ? 'bg-rose-500/20 text-rose-300'
-                                              : 'bg-rose-50 text-rose-700'
-                                          }
-                                        `}
-                                        title="Checks exit < enter < flip on long and short sides."
-                                      >
-                                        {optimizedOrderingValid ? "Ordering OK" : "Invalid"}
-                                      </span>
-                                      <span
-                                        className={`
-                                          px-1.5 py-0.5 rounded text-[9px] font-medium w-fit
-                                          ${t212ZOptimized.applyRecommended
-                                            ? isDarkMode
-                                              ? 'bg-emerald-500/20 text-emerald-300'
-                                              : 'bg-emerald-50 text-emerald-700'
-                                            : isDarkMode
-                                              ? 'bg-amber-500/20 text-amber-300'
-                                              : 'bg-amber-50 text-amber-700'
-                                          }
-                                        `}
-                                      >
-                                        {t212ZOptimized.applyRecommended ? "Recommended" : "Not recommended"}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {/* Performance Scores */}
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div className="space-y-0.5 text-right">
-                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                                        Baseline score
-                                      </div>
-                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`} title={optimizedBaselineScore?.title}>
-                                        {optimizedBaselineScore?.text ?? "—"}
-                                      </div>
-                                    </div>
-                                    <div className="space-y-0.5 text-right">
-                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                                        Best score
-                                      </div>
-                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`} title={optimizedBestScore?.title}>
-                                        {optimizedBestScore?.text ?? "—"}
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div className="pt-1.5 space-y-1 text-[10px] border-t border-slate-700/30">
-                                    <div className={`${isDarkMode ? "text-slate-300" : "text-gray-700"}`}>
-                                      Tier: {optimizedSelectionTier} · strictPass: {optimizedStrictPass ? "true" : "false"} · recencyPass: {optimizedRecencyPass ? "true" : "false"}
-                                    </div>
-                                    {optimizedSelectionTier !== "strict" && (
-                                      <div className="flex items-start gap-1.5">
-                                        <span className={`${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>Failed constraints</span>
-                                        <div className="flex flex-wrap gap-1">
-                                          {(optimizedFailedConstraints.length ? optimizedFailedConstraints : ["—"]).map((fc, idx) => (
-                                            <span
-                                              key={`${fc}-${idx}`}
-                                              className={`
-                                                px-1.5 py-0.5 rounded text-[9px] font-medium
-                                                ${isDarkMode ? "bg-slate-800 text-slate-200" : "bg-gray-100 text-gray-800"}
-                                              `}
-                                            >
-                                              {fc}
-                                            </span>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    )}
-                                    <div className="flex items-start gap-1.5">
-                                      <span className={`${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>Recency rules</span>
-                                      <div className={`${isDarkMode ? "text-slate-200" : "text-gray-800"}`}>
-                                        opens≥{optimizedRecencyRules.minOpens} in last {optimizedRecencyRules.bars63} bars; flat≥{optimizedRecencyRules.minFlatPct}%
-                                      </div>
-                                    </div>
-                                    {optimizedReasonLabel && (
-                                      <div className="flex items-start gap-1.5">
-                                        <span className={`${isDarkMode ? "text-slate-400" : "text-gray-600"}`}>{optimizedReasonLabel.label}</span>
-                                        <span className={`${isDarkMode ? "text-slate-200" : "text-gray-800"}`}>{optimizedReasonLabel.text}</span>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Quantiles */}
-                                  <div className="grid grid-cols-3 gap-2 pt-1.5 border-t border-slate-700/30">
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>qE</div>
-                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.quantiles.enter.toFixed(2)}</div>
-                                    </div>
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>qX</div>
-                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.quantiles.exit.toFixed(2)}</div>
-                                    </div>
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <div className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>qF</div>
-                                      <div className={`font-mono text-xs ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.quantiles.flip.toFixed(2)}</div>
-                                    </div>
-                                  </div>
-
-                                  {/* Statistics */}
-                                  <div className="space-y-0.5">
-                                    <div className="flex justify-between items-center">
-                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Folds</span>
-                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.folds}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Avg trades</span>
-                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.avgTradeCount.toFixed(1)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Avg short opp</span>
-                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>{t212ZOptimized.avgShortOppCount.toFixed(1)}</span>
-                                    </div>
-                                    <div className="flex justify-between items-center">
-                                      <span className={`text-[9px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>Total short entries</span>
-                                      <span className={`font-mono text-[10px] ${isDarkMode ? 'text-slate-200' : 'text-gray-800'}`}>
-                                        {t212ZOptimized.totalShortEntries != null ? t212ZOptimized.totalShortEntries : "—"}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  {/* Warnings */}
-                                  {confirmApplyOptimized && !t212ZOptimized.applyRecommended && (
-                                    <div className={`text-[11px] pt-1 ${isDarkMode ? 'text-amber-300' : 'text-amber-700'}`}>
-                                      Click again to confirm apply.
-                                    </div>
-                                  )}
-
-                                  {/* Action Button */}
-                                  <div className="pt-1.5 border-t border-slate-700/30">
-                                    <button
-                                      type="button"
-                                      disabled={optimizedApplyDisabled}
-                                      onClick={handleApplyOptimizedClick}
-                                      className={`
-                                        w-full px-4 py-2 rounded-lg text-xs font-medium transition-all
-                                        ${optimizedApplyDisabled
-                                          ? isDarkMode
-                                            ? 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                                            : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                          : t212ZOptimized.applyRecommended
-                                            ? isDarkMode
-                                              ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/40'
-                                              : 'bg-emerald-500 text-white hover:bg-emerald-600'
-                                            : isDarkMode
-                                              ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40'
-                                              : 'bg-amber-500 text-white hover:bg-amber-600'
-                                        }
-                                      `}
-                                      title={!optimizedOrderingValid ? "Ordering must satisfy exit < enter < flip" : undefined}
-                                    >
-                                      {optimizedApplyLabel}
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-{/* Optimized badges removed in favor of inline values above */}
-
-          </div>
-        )}
-
-        {/* Spacer if no horizonCoverage */}
-        {!horizonCoverage && <div />}
-      </div>
-      
       {/* Range Selector + Position Controls - independent row below controls */}
       {perfByRange && (
         <div className="mt-7 mb-2 flex items-center justify-between">
@@ -7242,7 +5339,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           {/* Header Row: Insight Pills (left) + Date Range (right) */}
           <div className="flex items-center justify-between mb-4">
             {/* Insight Pills */}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
               {["Overview", "Performance", "Trades analysis", "Risk/performance ratios", "List of trades"].map((tab) => {
                 const isActive = tab === activeInsightTab;
                 return (
@@ -7266,6 +5363,481 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </button>
                 );
               })}
+              
+              {/* Settings Button */}
+              {horizonCoverage && (
+                <div className="relative ml-1" ref={mainSettingsDropdownRef}>
+                  <button
+                    onClick={() => setShowMainSettingsDropdown(!showMainSettingsDropdown)}
+                    className={`
+                      w-7 h-7 flex items-center justify-center text-base rounded-full transition-colors border
+                      ${showMainSettingsDropdown
+                        ? isDarkMode 
+                          ? 'border-blue-400 bg-blue-900/30 text-white' 
+                          : 'border-blue-500 bg-blue-50 text-gray-900'
+                        : isDarkMode 
+                          ? 'border-gray-500 text-gray-300 hover:border-gray-400 hover:bg-gray-800/50' 
+                          : 'border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-100'
+                      }
+                    `}
+                    title="Settings"
+                  >
+                    ⋯
+                  </button>
+                  
+                  {/* Settings Dropdown */}
+                  {showMainSettingsDropdown && (
+                    <div 
+                      className={`
+                        absolute top-full left-0 mt-2 z-50 w-96 px-4 py-4 rounded-xl shadow-2xl backdrop-blur-xl border
+                        ${isDarkMode 
+                          ? 'bg-gray-900/95 border-gray-600/30' 
+                          : 'bg-white/95 border-gray-300/50'
+                        }
+                      `}
+                    >
+                      <div className="space-y-4">
+                        {/* Horizon */}
+                        <div>
+                          <div className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Horizon
+                          </div>
+                          <div className="flex gap-1.5">
+                            {[1, 2, 3, 5].map((days) => (
+                              <button
+                                key={days}
+                                onClick={() => horizonCoverage.onHorizonChange(days)}
+                                disabled={horizonCoverage.isLoading}
+                                className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                                  horizonCoverage.h === days 
+                                    ? 'bg-blue-600 text-white font-medium' 
+                                    : horizonCoverage.isLoading
+                                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                      : isDarkMode 
+                                        ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                {days}D
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        {/* Coverage */}
+                        <div>
+                          <div className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Coverage
+                          </div>
+                          <div className="flex gap-1.5">
+                            {[0.90, 0.95, 0.99].map((cov) => (
+                              <button
+                                key={cov}
+                                onClick={() => horizonCoverage.onCoverageChange(cov)}
+                                disabled={horizonCoverage.isLoading}
+                                className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                                  horizonCoverage.coverage === cov 
+                                    ? 'bg-blue-600 text-white font-medium' 
+                                    : horizonCoverage.isLoading
+                                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                      : isDarkMode 
+                                        ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                {(cov * 100).toFixed(0)}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        
+                        {/* Volatility Model Settings */}
+                        <div>
+                          <div className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Volatility Model
+                          </div>
+                          
+                          {/* Model Selection Buttons */}
+                          {horizonCoverage.volModel && horizonCoverage.onModelChange && (
+                            <div className="flex gap-1.5 mb-3">
+                              {/* GBM Button */}
+                              {(() => {
+                                const isSelected = horizonCoverage.volModel === 'GBM';
+                                const isBest = horizonCoverage.recommendedModel?.volModel === 'GBM';
+                                return (
+                                  <button
+                                    onClick={() => horizonCoverage.onModelChange!('GBM')}
+                                    disabled={horizonCoverage.isLoading}
+                                    className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                                      isSelected 
+                                        ? isBest
+                                          ? 'bg-emerald-600 text-white font-medium'
+                                          : 'bg-blue-600 text-white font-medium' 
+                                        : horizonCoverage.isLoading
+                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                          : isBest
+                                            ? isDarkMode 
+                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+                                            : isDarkMode 
+                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    GBM
+                                  </button>
+                                );
+                              })()}
+                              
+                              {/* GARCH Button */}
+                              {(() => {
+                                const isSelected = horizonCoverage.volModel === 'GARCH';
+                                const isBest = horizonCoverage.recommendedModel?.volModel === 'GARCH';
+                                return (
+                                  <button
+                                    onClick={() => horizonCoverage.onModelChange!('GARCH')}
+                                    disabled={horizonCoverage.isLoading}
+                                    className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                                      isSelected 
+                                        ? isBest
+                                          ? 'bg-emerald-600 text-white font-medium'
+                                          : 'bg-blue-600 text-white font-medium' 
+                                        : horizonCoverage.isLoading
+                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                          : isBest
+                                            ? isDarkMode 
+                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+                                            : isDarkMode 
+                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    GARCH
+                                  </button>
+                                );
+                              })()}
+                              
+                              {/* HAR-RV Button */}
+                              {(() => {
+                                const isSelected = horizonCoverage.volModel === 'HAR-RV';
+                                const isBest = horizonCoverage.recommendedModel?.volModel === 'HAR-RV';
+                                return (
+                                  <button
+                                    onClick={() => horizonCoverage.onModelChange!('HAR-RV')}
+                                    disabled={horizonCoverage.isLoading}
+                                    className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                                      isSelected 
+                                        ? isBest
+                                          ? 'bg-emerald-600 text-white font-medium'
+                                          : 'bg-blue-600 text-white font-medium' 
+                                        : horizonCoverage.isLoading
+                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                          : isBest
+                                            ? isDarkMode 
+                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+                                            : isDarkMode 
+                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    HAR-RV
+                                  </button>
+                                );
+                              })()}
+                              
+                              {/* Range Button */}
+                              {(() => {
+                                const isSelected = horizonCoverage.volModel === 'Range';
+                                const isBest = horizonCoverage.recommendedModel?.volModel === 'Range';
+                                return (
+                                  <button
+                                    onClick={() => horizonCoverage.onModelChange!('Range')}
+                                    disabled={horizonCoverage.isLoading}
+                                    className={`flex-1 py-1.5 text-sm rounded-lg transition-colors ${
+                                      isSelected 
+                                        ? isBest
+                                          ? 'bg-emerald-600 text-white font-medium'
+                                          : 'bg-blue-600 text-white font-medium' 
+                                        : horizonCoverage.isLoading
+                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                          : isBest
+                                            ? isDarkMode 
+                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
+                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
+                                            : isDarkMode 
+                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                  >
+                                    Range
+                                  </button>
+                                );
+                              })()}
+                            </div>
+                          )}
+                          
+                          <div className={`space-y-2 px-3 py-2 rounded-lg ${isDarkMode ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
+                            {/* Window - always shown */}
+                            {horizonCoverage.onWindowSizeChange && (
+                              <div className="flex items-center justify-between gap-4">
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Window</span>
+                                <input
+                                  type="number"
+                                  min={50}
+                                  max={5000}
+                                  step={50}
+                                  value={horizonCoverage.windowSize ?? 1000}
+                                  onChange={(e) => horizonCoverage.onWindowSizeChange!(parseInt(e.target.value) || 1000)}
+                                  disabled={horizonCoverage.isLoading}
+                                  className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                    isDarkMode 
+                                      ? 'border-gray-600 text-white focus:border-blue-500' 
+                                      : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                  }`}
+                                />
+                              </div>
+                            )}
+                            
+                            <div className="flex items-center justify-between gap-4">
+                              <span
+                                className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}
+                                title="Entry spread cost in basis points. 1 bp = 0.01%."
+                              >
+                                Cost (bps)
+                              </span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={500}
+                                  step={1}
+                                  value={costInput}
+                                  onChange={(e) => setCostInput(e.target.value)}
+                                  onBlur={(e) => commitCost(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      commitCost((e.target as HTMLInputElement).value);
+                                    }
+                                  }}
+                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                    isDarkMode 
+                                      ? 'border-gray-600 text-white focus:border-amber-500' 
+                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                  }`}
+                                />
+                                <span className={`text-xs ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>bps</span>
+                              </div>
+                            </div>
+                            {/* GBM Lambda - only for GBM */}
+                            {horizonCoverage.volModel === 'GBM' && horizonCoverage.onGbmLambdaChange && (
+                              <div className="flex items-center justify-between gap-4">
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>λ Drift</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={1}
+                                  step={0.01}
+                                  value={horizonCoverage.gbmLambda ?? 0}
+                                  onChange={(e) => horizonCoverage.onGbmLambdaChange!(parseFloat(e.target.value) || 0)}
+                                  disabled={horizonCoverage.isLoading}
+                                  className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                    isDarkMode 
+                                      ? 'border-gray-600 text-white focus:border-blue-500' 
+                                      : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                  }`}
+                                />
+                              </div>
+                            )}
+
+                            {/* DoF - only for GARCH Student-t */}
+                            {horizonCoverage.volModel === 'GARCH' && horizonCoverage.garchEstimator === 'Student-t' && horizonCoverage.onDegreesOfFreedomChange && (
+                              <div className="flex items-center justify-between gap-4">
+                                <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>DoF</span>
+                                <input
+                                  type="number"
+                                  min={3}
+                                  max={30}
+                                  step={0.5}
+                                  value={horizonCoverage.degreesOfFreedom ?? 5}
+                                  onChange={(e) => horizonCoverage.onDegreesOfFreedomChange!(parseFloat(e.target.value) || 5)}
+                                  disabled={horizonCoverage.isLoading}
+                                  className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                    isDarkMode 
+                                      ? 'border-gray-600 text-white focus:border-blue-500' 
+                                      : 'border-gray-300 text-gray-900 focus:border-blue-500'
+                                  }`}
+                                />
+                              </div>
+                            )}
+
+                          </div>
+                        </div>
+                        
+                        {/* Simulation Settings */}
+                        <div>
+                          <div className={`text-xs font-semibold mb-2 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Simulation
+                          </div>
+                          
+                          <div className={`space-y-2 px-3 py-2 rounded-lg ${isDarkMode ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
+                            {/* Initial Equity */}
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Initial equity</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={1000000}
+                                step={100}
+                                value={equityInput}
+                                onChange={(e) => setEquityInput(e.target.value)}
+                                onBlur={(e) => commitInitialEquity(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    commitInitialEquity((e.target as HTMLInputElement).value);
+                                  }
+                                }}
+                                className={`w-20 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-amber-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                }`}
+                              />
+                            </div>
+                            
+                            {/* Leverage */}
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Leverage</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={100}
+                                step={1}
+                                value={t212Leverage}
+                                onChange={(e) => {
+                                  const val = Number(e.target.value);
+                                  if (Number.isFinite(val) && val >= 1) {
+                                    onChangeT212Leverage?.(Math.min(100, val));
+                                  }
+                                }}
+                                className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                  isDarkMode 
+                                    ? 'border-gray-600 text-white focus:border-amber-500' 
+                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                }`}
+                              />
+                            </div>
+                            
+                            {/* Position % */}
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Position %</span>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={100}
+                                  step={0.5}
+                                  value={positionPctInput}
+                                  onChange={(e) => setPositionPctInput(e.target.value)}
+                                  onBlur={(e) => commitPositionPct(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      commitPositionPct((e.target as HTMLInputElement).value);
+                                    }
+                                  }}
+                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                    isDarkMode 
+                                      ? 'border-gray-600 text-white focus:border-amber-500' 
+                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                  }`}
+                                />
+                                <span className={`text-xs ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>%</span>
+                              </div>
+                            </div>
+                            
+                            {/* Signal Type */}
+                            <div className="flex items-center justify-between gap-4">
+                              <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Signal</span>
+                              <div className={`px-3 py-1 rounded-full text-[10px] font-semibold ${
+                                isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                Z
+                              </div>
+                            </div>
+                            
+                            {/* Z Thresholds */}
+                            {t212SignalRule === 'z' && (
+                              <>
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Enter (L / S)</span>
+                                  <span className="font-mono tabular-nums text-right text-xs">
+                                    {t212ZDisplayThresholds
+                                      ? `${t212ZDisplayThresholds.enterLong.toFixed(3)} / ${t212ZDisplayThresholds.enterShort.toFixed(3)}`
+                                      : '—'}
+                                  </span>
+                                </div>
+                                
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Exit (L / S)</span>
+                                  <span className="font-mono tabular-nums text-right text-xs">
+                                    {t212ZDisplayThresholds
+                                      ? `${t212ZDisplayThresholds.exitLong.toFixed(3)} / ${t212ZDisplayThresholds.exitShort.toFixed(3)}`
+                                      : '—'}
+                                  </span>
+                                </div>
+                                
+                                <div className="flex items-center justify-between gap-4">
+                                  <span className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Flip (L / S)</span>
+                                  <span className="font-mono tabular-nums text-right text-xs">
+                                    {t212ZDisplayThresholds
+                                      ? `${t212ZDisplayThresholds.flipLong.toFixed(3)} / ${t212ZDisplayThresholds.flipShort.toFixed(3)}`
+                                      : '—'}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+                            
+                            {/* BPS Threshold (if using bps signal rule) */}
+                            {t212SignalRule === 'bps' && (
+                              <div className="flex items-center justify-between gap-4">
+                                <span
+                                  className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}
+                                  title="Minimum |edge| to trade (no-trade band). 1 bp = 0.01%."
+                                >
+                                  Threshold
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={500}
+                                    step={1}
+                                    value={thresholdInput}
+                                    onChange={(e) => setThresholdInput(e.target.value)}
+                                    onBlur={(e) => commitThreshold(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        commitThreshold((e.target as HTMLInputElement).value);
+                                      }
+                                    }}
+                                    className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-xs ${
+                                      isDarkMode 
+                                        ? 'border-gray-600 text-white focus:border-amber-500' 
+                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
+                                    }`}
+                                  />
+                                  <span className={`text-xs ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>bps</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
           </div>
@@ -8300,18 +6872,12 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   // Find the main chart data (first payload that has 'date' field - not scatter data)
   const chartPayload = payload.find(p => p.payload && 'date' in p.payload);
   const data = chartPayload?.payload ?? payload[0].payload;
-  const h = horizon;
-  // Use close price directly from data, not from payload value (which could be EWMA)
-  const price = data.close;
-  const shortValue = data.ewma_short ?? null;
-  const longValue = data.ewma_long ?? null;
+  const shortValue = data.trendEwmaShort ?? null;
+  const longValue = data.trendEwmaLong ?? null;
   
   // Check if this is a future/forecast-only point (no historical price, only forecast data)
   const isFuturePoint = data.isFuture === true;
   const hasForecastData = isFuturePoint && (data.forecastCenter != null || data.forecastLower != null || data.forecastUpper != null);
-  const hasEwmaData = data.ewma_forecast != null;
-  const hasEwmaBiasedData = data.ewma_biased_forecast != null;
-  const showEwmaTrend = ewmaShortWindow != null && ewmaLongWindow != null && (shortValue != null || longValue != null);
   const formatPrice = (v: number | null) => (v != null ? v.toFixed(2) : '—');
   const formatDelta = (v: number | null | undefined) => {
     if (v == null || Number.isNaN(v)) return '—';
@@ -8518,71 +7084,6 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
           </div>
         )}
         
-        {/* EWMA Unbiased Section */}
-        {(data.ewma_past_forecast != null || data.ewma_future_forecast != null) && (
-          <div className={TOOLTIP_COLUMN_CLASS}>
-            <div className="mb-1">
-              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                isDarkMode ? 'text-purple-300' : 'text-purple-700'
-              }`}>
-                EWMA Unbiased
-              </span>
-            </div>
-
-            <div className="text-[10px] space-y-1">
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>Expected</span>
-                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
-                  {formatPrice(data.ewma_past_forecast ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_past_upper ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_past_lower ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Error</span>
-                <span className="font-mono tabular-nums">
-                  {data.ewma_past_forecast != null && (data.close ?? data.ewma_past_realized) != null ? (
-                    <span className={(data.ewma_past_forecast - (data.close ?? data.ewma_past_realized)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {formatDelta(data.ewma_past_forecast - (data.close ?? data.ewma_past_realized))}
-                    </span>
-                  ) : (
-                    <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>—</span>
-                  )}
-                </span>
-              </div>
-              <div className={`border-t my-1.5 ${isDarkMode ? 'border-slate-600/40' : 'border-gray-300/60'}`} />
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-300' : 'text-gray-700'}>Forecast</span>
-                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
-                  {formatPrice(data.ewma_future_forecast ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_future_upper ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_future_lower ?? null)}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-        
         {/* EWMA Trend Section */}
         {(data.trendEwmaShort != null || data.trendEwmaLong != null) && (
           <div className={TOOLTIP_COLUMN_CLASS}>
@@ -8624,71 +7125,6 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
                   </span>
                 </div>
               )}
-            </div>
-          </div>
-        )}
-        
-        {/* EWMA Biased Section */}
-        {(data.ewma_biased_past_forecast != null || data.ewma_biased_future_forecast != null) && (
-          <div className={TOOLTIP_COLUMN_CLASS}>
-            <div className="mb-1">
-              <span className={`text-[9px] font-semibold uppercase tracking-wider ${
-                isDarkMode ? 'text-cyan-300' : 'text-cyan-700'
-              }`}>
-                EWMA Biased
-              </span>
-            </div>
-
-            <div className="text-[10px] space-y-1">
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Expected</span>
-                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
-                  {formatPrice(data.ewma_biased_past_forecast ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_biased_past_upper ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_biased_past_lower ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Error</span>
-                <span className="font-mono tabular-nums">
-                  {data.ewma_biased_past_forecast != null && (data.close ?? data.ewma_biased_past_realized) != null ? (
-                    <span className={(data.ewma_biased_past_forecast - (data.close ?? data.ewma_biased_past_realized)) >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {formatDelta(data.ewma_biased_past_forecast - (data.close ?? data.ewma_biased_past_realized))}
-                    </span>
-                  ) : (
-                    <span className={isDarkMode ? 'text-slate-500' : 'text-gray-500'}>—</span>
-                  )}
-                </span>
-              </div>
-              <div className={`border-t my-2 ${isDarkMode ? 'border-slate-600/40' : 'border-gray-300/60'}`} />
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-200' : 'text-gray-700'}>Forecast</span>
-                <span className={`font-mono tabular-nums font-semibold ${isDarkMode ? 'text-cyan-200' : 'text-cyan-700'}`}>
-                  {formatPrice(data.ewma_biased_future_forecast ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Upper</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_biased_future_upper ?? null)}
-                </span>
-              </div>
-              <div className={`flex justify-between ${TOOLTIP_ROW_GAP}`}>
-                <span className={isDarkMode ? 'text-slate-400' : 'text-gray-500'}>Lower</span>
-                <span className="font-mono tabular-nums">
-                  {formatPrice(data.ewma_biased_future_lower ?? null)}
-                </span>
-              </div>
             </div>
           </div>
         )}
@@ -8955,60 +7391,4 @@ const AnimatedPriceDot = (props: any) => {
       }}
     />
   );
-};
-
-// Custom animated dot for EWMA line (purple) - smaller, refined style
-const AnimatedEwmaDot = (props: any) => {
-  const { cx, cy, payload } = props;
-  
-  // Don't render dot for points without EWMA data
-  if (!payload || payload.ewma_forecast == null) return null;
-  if (cx === undefined || cy === undefined) return null;
-  
-  return (
-    <circle
-      cx={cx}
-      cy={cy}
-      r={3.5}
-      fill="#A855F7"
-      stroke="rgba(255, 255, 255, 0.9)"
-      strokeWidth={1.5}
-      style={{
-        filter: 'drop-shadow(0 0 4px rgba(168, 85, 247, 0.6)) drop-shadow(0 0 2px rgba(168, 85, 247, 0.4))',
-        transition: 'all 0.12s ease-out',
-      }}
-    />
-  );
-};
-
-// Custom animated dot for EWMA Biased line (cyan/fuchsia) - smaller, refined style
-const createAnimatedEwmaBiasedDot = ({ isMaximized = false }: { isMaximized?: boolean }) => {
-  const DotComponent = (props: any) => {
-    const { cx, cy, payload } = props;
-    
-    // Don't render dot for points without EWMA Biased data
-    if (!payload || payload.ewma_biased_forecast == null) return null;
-    if (cx === undefined || cy === undefined) return null;
-    
-    // Fuchsia when maximized, cyan when not
-    const fillColor = isMaximized ? EWMA_BIASED_MAX_COLOR : EWMA_BIASED_COLOR;
-    const glowColor = isMaximized ? EWMA_BIASED_MAX_COLOR_RGB : EWMA_BIASED_COLOR_RGB;
-    
-    return (
-      <circle
-        cx={cx}
-        cy={cy}
-        r={3.5}
-        fill={fillColor}
-        stroke="rgba(255, 255, 255, 0.9)"
-        strokeWidth={1.5}
-        style={{
-          filter: `drop-shadow(0 0 4px rgba(${glowColor}, 0.6)) drop-shadow(0 0 2px rgba(${glowColor}, 0.4))`,
-          transition: 'all 0.15s ease-out',
-        }}
-      />
-    );
-  };
-  DotComponent.displayName = 'AnimatedEwmaBiasedDot';
-  return DotComponent;
 };

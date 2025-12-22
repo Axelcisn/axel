@@ -1,14 +1,14 @@
 {
-  "symbol": "SO",
+  "symbol": "CL",
   "method": "GARCH11-N",
   "date_t": "2025-12-12",
   "horizonTrading": 5,
   "h_eff_days": 7,
   "verifyDate": "2025-12-19",
   "domain": "log",
-  "created_at": "2025-12-21T13:02:11.188Z",
+  "created_at": "2025-12-21T13:02:07.044Z",
   "locked": true,
-  "y_hat": 84.44000244140625,
+  "y_hat": 78.33999633789062,
   "target": {
     "h": 5,
     "coverage": 0.95,
@@ -18,32 +18,32 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.010678887263682836,
+    "sigma_hat": 0.011979309034159244,
     "mu_star_used": 0,
     "window_start": "2023-12-11",
     "window_end": "2025-12-12",
-    "n": 11078,
-    "S_t": 84.44000244140625,
-    "sigma_forecast": 0.010678887263682836,
-    "sigma2_forecast": 0.0001140386331904475,
+    "n": 13268,
+    "S_t": 78.33999633789062,
+    "sigma_forecast": 0.011979309034159244,
+    "sigma2_forecast": 0.00014350384493588928,
     "critical_value": 1.96,
     "window_span": {
       "start": "2023-12-11",
       "end": "2025-12-12"
     },
     "volatility_diagnostics": {
-      "omega": 0.000011999692486366455,
+      "omega": 0.000013688258782689883,
       "alpha": 0.05,
       "beta": 0.85,
       "alpha_plus_beta": 0.9,
-      "unconditional_var": 0.00011999692486366454,
+      "unconditional_var": 0.00013688258782689882,
       "dist": "normal"
     }
   },
   "intervals": {
-    "L_h": 80.56128571202316,
-    "U_h": 88.50546449559184,
-    "band_width_bp": 427.49774743833456
+    "L_h": 74.34945251743503,
+    "U_h": 82.5447238469112,
+    "band_width_bp": 480.789231514136
   },
   "provenance": {
     "rng_seed": null,
@@ -61,8 +61,8 @@
   },
   "diagnostics": {
     "method_source": "GARCH11-N",
-    "m_log": 4.436041251893031,
-    "s_scale": 0.02399134894263621,
+    "m_log": 4.36105828149133,
+    "s_scale": 0.026674475610994137,
     "critical_type": "normal"
   },
   "critical": {

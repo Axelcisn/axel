@@ -21,7 +21,7 @@ import { CompanyInfo, ExchangeOption } from '@/lib/types/company';
 import { useDarkMode } from '@/lib/hooks/useDarkMode';
 import { useAutoCleanupForecasts, extractFileIdFromPath } from '@/lib/hooks/useAutoCleanupForecasts';
 import { resolveBaseMethod } from '@/lib/forecast/methods';
-import { PriceChart, EwmaSummary, EwmaReactionMapDropdownProps, EwmaWalkerPathPoint, TrendOverlayState } from '@/components/PriceChart';
+import { PriceChart, TrendOverlayState } from '@/components/PriceChart';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
   Trading212CfdConfig,
@@ -352,6 +352,10 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [harUseIntradayRv, setHarUseIntradayRv] = useState(true);
   const [rangeEwmaLambda, setRangeEwmaLambda] = useState(0.94);
   const [isVolForecastLoading, setIsVolForecastLoading] = useState(false);
+  const [volForecastError, setVolForecastError] = useState<string | null>(null);
+  
+  // STEP 3: Bulletproof forecast storage by selection key
+  const [forecastByKey, setForecastByKey] = useState<Record<string, any>>({});
   
   // Compute stable selection key for transition tracking
   const volSelectionKey = useMemo(() => {
@@ -459,35 +463,6 @@ export default function TimingPage({ params }: TimingPageProps) {
   
   // Track when horizon changes but forecast hasn't been regenerated
   const [forecastHorizonMismatch, setForecastHorizonMismatch] = useState(false);
-
-  // EWMA Walker diagnostics state
-  type EwmaWalkerPathPoint = {
-    date_t: string;
-    date_tp1: string;
-  S_t: number;
-  S_tp1: number;
-  y_hat_tp1: number;
-  L_tp1: number;
-  U_tp1: number;
-  sigma_t: number; // EWMA daily volatility at t
-};
-
-  const [ewmaSummary, setEwmaSummary] = useState<EwmaSummary | null>(null);
-  const [ewmaPath, setEwmaPath] = useState<EwmaWalkerPathPoint[] | null>(null);
-  const [isLoadingEwma, setIsLoadingEwma] = useState(false);
-  const [ewmaError, setEwmaError] = useState<string | null>(null);
-
-  // EWMA Biased (tilted) state
-  const [ewmaBiasedSummary, setEwmaBiasedSummary] = useState<EwmaSummary | null>(null);
-  const [ewmaBiasedPath, setEwmaBiasedPath] = useState<EwmaWalkerPathPoint[] | null>(null);
-  const [isLoadingEwmaBiased, setIsLoadingEwmaBiased] = useState(false);
-  const [ewmaBiasedError, setEwmaBiasedError] = useState<string | null>(null);
-
-  // EWMA Biased (Max) state - separate path so toggles don't mutate baseline params
-  const [ewmaBiasedMaxSummary, setEwmaBiasedMaxSummary] = useState<EwmaSummary | null>(null);
-  const [ewmaBiasedMaxPath, setEwmaBiasedMaxPath] = useState<EwmaWalkerPathPoint[] | null>(null);
-  const [isLoadingEwmaBiasedMax, setIsLoadingEwmaBiasedMax] = useState(false);
-  const [ewmaBiasedMaxError, setEwmaBiasedMaxError] = useState<string | null>(null);
 
   // EWMA Reaction Map state
   type ReactionBucketSummary = {
@@ -1418,6 +1393,47 @@ export default function TimingPage({ params }: TimingPageProps) {
         days: stats?.days ?? 0,
         firstDate: stats?.firstDate ?? "—",
         lastDate: stats?.lastDate ?? "—",
+        // Add volatility forecast bounds from forecastByKey
+        gbmBounds: (() => {
+          const key = `GBM|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        garchNormalBounds: (() => {
+          const key = `GARCH|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast?.garchDistribution === 'normal' ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        garchStudentBounds: (() => {
+          const key = `GARCH|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast?.garchDistribution === 'student' ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        harvBounds: (() => {
+          const key = `HAR-RV|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        rangeParkinsonBounds: (() => {
+          const key = `Range|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast?.rangeEstimator === 'parkinson' ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        rangeGarmanKlassBounds: (() => {
+          const key = `Range|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast?.rangeEstimator === 'garman-klass' ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        rangeRogersSatchellBounds: (() => {
+          const key = `Range|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast?.rangeEstimator === 'rogers-satchell' ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
+        rangeYangZhangBounds: (() => {
+          const key = `Range|h=${h}|cov=${coverage}`;
+          const forecast = forecastByKey[key];
+          return forecast?.rangeEstimator === 'yang-zhang' ? { lower: forecast.lower, upper: forecast.upper } : null;
+        })(),
       };
 
       if (process.env.NODE_ENV !== "production") {
@@ -1450,6 +1466,9 @@ export default function TimingPage({ params }: TimingPageProps) {
     summarizeRunStats,
     t212BaseRunsById,
     visibleWindow,
+    forecastByKey,
+    h,
+    coverage,
   ]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
@@ -1687,12 +1706,13 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [serverTargetSpec]);
 
   // Memoize forecast overlay props to prevent unnecessary re-renders
+  // STEP 3: Use strict key matching (no fallback chain)
   const forecastOverlayProps = useMemo(() => ({
-    activeForecast: fallbackOverlayForecast,
+    activeForecast: forecastByKey[volSelectionKey] ?? null,
     volModel,
     coverage,
     conformalState,
-  }), [fallbackOverlayForecast, volModel, coverage, conformalState]);
+  }), [forecastByKey, volSelectionKey, volModel, coverage, conformalState]);
 
   // Exchange TZ resolver helper
   function resolveExchangeTZ(opts: { canonicalTZ?: string | null; selectedExchange?: string | null }): string | null {
@@ -2222,312 +2242,6 @@ export default function TimingPage({ params }: TimingPageProps) {
   // Load conformal state on mount and when ticker changes
   useEffect(() => { loadConformalState(); }, [loadConformalState]);
 
-  // Load EWMA Walker diagnostics
-  const loadEwmaWalker = useCallback(async () => {
-    if (!params?.ticker) return;
-
-    try {
-      setIsLoadingEwma(true);
-      setEwmaError(null);
-
-      // Build query params including horizon
-      const query = new URLSearchParams({
-        lambda: '0.94',
-        h: String(h),
-        coverage: coverage.toString(),
-      });
-
-      console.debug("[EWMA] Loading unbiased walker", { symbol: params.ticker, h, coverage });
-      const res = await fetch(
-        `/api/volatility/ewma/${encodeURIComponent(params.ticker)}?${query.toString()}`
-      );
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `EWMA API error ${res.status}`);
-      }
-
-      const json = await res.json();
-
-      // Expecting shape like:
-      // { points: EwmaWalkerPoint[], piMetrics: {...}, zMean, zStd, directionHitRate, oosForecast }
-      const points = json.points || [];
-      const m = json.piMetrics || {};
-      const oosForecast = json.oosForecast || null;
-      const zMean = typeof json.zMean === "number" ? json.zMean : NaN;
-      const zStd = typeof json.zStd === "number" ? json.zStd : NaN;
-      const directionHitRate =
-        typeof json.directionHitRate === "number" ? json.directionHitRate : NaN;
-
-      const coverageValue = typeof m.empiricalCoverage === "number"
-        ? m.empiricalCoverage
-        : NaN;
-      const targetCoverage = typeof m.coverage === "number"
-        ? m.coverage
-        : NaN;
-      const intervalScore = typeof m.intervalScore === "number"
-        ? m.intervalScore
-        : NaN;
-      const avgWidth = typeof m.avgWidth === "number"
-        ? m.avgWidth
-        : NaN;
-
-      setEwmaSummary({
-        coverage: coverageValue,
-        targetCoverage,
-        intervalScore,
-        avgWidth,
-        zMean,
-        zStd,
-        directionHitRate,
-        nPoints: points.length,  // Keep as in-sample count only
-      });
-
-      // Map to a clean path type for chart overlay
-      const mappedPath: EwmaWalkerPathPoint[] = points.map((p: any) => ({
-        date_t: p.date_t,
-        date_tp1: p.date_tp1,
-        S_t: p.S_t,
-        S_tp1: p.S_tp1,
-        y_hat_tp1: p.y_hat_tp1,
-        L_tp1: p.L_tp1,
-        U_tp1: p.U_tp1,
-        sigma_t: p.sigma_t,
-      }));
-
-      // Append OOS tail if present (extends EWMA line/band into future)
-      if (oosForecast && oosForecast.targetDate) {
-        mappedPath.push({
-          date_t: oosForecast.originDate,
-          date_tp1: oosForecast.targetDate,
-          S_t: oosForecast.S_t,
-          // No realized price for OOS; use forecast center as placeholder
-          S_tp1: oosForecast.y_hat,
-          y_hat_tp1: oosForecast.y_hat,
-          L_tp1: oosForecast.L,
-          U_tp1: oosForecast.U,
-          sigma_t: oosForecast.sigma_t,
-        });
-      }
-
-      setEwmaPath(mappedPath);
-    } catch (err: any) {
-      console.error("[EWMA] loadEwmaWalker error", err);
-      setEwmaError(err?.message || "Failed to load EWMA walker data.");
-      setEwmaSummary(null);
-      setEwmaPath(null);
-    } finally {
-      setIsLoadingEwma(false);
-    }
-  }, [params?.ticker, h, coverage]);
-
-  // Load EWMA Walker on mount/ticker change/horizon change
-  useEffect(() => {
-    loadEwmaWalker();
-  }, [loadEwmaWalker]);
-
-  // Track if biased EWMA was ever loaded (so we know to auto-refresh on horizon change)
-  const biasedEverLoaded = useRef(false);
-
-  // Load EWMA Biased Walker (uses Reaction Map tilt)
-  const loadEwmaBiasedWalker = useCallback(async () => {
-    if (!params?.ticker) return;
-
-    try {
-      setIsLoadingEwmaBiased(true);
-      setEwmaBiasedError(null);
-
-      const query = new URLSearchParams({
-        lambda: reactionLambda.toString(),
-        coverage: coverage.toString(),              // main coverage
-        h: String(h),
-        trainFraction: reactionTrainFraction.toString(),
-        minTrainObs: reactionMinTrainObs.toString(),
-        shrinkFactor: ewmaShrinkK.toString(),
-      });
-
-      const res = await fetch(
-        `/api/volatility/ewma-biased/${encodeURIComponent(params.ticker)}?${query.toString()}`
-      );
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `EWMA Biased API error ${res.status}`);
-      }
-
-      const json = await res.json();
-
-      if (!json.success) {
-        throw new Error(json.error || "Failed to load biased EWMA");
-      }
-
-      const {
-        points,
-        piMetrics,
-        zMean,
-        zStd,
-        directionHitRate,
-        oosForecast,
-      } = json;
-
-      const m = piMetrics || {};
-
-      setEwmaBiasedSummary({
-        coverage: typeof m.empiricalCoverage === "number" ? m.empiricalCoverage : NaN,
-        targetCoverage: typeof m.coverage === "number" ? m.coverage : NaN,
-        intervalScore: typeof m.intervalScore === "number" ? m.intervalScore : NaN,
-        avgWidth: typeof m.avgWidth === "number" ? m.avgWidth : NaN,
-        zMean: typeof zMean === "number" ? zMean : NaN,
-        zStd: typeof zStd === "number" ? zStd : NaN,
-        directionHitRate: typeof directionHitRate === "number" ? directionHitRate : NaN,
-        nPoints: points?.length ?? 0,
-      });
-
-      const mappedPath: EwmaWalkerPathPoint[] = (points || []).map((p: any) => ({
-        date_t: p.date_t,
-        date_tp1: p.date_tp1,
-        S_t: p.S_t,
-        S_tp1: p.S_tp1,
-        y_hat_tp1: p.y_hat_tp1,
-        L_tp1: p.L_tp1,
-        U_tp1: p.U_tp1,
-        sigma_t: p.sigma_t,
-      }));
-
-      // Append OOS tail if present
-      if (oosForecast && oosForecast.targetDate) {
-        mappedPath.push({
-          date_t: oosForecast.originDate,
-          date_tp1: oosForecast.targetDate,
-          S_t: oosForecast.S_t,
-          S_tp1: oosForecast.y_hat,
-          y_hat_tp1: oosForecast.y_hat,
-          L_tp1: oosForecast.L,
-          U_tp1: oosForecast.U,
-          sigma_t: oosForecast.sigma_t,
-        });
-      }
-
-      setEwmaBiasedPath(mappedPath);
-    } catch (err: any) {
-      console.error("[EWMA Biased] loadEwmaBiasedWalker error", err);
-      setEwmaBiasedError(err?.message || "Failed to load biased EWMA.");
-      setEwmaBiasedSummary(null);
-      setEwmaBiasedPath(null);
-    } finally {
-      setIsLoadingEwmaBiased(false);
-    }
-  }, [params?.ticker, h, reactionLambda, coverage, reactionTrainFraction, reactionMinTrainObs, ewmaShrinkK]);
-
-  // Auto-refresh biased EWMA when horizon/coverage changes (only if it was previously loaded)
-  useEffect(() => {
-    if (biasedEverLoaded.current) {
-      loadEwmaBiasedWalker();
-    }
-  }, [loadEwmaBiasedWalker]);
-
-  // Load EWMA Biased (Max) Walker using the optimized config without mutating baseline params
-  const loadEwmaBiasedMaxWalker = useCallback(async () => {
-    if (!params?.ticker) return;
-    if (!biasedMaxCalmarResult) return;
-
-    try {
-      setIsLoadingEwmaBiasedMax(true);
-      setEwmaBiasedMaxError(null);
-
-      const maxCfg = getMaxEwmaConfig();
-      if (!maxCfg || maxCfg.lambda == null) {
-        setEwmaBiasedMaxSummary(null);
-        setEwmaBiasedMaxPath([]);
-        setIsLoadingEwmaBiasedMax(false);
-        return;
-      }
-      const query = new URLSearchParams({
-        lambda: maxCfg.lambda.toString(),
-        coverage: coverage.toString(), // main coverage
-        h: String(h),
-        minTrainObs: reactionMinTrainObs.toString(),
-        shrinkFactor: ewmaShrinkK.toString(),
-        trainFraction: (maxCfg.trainFraction ?? reactionTrainFraction).toString(),
-      });
-
-      const res = await fetch(
-        `/api/volatility/ewma-biased/${encodeURIComponent(params.ticker)}?${query.toString()}`
-      );
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `EWMA Biased (Max) API error ${res.status}`);
-      }
-
-      const json = await res.json();
-
-      if (!json.success) {
-        throw new Error(json.error || "Failed to load biased EWMA (Max)");
-      }
-
-      const { points, piMetrics, zMean, zStd, directionHitRate, oosForecast } = json;
-      const m = piMetrics || {};
-
-      setEwmaBiasedMaxSummary({
-        coverage: typeof m.empiricalCoverage === "number" ? m.empiricalCoverage : NaN,
-        targetCoverage: typeof m.coverage === "number" ? m.coverage : NaN,
-        intervalScore: typeof m.intervalScore === "number" ? m.intervalScore : NaN,
-        avgWidth: typeof m.avgWidth === "number" ? m.avgWidth : NaN,
-        zMean: typeof zMean === "number" ? zMean : NaN,
-        zStd: typeof zStd === "number" ? zStd : NaN,
-        directionHitRate: typeof directionHitRate === "number" ? directionHitRate : NaN,
-        nPoints: points?.length ?? 0,
-      });
-
-      const mappedPath: EwmaWalkerPathPoint[] = (points || []).map((p: any) => ({
-        date_t: p.date_t,
-        date_tp1: p.date_tp1,
-        S_t: p.S_t,
-        S_tp1: p.S_tp1,
-        y_hat_tp1: p.y_hat_tp1,
-        L_tp1: p.L_tp1,
-        U_tp1: p.U_tp1,
-        sigma_t: p.sigma_t,
-      }));
-
-      if (oosForecast && oosForecast.targetDate) {
-        mappedPath.push({
-          date_t: oosForecast.originDate,
-          date_tp1: oosForecast.targetDate,
-          S_t: oosForecast.S_t,
-          S_tp1: oosForecast.y_hat,
-          y_hat_tp1: oosForecast.y_hat,
-          L_tp1: oosForecast.L,
-          U_tp1: oosForecast.U,
-          sigma_t: oosForecast.sigma_t,
-        });
-      }
-
-      if (!mappedPath.length) {
-        console.warn("[EWMA Biased Max] empty path", { reason: "noPoints", ticker: params.ticker });
-      }
-
-      setEwmaBiasedMaxPath(mappedPath);
-    } catch (err: any) {
-      console.error("[EWMA Biased Max] loadEwmaBiasedMaxWalker error", err);
-      setEwmaBiasedMaxError(err?.message || "Failed to load biased EWMA (Max).");
-      setEwmaBiasedMaxSummary(null);
-      setEwmaBiasedMaxPath(null);
-    } finally {
-      setIsLoadingEwmaBiasedMax(false);
-    }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs, reactionTrainFraction, getMaxEwmaConfig, biasedMaxCalmarResult, ewmaShrinkK]);
-
-  // Auto-load/refresh max path when optimizer results exist; clear when not available
-  useEffect(() => {
-    if (biasedMaxCalmarResult) {
-      loadEwmaBiasedMaxWalker();
-    } else {
-      setEwmaBiasedMaxSummary(null);
-      setEwmaBiasedMaxPath(null);
-    }
-  }, [biasedMaxCalmarResult, loadEwmaBiasedMaxWalker]);
-
   // Load EWMA Reaction Map (manual trigger only)
   const loadReactionMap = useCallback(async () => {
     if (!params?.ticker) return;
@@ -2589,18 +2303,14 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
   }, [params?.ticker, reactionLambda, coverage, h, reactionTrainFraction, reactionMinTrainObs]);
 
-  // Auto-load reaction map and biased EWMA when λ or Train% changes
-  // Also load biased EWMA on initial mount for T212 auto-run
+  // Auto-load reaction map when λ or Train% changes
   useEffect(() => {
     // Debounce to avoid too many calls while typing
     const timeout = setTimeout(() => {
       loadReactionMap();
-      // Always load biased EWMA for T212 auto-population
-      loadEwmaBiasedWalker();
-      biasedEverLoaded.current = true;
     }, 300);
     return () => clearTimeout(timeout);
-  }, [reactionLambda, reactionTrainFraction, loadReactionMap, loadEwmaBiasedWalker]);
+  }, [reactionLambda, reactionTrainFraction, loadReactionMap]);
 
   // Core optimization function - runs the optimizer API and updates state
   const runOptimization = useCallback(async (options?: { applyBest?: boolean }) => {
@@ -2656,7 +2366,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         setReactionLambda(best.lambda);
         setReactionTrainFraction(best.trainFraction);
         setIsReactionMaximized(true);
-        biasedEverLoaded.current = true;
       }
       
       console.log("[EWMA Optimize] Optimization complete:", {
@@ -2885,23 +2594,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     ewmaShrinkK,
   ]);
 
-  // Auto-run optimization on initial load when unbiased EWMA is ready
-  const hasAutoOptimized = useRef(false);
-  useEffect(() => {
-    // Only auto-optimize once per ticker, and only when unbiased EWMA is loaded
-    if (hasAutoOptimized.current) return;
-    if (!ewmaPath || ewmaPath.length === 0) return;
-    if (!params?.ticker) return;
-
-    console.log("[EWMA Optimize] Auto-running optimization on page load...");
-    hasAutoOptimized.current = true;
-    runOptimization({ applyBest: false }); // Don't apply best, just populate candidates
-  }, [ewmaPath, params?.ticker, runOptimization]);
-
-  // Reset auto-optimize flag when ticker changes
-  useEffect(() => {
-    hasAutoOptimized.current = false;
-  }, [params?.ticker]);
 
   // EWMA Maximize button handler - now only toggles biased overlay and applies best config
   const handleMaximizeReaction = useCallback(() => {
@@ -2909,7 +2601,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     if (reactionOptimizationBest) {
       setReactionLambda(reactionOptimizationBest.lambda);
       setIsReactionMaximized(true);
-      biasedEverLoaded.current = true;
     } else {
       // Fallback: run optimization if somehow we don't have results yet
       runOptimization({ applyBest: true });
@@ -2961,6 +2652,18 @@ export default function TimingPage({ params }: TimingPageProps) {
       flipLong: number;
       flipShort: number;
     } | null;
+  };
+
+  // Stub type for EWMA simulation (no longer used, but kept for backward compatibility)
+  type EwmaWalkerPathPoint = {
+    date_t: string;
+    date_tp1: string;
+    S_t: number;
+    S_tp1: number;
+    y_hat_tp1: number;
+    L_tp1: number;
+    U_tp1: number;
+    sigma_t: number;
   };
 
   const quantile = (arr: number[], q: number): number => {
@@ -3229,16 +2932,11 @@ export default function TimingPage({ params }: TimingPageProps) {
           throw new Error('No canonical data available');
         }
 
-        // Choose the EWMA path based on source (or explicit override)
-        const ewmaPathForSim =
-          opts?.ewmaPathOverride ?? (source === "biased" ? ewmaBiasedPath : ewmaPath);
+        // EWMA simulation paths no longer available
+        const ewmaPathForSim = opts?.ewmaPathOverride ?? null;
 
         if (!isNoTradeBaseline && (!ewmaPathForSim || ewmaPathForSim.length === 0)) {
-          setT212Error(
-            source === "biased"
-              ? 'Need EWMA Biased path to run sim. Click "Biased" button first.'
-              : 'Need EWMA Unbiased path to run sim.'
-          );
+          setT212Error('EWMA simulation paths have been removed. This feature is no longer supported.');
           setIsRunningT212Sim(false);
           return;
         }
@@ -3486,8 +3184,6 @@ export default function TimingPage({ params }: TimingPageProps) {
     [
       params.ticker,
       t212CanonicalRows,
-      ewmaPath,
-      ewmaBiasedPath,
       reactionMapSummary,
       t212ThresholdFrac,
       t212Leverage,
@@ -3517,21 +3213,6 @@ export default function TimingPage({ params }: TimingPageProps) {
       fetchCanonicalRows,
     ]
   );
-
-  // Stable handlers for EWMA loading - deduplication check moved to PriceChart
-  // These are intentionally simple to maintain stable callback references
-  const handleLoadBiasedClick = useCallback(() => {
-    biasedEverLoaded.current = true;
-    loadEwmaBiasedWalker();
-  }, [loadEwmaBiasedWalker]);
-
-  const handleLoadBiasedMaxClick = useCallback(() => {
-    loadEwmaBiasedMaxWalker();
-  }, [loadEwmaBiasedMaxWalker]);
-
-  const handleLoadUnbiasedClick = useCallback(() => {
-    loadEwmaWalker();
-  }, [loadEwmaWalker]);
 
   // Debug: Log T212 table row values whenever runs change
   useEffect(() => {
@@ -3674,153 +3355,6 @@ export default function TimingPage({ params }: TimingPageProps) {
       baselineVerifyLoggedRef.current = false;
     }
   }, [simConfigKey]);
-
-  // Auto-run baseline T212 sims when data is ready (always without trend tilt)
-  useEffect(() => {
-    if (!isCfdEnabled) return;
-    if (!ewmaPath || ewmaPath.length === 0) return;
-    if (!ewmaBiasedPath || ewmaBiasedPath.length === 0) return;
-    if (!reactionMapSummary) return;
-    if (!biasedMaxCalmarResult) return;
-
-    const maxConfig = getMaxEwmaConfig();
-    const isNoTradeMax = biasedMaxCalmarResult.lambdaStar == null;
-    if (!isNoTradeMax && (!ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0)) return;
-    const specs: Array<{
-      source: "unbiased" | "biased";
-      runId: T212RunId;
-      label: string;
-      opts?: RunTrading212SimOptions;
-      ewmaPathOverride?: EwmaWalkerPathPoint[] | null;
-    }> = [
-      { source: "unbiased", runId: "ewma-unbiased", label: "EWMA Unbiased", ewmaPathOverride: ewmaPath ?? null },
-      { source: "biased", runId: "ewma-biased", label: "EWMA Biased", ewmaPathOverride: ewmaBiasedPath ?? null },
-      {
-        source: "biased",
-        runId: "ewma-biased-max",
-        label: "EWMA Biased (Max)",
-        ewmaPathOverride: isNoTradeMax ? null : ewmaBiasedMaxPath ?? null,
-        opts: {
-          lambdaOverride: maxConfig?.lambda ?? null,
-          trainFractionOverride: maxConfig?.trainFraction ?? null,
-        },
-      },
-    ];
-
-    (async () => {
-      console.log("[T212 Auto-Run] Seeding baseline sims", specs.map((s) => s.runId));
-      for (const spec of specs) {
-        if (
-          spec.runId === "ewma-biased-max" &&
-          !isNoTradeMax &&
-          (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)
-        ) {
-          continue;
-        }
-        await runTrading212SimForSource(spec.source, spec.runId, spec.label, {
-          autoSelect: false,
-          useTrendTilt: false,
-          trendWeight: null,
-          ewmaPathOverride: spec.ewmaPathOverride,
-          ...spec.opts,
-        });
-      }
-    })();
-  }, [
-    params?.ticker,
-    isCfdEnabled,
-    ewmaPath,
-    ewmaBiasedPath,
-    ewmaBiasedMaxPath,
-    reactionMapSummary,
-    biasedMaxCalmarResult,
-    getMaxEwmaConfig,
-    runTrading212SimForSource,
-    h,
-    coverage,
-    reactionLambda,
-    reactionTrainFraction,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
-    t212ThresholdFrac,
-    t212DailyLongSwap,
-    t212DailyShortSwap,
-    trendShortWindow,
-    trendLongWindow,
-  ]);
-
-  // Run trend-tilted variants when Trend mode is enabled, without touching baseline runs
-  useEffect(() => {
-    if (!isCfdEnabled) return;
-    if (!simulationMode.withTrend) return;
-    if (!ewmaBiasedPath || ewmaBiasedPath.length === 0) return;
-    if (!reactionMapSummary) return;
-
-    const maxConfig = getMaxEwmaConfig();
-    const isNoTradeMax = biasedMaxCalmarResult?.lambdaStar == null;
-    if (!isNoTradeMax && (!ewmaBiasedMaxPath || ewmaBiasedMaxPath.length === 0)) return;
-    const specs: Array<{ runId: T212RunId; label: string; opts?: RunTrading212SimOptions; ewmaPathOverride?: EwmaWalkerPathPoint[] | null }> = [
-      { runId: "ewma-biased-trend", label: "EWMA Biased + Trend", ewmaPathOverride: ewmaBiasedPath ?? null },
-      {
-        runId: "ewma-biased-max-trend",
-        label: "EWMA Biased (Max) + Trend",
-        ewmaPathOverride: isNoTradeMax ? null : ewmaBiasedMaxPath ?? null,
-        opts: {
-          lambdaOverride: maxConfig?.lambda ?? null,
-          trainFractionOverride: maxConfig?.trainFraction ?? null,
-        },
-      },
-    ];
-
-    (async () => {
-      console.log(
-        "[T212 Auto-Run] Seeding trend sims",
-        specs.map((s) => s.runId),
-        "trendWeight",
-        effectiveTrendWeight
-      );
-      for (const spec of specs) {
-        if (
-          spec.runId === "ewma-biased-max-trend" &&
-          !isNoTradeMax &&
-          (!spec.ewmaPathOverride || spec.ewmaPathOverride.length === 0)
-        ) {
-          continue;
-        }
-        await runTrading212SimForSource("biased", spec.runId, spec.label, {
-          autoSelect: false,
-          useTrendTilt: true,
-          trendWeight: effectiveTrendWeight,
-          ewmaPathOverride: spec.ewmaPathOverride,
-          ...spec.opts,
-        });
-      }
-    })();
-  }, [
-    params?.ticker,
-    isCfdEnabled,
-    simulationMode.withTrend,
-    ewmaBiasedPath,
-    ewmaBiasedMaxPath,
-    reactionMapSummary,
-    biasedMaxCalmarResult,
-    getMaxEwmaConfig,
-    effectiveTrendWeight,
-    runTrading212SimForSource,
-    h,
-    coverage,
-    reactionLambda,
-    reactionTrainFraction,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
-    t212ThresholdFrac,
-    t212DailyLongSwap,
-    t212DailyShortSwap,
-    trendShortWindow,
-    trendLongWindow,
-  ]);
 
   // Debug: Monitor conformal state changes
   useEffect(() => {
@@ -4203,6 +3737,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       return emitVolResult({ ok: false, forecast: null, reason: 'NO_HISTORY' }, "no-canonical-data");
     }
 
+    // CRITICAL: Set loading and clear stale forecast at start
+    setIsVolForecastLoading(true);
+    setVolForecastError(null);
+    setActiveForecast(null); // Clear stale forecast immediately
     setIsGeneratingVolatility(true);
 
     // Construct the model name for API (explicit, user-driven)
@@ -4273,6 +3811,20 @@ export default function TimingPage({ params }: TimingPageProps) {
       }
 
       console.log("[VOL] POST", { model: selectedModel, estimator: resolvedEstimator });
+
+      // ============================================================================
+      // COMPREHENSIVE REQUEST DIAGNOSTIC (Step 1: Prove request h changes)
+      // ============================================================================
+      console.log("🔍 [COMPREHENSIVE-REQUEST-CHECK] Before fetch /api/volatility:", {
+        volSelectionKey,
+        requestBody: {
+          model: selectedModel,
+          h: h,
+          coverage: effectiveCoverage,
+        },
+        stateSnapshot: { h, coverage, volModel, garchEstimator, rangeEstimator },
+        timestamp: new Date().toISOString(),
+      });
 
       // ============================================================================
       // STEP 1 DIAGNOSTIC: Log forecast request details (especially for Range)
@@ -4360,14 +3912,16 @@ export default function TimingPage({ params }: TimingPageProps) {
         // Handle error response with content-type detection
         const contentType = resp.headers.get('content-type') || '';
         let reason: string | undefined;
+        let errorMessage = `Server error ${resp.status}`;
         
         if (contentType.includes('application/json')) {
           const errorData = await resp.json();
-          const errorMessage = errorData.error || errorData.message || JSON.stringify(errorData);
+          errorMessage = errorData.error || errorData.message || JSON.stringify(errorData);
           console.error('[VOL] API error:', errorData);
           console.error('[VOL] Full error details:', errorData);
           const detailedError = errorData.details ? `${errorMessage} - ${errorData.details}` : errorMessage;
           setVolatilityError(detailedError);
+          setVolForecastError(detailedError); // Also set transition error
           const normalizedMessage = typeof errorMessage === 'string' ? errorMessage.toLowerCase() : '';
           if (resp.status === 422) {
             if (errorData.code === 'INSUFFICIENT_GBM_DATA') {
@@ -4388,7 +3942,9 @@ export default function TimingPage({ params }: TimingPageProps) {
           // Likely HTML error page from server crash
           const htmlText = await resp.text();
           console.error('[VOL] Server error body:', htmlText);
-          setVolatilityError(`Server error ${resp.status}. Check console for details.`);
+          errorMessage = `Server error ${resp.status}. Check console for details.`;
+          setVolatilityError(errorMessage);
+          setVolForecastError(errorMessage); // Also set transition error
           reason = 'SERVER_ERROR';
         }
         switch (reason) {
@@ -4434,36 +3990,47 @@ export default function TimingPage({ params }: TimingPageProps) {
 
       setModelAvailabilityMessage(null);
       
+      // Tag forecast with selection key BEFORE storing
+      const forecastWithKey = { ...data, _key: volSelectionKey };
+      
+      // STEP 3: Store forecast by key (bulletproof - no fallback chains)
+      setForecastByKey(prev => ({ ...prev, [volSelectionKey]: forecastWithKey }));
+      
       if (volModel === 'GBM') {
         // GBM from Volatility card is our baseline
-        setGbmForecast(data);    // feed green cone baseline
+        setGbmForecast(forecastWithKey);    // feed green cone baseline
         setVolForecast(null);    // GBM is not considered a "vol" model
-        setBaseForecast(data);   // Store as base forecast for conformal calibration
+        setBaseForecast(forecastWithKey);   // Store as base forecast for conformal calibration
       } else {
         // GARCH / HAR / Range
-        setVolForecast(data);    // last volatility model run
-        setBaseForecast(data);   // Store as base forecast for conformal calibration
+        setVolForecast(forecastWithKey);    // last volatility model run
+        setBaseForecast(forecastWithKey);   // Store as base forecast for conformal calibration
         // NOTE: DO NOT touch gbmForecast here – we keep the baseline
       }
       
       // Always update active forecast so chart reflects the latest model selection
-      setActiveForecast(data);
-      setCurrentForecast(data);        // keep for legacy compatibility if needed elsewhere
+      setActiveForecast(forecastWithKey);
+      setCurrentForecast(forecastWithKey);        // keep for legacy compatibility if needed elsewhere
       console.log("[VOL][handler] setForecast", { 
         volModel,
-        method: data?.method, 
-        date: data?.date_t, 
-        is_active: data?.is_active,
+        method: forecastWithKey?.method, 
+        date: forecastWithKey?.date_t, 
+        is_active: forecastWithKey?.is_active,
+        _key: forecastWithKey?._key,
         gbmUpdated: volModel === 'GBM',
         volUpdated: volModel !== 'GBM'
       });
 
       // Note: Don't call loadLatestForecast here - pipeline will handle state management
-      return emitVolResult({ ok: true, forecast: data }, "success");
+      return emitVolResult({ ok: true, forecast: forecastWithKey }, "success");
     } catch (err) {
-      setVolatilityError(err instanceof Error ? err.message : 'Unknown error');
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setVolatilityError(errorMsg);
+      setVolForecastError(errorMsg); // Also set transition error
+      console.error('[VOL][handler] exception:', err);
       return emitVolResult({ ok: false, forecast: null, reason: 'ERROR' }, "exception");
     } finally {
+      // CRITICAL: Always clear loading state in finally block
       setIsGeneratingVolatility(false);
       setIsVolForecastLoading(false);
     }
@@ -4923,16 +4490,18 @@ export default function TimingPage({ params }: TimingPageProps) {
     // Update UI state immediately
     setH(newH);
     
+    // CRITICAL: Clear ALL forecast state to prevent showing stale h=1 forecast under h=2/3/5
+    setActiveForecast(null);
+    setForecastByKey(prev => ({ ...prev, [volSelectionKey]: null })); // Clear current key
+    
     // Mark that forecast may be stale if we have an active forecast
-    if (activeForecast) {
-      setForecastHorizonMismatch(true);
-    }
+    setForecastHorizonMismatch(true);
 
-    console.log(`[HorizonChange] Updated horizon to h=${newH}. Volatility forecast will auto-update for Inspector.`);
+    console.log(`[HorizonChange] Updated horizon to h=${newH}. Cleared stale forecast. Auto-fetch will trigger.`);
     
     // Auto-triggers volatility forecast via useEffect (for Inspector)
     // Conformal calibration only runs when user clicks "Generate"
-  }, [activeForecast]);
+  }, [volSelectionKey]);
 
   const handleCoverageChange = useCallback((newCoverage: number) => {
     setCoverage(newCoverage);
@@ -6441,12 +6010,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       />
       
       <div className="mx-auto w-full max-w-[1400px] px-6 md:px-10 py-6 bg-background text-foreground">
-        <div className="grid grid-cols-[auto_1fr_auto] gap-5 items-center mb-8">
-          <div className="flex items-center">
-            <div className="w-32 h-32 rounded-full bg-gradient-to-br from-orange-500 via-rose-500 to-amber-400 shadow-xl ring-1 ring-white/10 flex items-center justify-center text-3xl font-semibold text-white">
-              {logoLetter}
-            </div>
-          </div>
+        <div className="grid grid-cols-[1fr_auto] gap-5 items-center mb-8">
           <div className="space-y-3">
               <h1 className="text-4xl font-semibold tracking-tight text-white">
                 {companyName || tickerDisplay}
@@ -6489,6 +6053,10 @@ export default function TimingPage({ params }: TimingPageProps) {
       </div>
       {/* Price Chart Section */}
       <div className="mb-4">
+        {process.env.NODE_ENV === "development" && (() => {
+          console.debug("[VOL-TRANS][parent]", { volSelectionKey, isVolForecastLoading, volForecastError });
+          return null;
+        })()}
         <PriceChart 
           symbol={params.ticker} 
           className="w-full"
@@ -6498,47 +6066,18 @@ export default function TimingPage({ params }: TimingPageProps) {
           forecastOverlay={forecastOverlayProps}
           volSelectionKey={volSelectionKey}
           isVolForecastLoading={isVolForecastLoading}
-          ewmaPath={ewmaPath}
-          ewmaSummary={ewmaSummary}
-          ewmaBiasedPath={ewmaBiasedPath}
-          ewmaBiasedSummary={ewmaBiasedSummary}
-          ewmaBiasedMaxPath={ewmaBiasedMaxPath}
-          ewmaBiasedMaxSummary={ewmaBiasedMaxSummary}
-          ewmaShortSeries={trendShortEwma ?? undefined}
-          ewmaLongSeries={trendLongEwma ?? undefined}
+          trendOverlays={trendOverlays}
+          showTrendEwma={trendOverlays.ewma}
+          onToggleEwmaTrend={toggleEwmaTrendOverlay}
           ewmaShortWindow={trendShortWindow}
           ewmaLongWindow={trendLongWindow}
-          trendOverlays={trendOverlays}
-          trendEwmaShort={trendEwmaSeries.short}
-          trendEwmaLong={trendEwmaSeries.long}
+          ewmaShortSeries={trendEwmaSeries.short}
+          ewmaLongSeries={trendEwmaSeries.long}
           trendEwmaCrossSignals={trendEwmaSeries.crossSignals}
-          onToggleEwmaTrend={toggleEwmaTrendOverlay}
           momentumScoreSeries={chartMomentum?.scoreSeries ?? undefined}
           momentumPeriod={chartMomentum?.period ?? trendMomentumPeriod}
           adxPeriod={chartAdx?.period ?? 14}
           adxSeries={chartAdx?.series ?? undefined}
-          onLoadEwmaUnbiased={handleLoadUnbiasedClick}
-          onLoadEwmaBiased={handleLoadBiasedClick}
-          onLoadEwmaBiasedMax={handleLoadBiasedMaxClick}
-          isLoadingEwmaBiased={isLoadingEwmaBiased}
-          isLoadingEwmaBiasedMax={isLoadingEwmaBiasedMax}
-          onSelectBiasedMaxObjective={setBiasedMaxObjective}
-          ewmaReactionMapDropdown={{
-            reactionLambda,
-            setReactionLambda,
-            reactionTrainFraction,
-            setReactionTrainFraction,
-            onMaximize: handleMaximizeReaction,
-            onReset: () => {
-              setReactionLambda(0.94);
-              setReactionTrainFraction(0.7);
-              setIsReactionMaximized(false);
-            },
-            isLoadingReaction,
-            isOptimizingReaction,
-            isMaximized: isReactionMaximized,
-            hasOptimizationResults: !!reactionOptimizationBest,
-          }}
           horizonCoverage={{
             h,
             coverage,
@@ -6560,8 +6099,6 @@ export default function TimingPage({ params }: TimingPageProps) {
                 setVolWindow(n);
               }
             },
-            ewmaLambda: rangeEwmaLambda,
-            onEwmaLambdaChange: setRangeEwmaLambda,
             degreesOfFreedom: garchDf,
             onDegreesOfFreedomChange: setGarchDf,
             gbmLambda,
@@ -6587,7 +6124,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           t212PositionFraction={t212PositionFraction}
           t212ThresholdFrac={t212ThresholdFrac}
           t212CostBps={t212CostBps}
-          ewmaShrinkK={ewmaShrinkK}
           t212ZMode={t212ZMode}
           t212SignalRule={t212SignalRule}
           t212ZDisplayThresholds={t212ZDisplayThresholds}
@@ -6600,7 +6136,6 @@ export default function TimingPage({ params }: TimingPageProps) {
           onChangeT212PositionFraction={setT212PositionFraction}
           onChangeT212ThresholdPct={setT212ThresholdFrac}
           onChangeT212CostBps={setT212CostBps}
-          onChangeEwmaShrinkK={setEwmaShrinkK}
           onOptimizeZThresholds={runZThresholdOptimization}
         />
       </div>
@@ -6867,8 +6402,6 @@ export default function TimingPage({ params }: TimingPageProps) {
       {/* Trend Analysis Section */}
       <TrendSection
         ticker={params.ticker}
-        ewmaPath={ewmaPath}
-        ewmaSummary={ewmaSummary}
         horizon={h}
         coverage={coverage}
         shortWindowOverride={trendShortWindow}

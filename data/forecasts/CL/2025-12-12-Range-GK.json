@@ -1,14 +1,14 @@
 {
-  "symbol": "SO",
-  "method": "GARCH11-N",
+  "symbol": "CL",
+  "method": "Range-GK",
   "date_t": "2025-12-12",
   "horizonTrading": 5,
   "h_eff_days": 7,
   "verifyDate": "2025-12-19",
   "domain": "log",
-  "created_at": "2025-12-21T13:02:11.188Z",
+  "created_at": "2025-12-21T13:02:07.588Z",
   "locked": true,
-  "y_hat": 84.44000244140625,
+  "y_hat": 78.33999633789062,
   "target": {
     "h": 5,
     "coverage": 0.95,
@@ -18,51 +18,51 @@
   },
   "estimates": {
     "mu_star_hat": 0,
-    "sigma_hat": 0.010678887263682836,
+    "sigma_hat": 0.011376408078219283,
     "mu_star_used": 0,
     "window_start": "2023-12-11",
     "window_end": "2025-12-12",
-    "n": 11078,
-    "S_t": 84.44000244140625,
-    "sigma_forecast": 0.010678887263682836,
-    "sigma2_forecast": 0.0001140386331904475,
+    "n": 13268,
+    "S_t": 78.33999633789062,
+    "sigma_forecast": 0.011376408078219283,
+    "sigma2_forecast": 0.00012942266076217297,
     "critical_value": 1.96,
     "window_span": {
       "start": "2023-12-11",
       "end": "2025-12-12"
     },
     "volatility_diagnostics": {
-      "omega": 0.000011999692486366455,
-      "alpha": 0.05,
-      "beta": 0.85,
-      "alpha_plus_beta": 0.9,
-      "unconditional_var": 0.00011999692486366454,
-      "dist": "normal"
+      "estimator": "GK",
+      "window": 504,
+      "ewma_lambda": 0.94,
+      "gap_warnings": [
+        "Gap day detected: 5 large overnight gaps (|g| > 2 * std(c)). Max gap ratio: 5.94, threshold: 2.0. Consider using RS or YZ estimators."
+      ]
     }
   },
   "intervals": {
-    "L_h": 80.56128571202316,
-    "U_h": 88.50546449559184,
-    "band_width_bp": 427.49774743833456
+    "L_h": 74.52979473456254,
+    "U_h": 82.34498763988489,
+    "band_width_bp": 456.0484776702967
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
-      "model": "GARCH11-N",
+      "model": "Range-GK",
       "h": 5,
       "coverage": 0.95,
-      "garch": {
+      "range": {
         "window": 504,
-        "dist": "normal"
+        "ewma_lambda": 0.94
       }
     },
     "regime_tag": null,
     "conformal": null
   },
   "diagnostics": {
-    "method_source": "GARCH11-N",
-    "m_log": 4.436041251893031,
-    "s_scale": 0.02399134894263621,
+    "method_source": "Range-GK",
+    "m_log": 4.36105828149133,
+    "s_scale": 0.025438421802676064,
     "critical_type": "normal"
   },
   "critical": {

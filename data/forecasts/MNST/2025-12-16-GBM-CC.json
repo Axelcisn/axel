@@ -1,8 +1,8 @@
 {
-  "symbol": "SO",
-  "date_t": "2025-12-12",
+  "symbol": "MNST",
+  "date_t": "2025-12-16",
   "method": "GBM-CC",
-  "y_hat": 84.62556811418061,
+  "y_hat": 75.55808294700493,
   "params": {
     "window": 504,
     "lambda_drift": 0.94,
@@ -10,27 +10,27 @@
     "h": 5
   },
   "estimates": {
-    "mu_star_hat": 0.0004670622618462384,
-    "sigma_hat": 0.01094397292588987,
-    "mu_star_used": 0.0004390385261354641,
-    "window_start": "2023-12-08",
-    "window_end": "2025-12-12",
+    "mu_star_hat": 0.0006150036994739008,
+    "sigma_hat": 0.014838760328291248,
+    "mu_star_used": 0.0005781034775054668,
+    "window_start": "2023-12-11",
+    "window_end": "2025-12-16",
     "n": 504
   },
   "target": {
     "h": 5,
     "coverage": 0.95
   },
-  "S_t": 84.44000244140625,
+  "S_t": 75.33999633789062,
   "critical": {
     "type": "normal",
     "z_alpha": 1.959963986120195
   },
-  "m_log": 4.438236444523708,
-  "s_scale": 0.02447146740620702,
-  "L_h": 80.66245696318556,
-  "U_h": 88.78339500514265,
-  "band_width_bp": 1007,
+  "m_log": 4.324901671043651,
+  "s_scale": 0.03318047679588633,
+  "L_h": 70.80071726298061,
+  "U_h": 80.63511387068306,
+  "band_width_bp": 1389,
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
@@ -44,6 +44,6 @@
     "conformal": null
   },
   "locked": true,
-  "created_at": "2025-12-21T13:02:11.068Z",
+  "created_at": "2025-12-21T13:02:15.133Z",
   "is_active": false
 }

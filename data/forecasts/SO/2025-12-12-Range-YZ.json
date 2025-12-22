@@ -2,15 +2,15 @@
   "symbol": "SO",
   "method": "Range-YZ",
   "date_t": "2025-12-12",
-  "horizonTrading": 1,
-  "h_eff_days": 3,
-  "verifyDate": "2025-12-15",
+  "horizonTrading": 5,
+  "h_eff_days": 7,
+  "verifyDate": "2025-12-19",
   "domain": "log",
-  "created_at": "2025-12-21T10:44:47.252Z",
+  "created_at": "2025-12-21T13:02:11.935Z",
   "locked": true,
   "y_hat": 84.44000244140625,
   "target": {
-    "h": 1,
+    "h": 5,
     "coverage": 0.95,
     "window_requirements": {
       "min_days": 504
@@ -42,15 +42,15 @@
     }
   },
   "intervals": {
-    "L_h": 82.59839721907478,
-    "U_h": 86.32266790109227,
+    "L_h": 80.37745860762678,
+    "U_h": 88.70788073944081,
     "band_width_bp": 450.88897695431564
   },
   "provenance": {
     "rng_seed": null,
     "params_snapshot": {
       "model": "Range-YZ",
-      "h": 1,
+      "h": 5,
       "coverage": 0.95,
       "range": {
         "window": 504,
@@ -63,7 +63,7 @@
   "diagnostics": {
     "method_source": "Range-YZ",
     "m_log": 4.436041251893031,
-    "s_scale": 0.011250497796829394,
+    "s_scale": 0.025156877854422145,
     "critical_type": "normal"
   },
   "critical": {
