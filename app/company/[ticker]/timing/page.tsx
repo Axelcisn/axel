@@ -253,6 +253,12 @@ const variance = (arr: number[], avg?: number): number => {
   return arr.reduce((s, v) => s + Math.pow(v - m, 2), 0) / arr.length;
 };
 
+const normalizeDateKey = (value: string | null | undefined): string => {
+  if (!value) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  return value.slice(0, 10);
+};
+
 const getWindowedRows = (
   rows: CanonicalRow[] | null | undefined,
   window: { start: string; end: string } | null
@@ -645,6 +651,26 @@ const summarizeSimPerformance = (
       buyHoldUsd: buyHoldReturn,
       buyHoldPct,
       buyHoldPricePct,
+      openPnlUsd: openPnl,
+      openPnlPct,
+      grossProfitUsd: grossProfit,
+      grossLossUsd: grossLoss,
+      commissionUsd: commissionPaid,
+    });
+    console.log("[SIM-PERF][AUDIT]", {
+      initialEquity: initialCapital,
+      finalEquity: result.finalEquity,
+      openPnlUsd: openPnl,
+      openPnlPct,
+      netProfitUsd: netProfit,
+      netProfitPct,
+      grossProfitUsd: grossProfit,
+      grossLossUsd: grossLoss,
+      commissionUsd: commissionPaid,
+      buyHoldPctPrice: buyHoldPricePct,
+      buyHoldUsdDerived: buyHoldReturn,
+      maxDrawdownPctPeak: drawdownStats.maxPct ?? null,
+      maxDrawdownUsdPeak: drawdownStats.maxValue ?? null,
     });
   }
 
@@ -863,6 +889,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const windowReductionLogRef = useRef<{ required: number; effective: number; canonical: number } | null>(null);
   const lastAutoForecastKeyRef = useRef<string | null>(null);
   const [autoForecastError, setAutoForecastError] = useState<string | null>(null);
+  const [selectedSimRunId, setSelectedSimRunId] = useState<string | null>(null);
 
   // Volatility Model state
   const [volModel, setVolModel] = useState<'GBM' | 'GARCH' | 'HAR-RV' | 'Range'>('GBM');
@@ -1319,6 +1346,11 @@ export default function TimingPage({ params }: TimingPageProps) {
   };
 
   type SimulationStrategySummary = SimulationRunSummary;
+  type SimResultCacheEntry = {
+    accountHistory: Trading212AccountSnapshot[];
+    initialEquity: number;
+    trades: Trading212Trade[];
+  };
 
   // Type for trade overlays passed to PriceChart
   type Trading212TradeOverlay = {
@@ -1867,22 +1899,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     };
   }, [params.ticker]);
 
-  // Create simulation runs summary for PriceChart Overview tab
-  const simulationRunsSummary: SimulationStrategySummary[] = useMemo(() => {
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[SIM-TABLE] building summary", {
-        baseRuns: comparisonRunIds.map((id) => {
-          const run = t212BaseRunsById[id];
-          return {
-            id,
-            hasRun: !!run,
-            lambda: run?.lambda,
-            trainFraction: run?.trainFraction,
-          };
-        }),
-      });
-    }
-
+  const { rows: simulationRunsSummary, simResultsById } = useMemo(() => {
     const windowedRows = getWindowedRows(t212CanonicalRows, visibleWindow);
     const asOfRow = windowedRows.length > 0 ? windowedRows[windowedRows.length - 1] : null;
     const asOfDate = asOfRow?.date ?? null;
@@ -1945,24 +1962,23 @@ export default function TimingPage({ params }: TimingPageProps) {
       ),
     };
 
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[SIM-TABLE][VOL-BUNDLE] Building volatility bundle", {
-        forecastKeys: Object.keys(forecastByKey),
-        rangeKeys: {
-          P: buildVolSelectionKey({ model: "Range", rangeEstimator: "P", h, coverage }),
-          GK: buildVolSelectionKey({ model: "Range", rangeEstimator: "GK", h, coverage }),
-          RS: buildVolSelectionKey({ model: "Range", rangeEstimator: "RS", h, coverage }),
-          YZ: buildVolSelectionKey({ model: "Range", rangeEstimator: "YZ", h, coverage }),
-        },
-        rangeForecasts: {
-          P: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "P", h, coverage })],
-          GK: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "GK", h, coverage })],
-          RS: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "RS", h, coverage })],
-          YZ: forecastByKey[buildVolSelectionKey({ model: "Range", rangeEstimator: "YZ", h, coverage })],
-        },
-        volBundle: sharedVolatility,
-      });
-    }
+    const simResultMap: Record<string, SimResultCacheEntry> = {};
+    const storeSimResult = (
+      id: string,
+      result?: Trading212SimulationResult | null,
+      fallbackInitialEquity?: number | null
+    ) => {
+      if (!result) return;
+      const initialEquity =
+        (Number.isFinite(result.initialEquity) ? result.initialEquity : undefined) ??
+        (fallbackInitialEquity ?? undefined) ??
+        t212InitialEquity;
+      simResultMap[id] = {
+        accountHistory: result.accountHistory ?? [],
+        initialEquity,
+        trades: result.trades ?? [],
+      };
+    };
 
     const rows: SimulationStrategySummary[] = comparisonRowSpecs.map((spec, idx) => {
       const run = t212BaseRunsById[spec.id];
@@ -1970,6 +1986,12 @@ export default function TimingPage({ params }: TimingPageProps) {
       const defaults = EWMA_UNBIASED_DEFAULTS[h] ?? { lambda: 0.94, trainFraction: 0.7 };
       const isUnbiased = spec.key === "unbiased" || /unbiased/i.test(spec.label);
       const isBiasedMax = spec.key === "biased-max";
+      const canonicalId = spec.key;
+      const baseResult = run?.windowResult?.result ?? run?.result ?? null;
+
+      if (!isUnbiased) {
+        storeSimResult(canonicalId, baseResult, run?.initialEquity);
+      }
 
       let lambdaUsed = isUnbiased
         ? (run?.lambda ?? defaults.lambda)
@@ -2049,26 +2071,33 @@ export default function TimingPage({ params }: TimingPageProps) {
               endDate: asOfDate,
             });
           }
-
-          // Build bars and simulate for performance breakdown
-          const bars = buildEwmaExpectedBars(windowedRows, h, lambdaUsed, trainFracUsed);
-          if (bars.length > 0) {
-            const config: Trading212CfdConfig = {
-              leverage: t212Leverage,
-              fxFeeRate: 0,
-              dailyLongSwapRate: 0,
-              dailyShortSwapRate: 0,
-              spreadBps: t212CostBps,
-              marginCallLevel: 0.45,
-              stopOutLevel: 0.25,
-              positionFraction: t212PositionFraction,
-            };
-            const simResult = simulateTrading212Cfd(bars, t212InitialEquity, config);
-            const priceStart = prices[0] ?? null;
-            const priceEnd = prices[prices.length - 1] ?? null;
-            perfMetrics = summarizeSimPerformance(simResult, priceStart, priceEnd);
-          }
         }
+
+        // Build bars and simulate for performance breakdown FOR ALL RUNS
+        const bars = buildEwmaExpectedBars(windowedRows, h, lambdaUsed, trainFracUsed);
+        if (bars.length > 0) {
+          const config: Trading212CfdConfig = {
+            leverage: t212Leverage,
+            fxFeeRate: 0,
+            dailyLongSwapRate: 0,
+            dailyShortSwapRate: 0,
+            spreadBps: t212CostBps,
+            marginCallLevel: 0.45,
+            stopOutLevel: 0.25,
+            positionFraction: t212PositionFraction,
+          };
+          const simResult = simulateTrading212Cfd(bars, t212InitialEquity, config);
+          if (isUnbiased || !simResultMap[canonicalId]) {
+            storeSimResult(canonicalId, simResult);
+          }
+          const priceStart = prices[0] ?? null;
+          const priceEnd = prices[prices.length - 1] ?? null;
+          perfMetrics = summarizeSimPerformance(simResult, priceStart, priceEnd);
+        }
+      }
+
+      if (isUnbiased && !simResultMap[canonicalId]) {
+        storeSimResult(canonicalId, baseResult, run?.initialEquity);
       }
 
       const row = {
@@ -2108,7 +2137,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       return row;
     });
 
-    return rows;
+    return { rows, simResultsById: simResultMap };
   }, [
     comparisonRowSpecs,
     comparisonRunIds,
@@ -2141,6 +2170,125 @@ export default function TimingPage({ params }: TimingPageProps) {
       }))
     );
   }, [simulationRunsSummary]);
+
+  useEffect(() => {
+    console.log("[SIM-ID]", {
+      selectedSimRunId,
+      simKeys: Object.keys(simResultsById ?? {}).slice(0, 20),
+      has: !!(selectedSimRunId && simResultsById?.[selectedSimRunId]),
+    });
+  }, [selectedSimRunId, simResultsById]);
+
+useEffect(() => {
+  if (selectedSimRunId) return;
+  const ids = simulationRunsSummary?.map((r) => r.id) ?? [];
+  const def = ids.includes("unbiased") ? "unbiased" : ids[0] ?? null;
+  if (def) setSelectedSimRunId(def);
+}, [selectedSimRunId, simulationRunsSummary]);
+
+useEffect(() => {
+  console.log("[SELECTED RUN]", selectedSimRunId);
+}, [selectedSimRunId]);
+
+  type SelectedSimPoint = {
+    pnlUsd: number;
+    equityUsd: number;
+    side?: Trading212AccountSnapshot["side"] | null;
+    contracts?: number | null;
+  };
+
+  const { selectedSimByDate, selectedPnlLabel } = useMemo(() => {
+    if (!selectedSimRunId) {
+      return { selectedSimByDate: undefined, selectedPnlLabel: undefined as string | undefined };
+    }
+    const cache = simResultsById[selectedSimRunId];
+    const label =
+      simulationRunsSummary.find((r) => r.id === selectedSimRunId)?.label ?? selectedSimRunId;
+    if (!cache || !cache.accountHistory || cache.accountHistory.length === 0) {
+      return { selectedSimByDate: undefined, selectedPnlLabel: label };
+    }
+
+    const start = visibleWindow?.start ?? null;
+    const end = visibleWindow?.end ?? null;
+    const initialEquity =
+      (Number.isFinite(cache.initialEquity) ? cache.initialEquity : undefined) ??
+      cache.accountHistory[0]?.equity ??
+      t212InitialEquity;
+
+    const simMap: Record<string, SelectedSimPoint> = {};
+    cache.accountHistory.forEach((snap) => {
+      const date = normalizeDateKey(snap.date);
+      if (!date) return;
+      if (start && date < start) return;
+      if (end && date > end) return;
+      const equity = snap.equity;
+      if (equity == null || !Number.isFinite(equity)) return;
+      const pnlUsd = equity - initialEquity;
+      const qty = Number.isFinite(snap.quantity) ? snap.quantity : null;
+      const derivedSide =
+        qty != null && qty !== 0 ? (qty > 0 ? ("long" as const) : ("short" as const)) : null;
+      simMap[date] = {
+        pnlUsd,
+        equityUsd: equity,
+        side: snap.side ?? derivedSide,
+        contracts: qty,
+      };
+    });
+
+    const selectedSimByDate = simMap;
+
+    return { selectedSimByDate, selectedPnlLabel: label };
+  }, [selectedSimRunId, simResultsById, simulationRunsSummary, visibleWindow, t212InitialEquity]);
+
+  const selectedOverviewStats = useMemo(() => {
+    if (!selectedSimRunId) return null;
+    const summary = simulationRunsSummary.find((r) => r.id === selectedSimRunId);
+    const simCache = simResultsById[selectedSimRunId];
+    const initialEquity =
+      (simCache && Number.isFinite(simCache.initialEquity) ? simCache.initialEquity : null) ??
+      null;
+
+    const keys = selectedSimByDate ? Object.keys(selectedSimByDate).sort() : [];
+    const lastKey = keys.length ? keys[keys.length - 1] : null;
+    const lastPoint = lastKey && selectedSimByDate ? selectedSimByDate[lastKey] : null;
+    const pnlAbs =
+      lastPoint && Number.isFinite(lastPoint.pnlUsd) ? (lastPoint.pnlUsd as number) : null;
+    const pnlPct =
+      pnlAbs != null && initialEquity && initialEquity !== 0 ? pnlAbs / initialEquity : null;
+
+    const maxDrawdownAbs = summary?.maxDrawdownValue ?? null;
+    const maxDrawdownPct = summary?.maxDrawdownPct ?? null;
+
+    const trades = simCache?.trades ?? [];
+    const totalTrades = summary?.tradeCount ?? (trades.length > 0 ? trades.length : null);
+    const profitableTrades = trades.length > 0 ? trades.filter((t) => (t.netPnl ?? 0) > 0).length : null;
+    const pctProfitable =
+      profitableTrades != null && totalTrades
+        ? (profitableTrades / totalTrades) * 100
+        : null;
+
+    const grossProfit = summary?.grossProfit;
+    const grossLoss = summary?.grossLoss;
+    const grossLossAbs =
+      grossLoss != null && Number.isFinite(grossLoss) ? Math.abs(grossLoss) : null;
+    const profitFactor =
+      grossLossAbs != null && grossLossAbs > 0 && grossProfit != null && Number.isFinite(grossProfit)
+        ? grossProfit / grossLossAbs
+        : null;
+
+    return {
+      pnlAbs,
+      pnlPct,
+      maxDrawdownAbs,
+      maxDrawdownPct,
+      totalTrades,
+      profitableTrades,
+      pctProfitable,
+      profitFactor,
+      label: summary?.label ?? null,
+      asOfDate: lastKey ?? null,
+    };
+  }, [selectedSimRunId, selectedSimByDate, simulationRunsSummary, simResultsById]);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -6917,6 +7065,11 @@ export default function TimingPage({ params }: TimingPageProps) {
           trendWeight={trendWeight}
           trendWeightUpdatedAt={trendWeightUpdatedAt}
           simulationRuns={simulationRunsSummary}
+          selectedSimRunId={selectedSimRunId}
+          onSelectSimulationRun={setSelectedSimRunId}
+          selectedSimByDate={selectedSimByDate}
+          selectedPnlLabel={selectedPnlLabel}
+          selectedOverviewStats={selectedOverviewStats}
           simComparePreset={simComparePreset}
           visibleWindow={visibleWindow}
           onChangeSimComparePreset={handleSimComparePresetChange}

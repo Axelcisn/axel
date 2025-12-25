@@ -106,6 +106,10 @@ interface ChartPoint {
   adxValue?: number;
   equity?: number | null;
   equityDelta?: number | null;
+  selectedPnl?: number | null;
+  selectedEquity?: number | null;
+  selectedSide?: Trading212AccountSnapshot["side"] | null;
+  selectedContracts?: number | null;
   // Forecast band values
   forecastCenter?: number | null;
   forecastLower?: number | null;
@@ -386,17 +390,20 @@ export interface SimulationRunSummary {
   buyHoldPricePct?: number;
   maxContractsHeld?: number;
   avgRunUpDuration?: number;
-  avgRunUpPct?: number;
   maxRunUpDuration?: number;
-  maxRunUpPct?: number;
   avgRunUpValue?: number;
   maxRunUpValue?: number;
+  avgRunUpPct?: number;
+  maxRunUpPct?: number;
   avgDrawdownDuration?: number;
-  avgDrawdownPct?: number;
   maxDrawdownDuration?: number;
-  maxDrawdownPct?: number;
   avgDrawdownValue?: number;
   maxDrawdownValue?: number;
+  avgDrawdownPct?: number;
+  maxDrawdownPct?: number;
+  maxEquityPeak?: number;
+  maxEquityDrawdown?: number;
+  maxEquityDrawdownPct?: number;
 }
 
 type T212RunId =
@@ -509,6 +516,30 @@ interface PriceChartProps {
   trendWeight?: number | null;
   trendWeightUpdatedAt?: string | null;
   simulationRuns?: SimulationRunSummary[];  // Simulation runs for comparison table in Overview tab
+  selectedSimRunId?: string | null;
+  onSelectSimulationRun?: (id: string) => void;
+  selectedSimByDate?: Record<
+    string,
+    {
+      pnlUsd: number;
+      equityUsd: number;
+      side?: Trading212AccountSnapshot["side"] | null;
+      contracts?: number | null;
+    }
+  >;
+  selectedPnlLabel?: string;
+  selectedOverviewStats?: {
+    pnlAbs: number | null;
+    pnlPct: number | null;
+    maxDrawdownAbs: number | null;
+    maxDrawdownPct: number | null;
+    totalTrades: number | null;
+    profitableTrades: number | null;
+    pctProfitable: number | null;
+    profitFactor: number | null;
+    label: string | null;
+    asOfDate: string | null;
+  } | null;
   simComparePreset?: SimCompareRangePreset;
   visibleWindow?: { start: string; end: string } | null;
   onChangeSimComparePreset?: (p: SimCompareRangePreset) => void;
@@ -580,6 +611,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   trendWeight = null,
   trendWeightUpdatedAt = null,
   simulationRuns,
+  selectedSimRunId,
+  onSelectSimulationRun,
+  selectedSimByDate,
+  selectedPnlLabel,
+  selectedOverviewStats,
   simComparePreset,
   visibleWindow,
   onChangeSimComparePreset,
@@ -611,6 +647,17 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
     return map;
   }, [trendLongSeries]);
+
+  const selectedPnlByDate = useMemo(() => {
+    if (!selectedSimByDate) return undefined;
+    const map: Record<string, number> = {};
+    Object.entries(selectedSimByDate).forEach(([k, v]) => {
+      if (v && Number.isFinite(v.pnlUsd)) {
+        map[normalizeDateString(k)] = v.pnlUsd;
+      }
+    });
+    return map;
+  }, [selectedSimByDate]);
 
   // Model dropdown states
   const [showGarchDropdown, setShowGarchDropdown] = useState(false);
@@ -2012,15 +2059,35 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return chartDataWithForecastBand.map((pt) => {
       const key = normalizeDateString(pt.date ?? "");
       const direct = key ? equityMap.get(key) ?? null : null;
+      const selectedPoint = key && selectedSimByDate ? selectedSimByDate[key] : undefined;
+      const selectedPnl = selectedPoint?.pnlUsd;
+      const selectedEquity = selectedPoint?.equityUsd;
+      const selectedSide = selectedPoint?.side ?? null;
+      const selectedContracts =
+        selectedPoint && Number.isFinite(selectedPoint.contracts ?? null)
+          ? (selectedPoint.contracts as number)
+          : null;
+      const sideWithContracts =
+        selectedSide ??
+        (selectedContracts != null && selectedContracts !== 0
+          ? selectedContracts > 0
+            ? ("long" as const)
+            : ("short" as const)
+          : null);
       if (direct != null) {
         lastEquity = direct;
       }
       return {
         ...pt,
         equity: direct ?? lastEquity,
+        selectedPnl: selectedPnl != null && Number.isFinite(selectedPnl) ? selectedPnl : undefined,
+        selectedEquity:
+          selectedEquity != null && Number.isFinite(selectedEquity) ? selectedEquity : undefined,
+        selectedSide: sideWithContracts,
+        selectedContracts,
       };
     });
-  }, [chartDataWithForecastBand, normalizedAccountHistory]);
+  }, [chartDataWithForecastBand, normalizedAccountHistory, selectedSimByDate]);
 
   const chartDataWithEquityWindowed = useMemo(() => {
     if (!activeSimWindow) return chartDataWithEquity;
@@ -2145,7 +2212,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
     const aligned = syncedDates.map((date, idx) => {
       const snap = snapshotMap.get(date);
-      const equity = snap?.equity != null ? snap.equity : lastEquity;
+      const selectedPoint = selectedSimByDate ? selectedSimByDate[date] : undefined;
+      const equity =
+        selectedPoint?.equityUsd != null && Number.isFinite(selectedPoint.equityUsd)
+          ? selectedPoint.equityUsd
+          : snap?.equity != null
+            ? snap.equity
+            : lastEquity;
       const marginUsed =
         snap?.marginUsed != null
           ? snap.marginUsed
@@ -2161,6 +2234,30 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       const prevEquity = idx > 0 ? lastEquity : equity;
       const equityDelta =
         equity != null && prevEquity != null ? equity - prevEquity : null;
+      const selectedPnl =
+        selectedPoint?.pnlUsd != null && Number.isFinite(selectedPoint.pnlUsd)
+          ? selectedPoint.pnlUsd
+          : selectedPnlByDate && Number.isFinite(selectedPnlByDate[date])
+            ? selectedPnlByDate[date]
+            : undefined;
+      const selectedEquityVal =
+        selectedPoint?.equityUsd != null && Number.isFinite(selectedPoint.equityUsd)
+          ? selectedPoint.equityUsd
+          : undefined;
+      const selectedContractsVal =
+        selectedPoint && Number.isFinite(selectedPoint.contracts ?? null)
+          ? (selectedPoint.contracts as number)
+          : Number.isFinite(snap?.quantity) && snap?.quantity != null
+            ? snap.quantity
+            : null;
+      const selectedSideVal = selectedPoint?.side ?? snap?.side ?? null;
+      const sideWithContracts =
+        selectedSideVal ??
+        (selectedContractsVal != null && selectedContractsVal !== 0
+          ? selectedContractsVal > 0
+            ? ("long" as const)
+            : ("short" as const)
+          : null);
       if (equity != null) {
         lastEquity = equity;
       }
@@ -2176,11 +2273,28 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         equityDelta,
         marginUsed,
         freeMargin,
+        selectedPnl: Number.isFinite(selectedPnl as number) ? (selectedPnl as number) : undefined,
+        selectedEquity: selectedEquityVal,
+        selectedSide: sideWithContracts,
+        selectedContracts: selectedContractsVal,
       };
     });
 
     return applyActivityMaskToEquitySeries(aligned, activityStartDate, activityEndDate);
-  }, [syncedDates, windowedAccountHistory]);
+  }, [syncedDates, windowedAccountHistory, selectedSimByDate, selectedPnlByDate]);
+
+  useEffect(() => {
+    console.log("[SELECTED RUN]", selectedSimRunId);
+  }, [selectedSimRunId]);
+
+  useEffect(() => {
+    const nSel = simulationEquityData.reduce(
+      (a, p) => a + (Number.isFinite((p as any).selectedPnl) ? 1 : 0),
+      0
+    );
+    const firstSel = simulationEquityData.find((p) => Number.isFinite((p as any).selectedPnl));
+    console.log("[CHART SEL]", { nSel, first: firstSel });
+  }, [simulationEquityData]);
   const simViewLength = simulationEquityData.length;
   const carryInBlocksWindowSim = useMemo(() => {
     if (!activeSimWindow) return false;
@@ -2702,6 +2816,41 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [activeSimWindow, summaryTrades, windowedAccountHistory]);
 
+  const overviewStats = useMemo(() => {
+    if (selectedOverviewStats) {
+      return {
+        pnlAbs: selectedOverviewStats.pnlAbs ?? equitySummary.pnlAbs,
+        pnlPct: selectedOverviewStats.pnlPct ?? equitySummary.pnlPct,
+        maxDrawdownAbs:
+          selectedOverviewStats.maxDrawdownAbs ?? equitySummary.maxDrawdownAbs,
+        maxDrawdownPct:
+          selectedOverviewStats.maxDrawdownPct ?? equitySummary.maxDrawdownPct,
+        totalTrades:
+          selectedOverviewStats.totalTrades ?? tradeSummary.totalTrades ?? 0,
+        profitableTrades:
+          selectedOverviewStats.profitableTrades ?? tradeSummary.profitableTrades ?? 0,
+        pctProfitable:
+          selectedOverviewStats.pctProfitable ?? tradeSummary.pctProfitable ?? null,
+        profitFactor:
+          selectedOverviewStats.profitFactor ?? tradeSummary.profitFactor ?? null,
+        label: selectedOverviewStats.label,
+        asOfDate: selectedOverviewStats.asOfDate,
+      };
+    }
+    return {
+      pnlAbs: equitySummary.pnlAbs,
+      pnlPct: equitySummary.pnlPct,
+      maxDrawdownAbs: equitySummary.maxDrawdownAbs,
+      maxDrawdownPct: equitySummary.maxDrawdownPct,
+      totalTrades: tradeSummary.totalTrades ?? 0,
+      profitableTrades: tradeSummary.profitableTrades ?? 0,
+      pctProfitable: tradeSummary.pctProfitable ?? null,
+      profitFactor: tradeSummary.profitFactor ?? null,
+      label: null,
+      asOfDate: hoveredDate ?? null,
+    };
+  }, [equitySummary, hoveredDate, selectedOverviewStats, tradeSummary]);
+
   useEffect(() => {
       console.log('[UI] Simulation header metrics', {
         simulationMode,
@@ -2761,15 +2910,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const performanceSeriesStats = useMemo(() => {
     const series = chartDataWithEquity
       .filter((p) => p.equity != null && Number.isFinite(p.equity as number) && p.date)
-      .map((p) => ({ equity: p.equity as number, date: p.date as string }))
-      .filter((p) => !Number.isNaN(new Date(p.date).getTime()))
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-    const dayDiff = (start: string, end: string) => {
-      const diff = Math.round((new Date(end).getTime() - new Date(start).getTime()) / (1000 * 60 * 60 * 24));
-      if (!Number.isFinite(diff)) return 0;
-      return Math.max(1, diff);
-    };
+      .map((p) => ({ equity: p.equity as number, date: new Date(p.date as string) }))
+      .filter((p) => !Number.isNaN(p.date.getTime()))
+      .sort((a, b) => a.date.getTime() - b.date.getTime());
 
     if (series.length < 2) {
       return {
@@ -2780,173 +2923,97 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         avgRunUpValue: null,
         maxRunUpValue: null,
         avgDrawdownValue: null,
-        maxDrawdownValue: equityStatsBase.maxDrawdownAbs != null ? -Math.abs(equityStatsBase.maxDrawdownAbs) : null,
-        avgRunUpPct: null,
-        maxRunUpPct: null,
-        avgDrawdownPct: null,
-        maxDrawdownPct: null,
+        maxDrawdownValue: equityStatsBase.maxDrawdownAbs ?? null,
       };
     }
 
-    const computeDrawdowns = (pts: { date: string; equity: number }[]) => {
-      const segments: { peak: number; trough: number; duration: number }[] = [];
-      let peak = pts[0].equity;
-      let peakDate = pts[0].date;
-      let trough = pts[0].equity;
-      let startDate = pts[0].date;
-      let inDd = false;
-
-      for (let i = 1; i < pts.length; i++) {
-        const eq = pts[i].equity;
-        const date = pts[i].date;
-        if (eq > peak) {
-          if (inDd) {
-            segments.push({ peak, trough, duration: dayDiff(startDate, date) });
-          }
-          peak = eq;
-          peakDate = date;
-          trough = eq;
-          startDate = date;
-          inDd = false;
-          continue;
-        }
-        if (eq < trough) {
-          trough = eq;
-        }
-        if (!inDd && eq < peak) {
-          inDd = true;
-          startDate = peakDate;
-        }
-        if (inDd && eq >= peak) {
-          segments.push({ peak, trough, duration: dayDiff(startDate, date) });
-          peak = eq;
-          peakDate = date;
-          trough = eq;
-          startDate = date;
-          inDd = false;
-        }
-      }
-      if (inDd) {
-        const last = pts[pts.length - 1];
-        segments.push({ peak, trough, duration: dayDiff(startDate, last.date) });
-      }
-      return segments;
+    const dayDiff = (prev: { date: Date }, curr: { date: Date }) => {
+      const diff = Math.max(1, Math.round((curr.date.getTime() - prev.date.getTime()) / (1000 * 60 * 60 * 24)));
+      return Number.isFinite(diff) ? diff : 1;
     };
 
-    const computeRunUps = (pts: { date: string; equity: number }[]) => {
-      const segments: { trough: number; peak: number; duration: number }[] = [];
-      let trough = pts[0].equity;
-      let troughDate = pts[0].date;
-      let peak = pts[0].equity;
-      let startDate = pts[0].date;
-      let inRunUp = false;
+    let upLen = 0;
+    let upVal = 0;
+    let downLen = 0;
+    let downVal = 0;
+    const upLens: number[] = [];
+    const upVals: number[] = [];
+    const downLens: number[] = [];
+    const downVals: number[] = [];
 
-      for (let i = 1; i < pts.length; i++) {
-        const eq = pts[i].equity;
-        const date = pts[i].date;
-        if (eq < trough) {
-          if (inRunUp) {
-            segments.push({ trough, peak, duration: dayDiff(startDate, date) });
-          }
-          trough = eq;
-          troughDate = date;
-          peak = eq;
-          startDate = troughDate;
-          inRunUp = false;
-          continue;
+    for (let i = 1; i < series.length; i++) {
+      const d = series[i].equity - series[i - 1].equity;
+      const span = dayDiff(series[i - 1], series[i]);
+      if (d > 0) {
+        upLen += span;
+        upVal += d;
+        if (downLen > 0) {
+          downLens.push(downLen);
+          downVals.push(downVal);
+          downLen = 0;
+          downVal = 0;
         }
-        if (eq > peak) {
-          peak = eq;
+      } else if (d < 0) {
+        downLen += span;
+        downVal += Math.abs(d);
+        if (upLen > 0) {
+          upLens.push(upLen);
+          upVals.push(upVal);
+          upLen = 0;
+          upVal = 0;
         }
-        if (!inRunUp && eq > trough) {
-          inRunUp = true;
-          startDate = troughDate;
+      } else {
+        // flat day ends streaks
+        if (upLen > 0) {
+          upLens.push(upLen);
+          upVals.push(upVal);
+          upLen = 0;
+          upVal = 0;
         }
-        if (inRunUp && eq <= trough) {
-          segments.push({ trough, peak, duration: dayDiff(startDate, date) });
-          trough = eq;
-          troughDate = date;
-          peak = eq;
-          startDate = troughDate;
-          inRunUp = false;
+        if (downLen > 0) {
+          downLens.push(downLen);
+          downVals.push(downVal);
+          downLen = 0;
+          downVal = 0;
         }
       }
-      if (inRunUp) {
-        const last = pts[pts.length - 1];
-        segments.push({ trough, peak, duration: dayDiff(startDate, last.date) });
-      }
-      return segments;
-    };
-
-    const ddSegments = computeDrawdowns(series);
-    const ruSegments = computeRunUps(series);
+    }
+    if (upLen > 0) {
+      upLens.push(upLen);
+      upVals.push(upVal);
+    }
+    if (downLen > 0) {
+      downLens.push(downLen);
+      downVals.push(downVal);
+    }
 
     const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
-    const min = (arr: number[]) => (arr.length ? Math.min(...arr) : null);
     const max = (arr: number[]) => (arr.length ? Math.max(...arr) : null);
 
-    const ddValues = ddSegments.map((s) => s.trough - s.peak);
-    const ddPcts = ddSegments
-      .map((s) => (s.peak > 0 ? (s.trough - s.peak) / s.peak : null))
-      .filter((v): v is number => v != null && Number.isFinite(v));
-    const ddDurations = ddSegments.map((s) => s.duration);
-
-    const ruValues = ruSegments.map((s) => s.peak - s.trough);
-    const ruPcts = ruSegments
-      .map((s) => (s.trough > 0 ? (s.peak - s.trough) / s.trough : null))
-      .filter((v): v is number => v != null && Number.isFinite(v));
-    const ruDurations = ruSegments.map((s) => s.duration);
-
     return {
-      avgRunUpDuration: avg(ruDurations),
-      maxRunUpDuration: max(ruDurations),
-      avgDrawdownDuration: avg(ddDurations),
-      maxDrawdownDuration: max(ddDurations),
-      avgRunUpValue: avg(ruValues),
-      maxRunUpValue: max(ruValues),
-      avgDrawdownValue: avg(ddValues),
-      maxDrawdownValue: min(ddValues) ?? (equityStatsBase.maxDrawdownAbs != null ? -Math.abs(equityStatsBase.maxDrawdownAbs) : null),
-      avgRunUpPct: avg(ruPcts),
-      maxRunUpPct: max(ruPcts),
-      avgDrawdownPct: avg(ddPcts),
-      maxDrawdownPct: min(ddPcts),
+      avgRunUpDuration: avg(upLens),
+      maxRunUpDuration: max(upLens),
+      avgDrawdownDuration: avg(downLens),
+      maxDrawdownDuration: max(downLens),
+      avgRunUpValue: avg(upVals),
+      maxRunUpValue: max(upVals),
+      avgDrawdownValue: avg(downVals),
+      maxDrawdownValue: equityStatsBase.maxDrawdownAbs ?? max(downVals) ?? null,
     };
   }, [chartDataWithEquity, equityStatsBase.maxDrawdownAbs]);
 
   // Helpers for the performance table
   const perfInitialEquity = tradeSummary.initialCapital ?? equityStatsBase.baseEquity ?? 0;
-  const pctFromInitial = (v: number | null | undefined) => {
-    if (perfInitialEquity <= 0 || v == null || typeof v !== "number" || !Number.isFinite(v)) return null;
-    return v / perfInitialEquity;
-  };
-  const pctLabel = (v: number | null | undefined) => {
-    if (v == null || !Number.isFinite(v)) return null;
-    return formatPct(v);
-  };
-  const renderMoneyWithPct = (
-    value: number | null | undefined,
-    pct?: number | null,
-    opts?: { sign?: boolean }
-  ) => {
-    const hasValue = value != null && Number.isFinite(value);
-    const pctStr = pctLabel(pct ?? null);
-    if (!hasValue) {
-      return <span className="font-mono">—</span>;
-    }
-    return (
-      <div className="flex items-baseline justify-end gap-1 font-mono">
-        <span>{formatUsd(value as number, opts)}</span>
-        <span className="text-xs text-slate-500">USD</span>
-        {pctStr && <span className="text-xs text-muted-foreground">({pctStr})</span>}
-      </div>
-    );
+  const pctOfPerfInitial = (v: number | null | undefined) => {
+    if (perfInitialEquity <= 0 || v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
+    return formatPct(v / perfInitialEquity);
   };
   const durationLabel = (v: number | null | undefined) => {
     if (v == null || typeof v !== "number" || !Number.isFinite(v)) return "—";
     return `${Math.round(v)} days`;
   };
-  const perfAvgDrawdownValue = performanceSeriesStats.avgDrawdownValue ?? null;
-  const perfMaxDrawdownValue = performanceSeriesStats.maxDrawdownValue ?? null;
+  const perfAvgDrawdownValue = performanceSeriesStats.avgDrawdownValue != null ? -performanceSeriesStats.avgDrawdownValue : null;
+  const perfMaxDrawdownValue = performanceSeriesStats.maxDrawdownValue != null ? -performanceSeriesStats.maxDrawdownValue : null;
 
   // Derivations for List of trades table (net P&L %, cumulative P&L, excursions)
   const tradeTableRows = useMemo(() => {
@@ -5097,15 +5164,15 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total P&L</span>
                   </div>
                   <div className="mt-1 flex items-baseline gap-2">
-                    <span className={`text-xs font-mono ${equitySummary.pnlAbs != null && equitySummary.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {equitySummary.pnlAbs != null ? `${equitySummary.pnlAbs >= 0 ? "+" : ""}${equitySummary.pnlAbs.toFixed(2)}` : "—"}
+                    <span className={`text-xs font-mono ${overviewStats.pnlAbs != null && overviewStats.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {overviewStats.pnlAbs != null ? `${overviewStats.pnlAbs >= 0 ? "+" : ""}${overviewStats.pnlAbs.toFixed(2)}` : "—"}
                     </span>
-                    <span className={`text-xs ${equitySummary.pnlPct != null && equitySummary.pnlPct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {equitySummary.pnlPct != null ? `${(equitySummary.pnlPct * 100).toFixed(2)}%` : ""}
+                    <span className={`text-xs ${overviewStats.pnlPct != null && overviewStats.pnlPct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {overviewStats.pnlPct != null ? `${(overviewStats.pnlPct * 100).toFixed(2)}%` : ""}
                     </span>
                   </div>
                   <div className={isDarkMode ? "text-xs text-slate-500" : "text-xs text-slate-500"}>
-                    {hoveredDate ? `At ${hoveredDate}` : "Today"}
+                    {hoveredDate ? `At ${hoveredDate}` : overviewStats.asOfDate ? `As of ${overviewStats.asOfDate}` : "Today"}
                   </div>
                 </div>
 
@@ -5116,10 +5183,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </div>
                   <div className="mt-1 flex items-baseline gap-2">
                     <span className="text-xs font-mono text-slate-400">
-                      {equitySummary.maxDrawdownAbs != null ? `${equitySummary.maxDrawdownAbs.toFixed(2)}` : "—"}
+                      {overviewStats.maxDrawdownAbs != null ? `${overviewStats.maxDrawdownAbs.toFixed(2)}` : "—"}
                     </span>
                     <span className="text-xs text-slate-500">
-                      {equitySummary.maxDrawdownPct != null ? `${(equitySummary.maxDrawdownPct * 100).toFixed(2)}%` : ""}
+                      {overviewStats.maxDrawdownPct != null ? `${(overviewStats.maxDrawdownPct * 100).toFixed(2)}%` : ""}
                     </span>
                   </div>
                 </div>
@@ -5130,7 +5197,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total trades</span>
                   </div>
                   <div className="mt-1 text-xs font-mono text-slate-400">
-                    {tradeSummary.totalTrades || 0}
+                    {overviewStats.totalTrades || 0}
                   </div>
                 </div>
 
@@ -5141,11 +5208,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </div>
                   <div className="mt-1 flex items-baseline gap-2">
                     <span className="text-xs font-mono text-slate-400">
-                      {tradeSummary.profitableTrades || 0}
+                      {overviewStats.profitableTrades || 0}
                     </span>
                     <span className="text-xs text-slate-500">
-                      {tradeSummary.pctProfitable != null
-                        ? `${tradeSummary.pctProfitable.toFixed(1)}%`
+                      {overviewStats.pctProfitable != null
+                        ? `${overviewStats.pctProfitable.toFixed(1)}%`
                         : "—"}
                     </span>
                   </div>
@@ -5157,11 +5224,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profit factor</span>
                   </div>
                   <div className="mt-1 text-xs font-mono text-slate-400">
-                    {tradeSummary.profitFactor == null
+                    {overviewStats.profitFactor == null
                       ? "—"
-                      : tradeSummary.profitFactor === Infinity
+                      : overviewStats.profitFactor === Infinity
                       ? "∞"
-                      : tradeSummary.profitFactor.toFixed(2)}
+                      : overviewStats.profitFactor.toFixed(2)}
                   </div>
                 </div>
               </div>
@@ -5206,7 +5273,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         axisLine={false}
                         tickLine={false}
                         tickMargin={8}
-                        padding={{ left: 0, right: 0 }}
+                        padding={{ left: 12, right: 12 }}
                         minTickGap={16}
                         interval={simTickConfig.interval as any}
                         tick={{
@@ -5228,6 +5295,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           return value.toFixed(0);
                         }}
                       />
+                      {selectedPnlByDate && Object.keys(selectedPnlByDate).length > 0 && (
+                        <YAxis
+                          yAxisId="pnl"
+                          type="number"
+                          domain={['auto', 'auto']}
+                          orientation="left"
+                          width={Y_AXIS_WIDTH}
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
+                          allowDataOverflow
+                          tickFormatter={(value: number) => {
+                            if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
+                            return value.toFixed(0);
+                          }}
+                        />
+                      )}
                       <YAxis yAxisId="delta" domain={equityDeltaDomain} hide />
                       <Tooltip
                         cursor={false}
@@ -5344,6 +5428,38 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         })}
                       </Bar>
 
+                      {selectedPnlByDate && Object.keys(selectedPnlByDate).length > 0 && (
+                        <Bar
+                          yAxisId="pnl"
+                          dataKey="selectedPnl"
+                          radius={[2, 2, 0, 0]}
+                          isAnimationActive={false}
+                          maxBarSize={sharedBarSizing.maxBarSize}
+                          barGap={0}
+                          barCategoryGap="0%"
+                        >
+                          {simulationEquityData.map((entry, index) => {
+                            const positive = (entry.selectedPnl ?? 0) >= 0;
+                            return (
+                              <Cell
+                                key={`pnl-bar-${entry.date}-${index}`}
+                                fill={
+                                  positive
+                                    ? "rgba(52, 211, 153, 0.35)"
+                                    : "rgba(251, 113, 133, 0.35)"
+                                }
+                                stroke={
+                                  positive
+                                    ? "rgba(16, 185, 129, 0.8)"
+                                    : "rgba(244, 63, 94, 0.8)"
+                                }
+                                strokeWidth={1}
+                              />
+                            );
+                          })}
+                        </Bar>
+                      )}
+
                       <Line
                         yAxisId="equity"
                         type="monotone"
@@ -5355,6 +5471,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                         isAnimationActive={false}
                         connectNulls={false}
                       />
+                      {selectedPnlByDate && Object.keys(selectedPnlByDate).length > 0 && (
+                        <Line
+                          yAxisId="pnl"
+                          type="monotone"
+                          dataKey="selectedPnl"
+                          name={`P&L: ${selectedPnlLabel ?? "Selected"}`}
+                          stroke={isDarkMode ? "#f59e0b" : "#d97706"}
+                          strokeWidth={2}
+                          strokeDasharray="6 3"
+                          dot={false}
+                          isAnimationActive={false}
+                          connectNulls
+                        />
+                      )}
                     </ComposedChart>
                   </ResponsiveContainer>
                 )}
@@ -5392,24 +5522,35 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       : 'bg-transparent border-gray-200'
                   }`}>
                     <div className="overflow-x-auto">
-                      {(() => {
-                        console.log('[SIM-TABLE] rows to render', simulationRuns);
-                        console.log('[SIM-TABLE] First run volatility:', simulationRuns[0]?.volatility);
-                        console.log('[SIM-TABLE] Missing data check:', {
-                          hasRS: !!simulationRuns[0]?.volatility?.rangeRogersSatchell,
-                          hasYZ: !!simulationRuns[0]?.volatility?.rangeYangZhang,
-                          hasP: !!simulationRuns[0]?.volatility?.rangeParkinson,
-                          hasGK: !!simulationRuns[0]?.volatility?.rangeGarmanKlass
-                        });
-                        return null;
-                      })()}
                       <table className={`min-w-full text-[11px] ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
                         <thead className={`${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
                           <tr className={`border-b-2 ${isDarkMode ? 'border-slate-600' : 'border-gray-300'}`}>
                             <th className="py-2 pr-4 text-left font-semibold w-40"></th>
                             {simulationRuns.map((run) => (
                               <th key={run.id} className={`py-2 px-4 text-center font-semibold border-l ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
-                                {run.label}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    console.log("[HEADER CLICK]", run.id);
+                                    onSelectSimulationRun?.(run.id);
+                                  }}
+                                  aria-pressed={run.id === selectedSimRunId}
+                                  className={`w-full rounded-md px-2 py-1 text-center transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
+                                    isDarkMode
+                                      ? 'focus-visible:outline-sky-400/80'
+                                      : 'focus-visible:outline-sky-500/80'
+                                  } ${
+                                    run.id === selectedSimRunId
+                                      ? isDarkMode
+                                        ? 'bg-slate-700/60 text-white underline decoration-emerald-400'
+                                        : 'bg-gray-100 text-gray-900 underline decoration-emerald-600'
+                                      : isDarkMode
+                                        ? 'text-slate-200 hover:bg-slate-800/60'
+                                        : 'text-gray-700 hover:bg-gray-100'
+                                  }`}
+                                >
+                                  {run.label}
+                                </button>
                               </th>
                             ))}
                           </tr>
@@ -5482,7 +5623,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                               );
                             })}
                           </tr>
-                          
+
                           {/* === VOLATILITY MODELS SECTION === */}
                           <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
                             <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -5664,119 +5805,64 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                               );
                             })}
                           </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Performance (All) */}
-                    <div className="mt-6">
-                      <h4
-                        className={`text-[11px] font-semibold mb-2 ${
-                          isDarkMode ? "text-slate-300" : "text-gray-700"
-                        }`}
-                      >
-                        Performance
-                      </h4>
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
-                            <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
-                            <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>All</th>
-                          </tr>
-                        </thead>
-                        <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Initial Capital</td>
-                            <td className="text-right py-2 px-4 font-mono">{renderMoneyWithPct(perfInitialEquity, null)}</td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Open P&amp;L</td>
-                            <td className={`text-right py-2 px-4 font-mono ${tradeSummary.openPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                              {renderMoneyWithPct(tradeSummary.openPnl, pctFromInitial(tradeSummary.openPnl), { sign: true })}
+
+                          {/* === PERFORMANCE SECTION === */}
+                          <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
+                            <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                              Performance
                             </td>
                           </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Net profit</td>
-                            <td className={`text-right py-2 px-4 font-mono ${tradeSummary.netProfit >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                              {renderMoneyWithPct(tradeSummary.netProfit, pctFromInitial(tradeSummary.netProfit), { sign: true })}
-                            </td>
+
+                          {/* Initial Capital */}
+                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
+                            <td className="py-2 pr-4 pl-3 text-slate-400">Initial Capital</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
+                                {run.initialCapital != null ? formatUsd(run.initialCapital) : "—"}
+                              </td>
+                            ))}
                           </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Gross profit</td>
-                            <td className="text-right py-2 px-4 font-mono">
-                              {renderMoneyWithPct(tradeSummary.grossProfit, pctFromInitial(tradeSummary.grossProfit))}
-                            </td>
+
+                          {/* Net Profit */}
+                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
+                            <td className="py-2 pr-4 pl-3 text-slate-400">Net Profit</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'} ${
+                                run.netProfit != null && run.netProfit >= 0 ? 'text-emerald-400' : run.netProfit != null ? 'text-rose-400' : ''
+                              }`}>
+                                {run.netProfit != null ? formatUsd(run.netProfit, { sign: true }) : "—"}
+                              </td>
+                            ))}
                           </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Gross loss</td>
-                            <td className="text-right py-2 px-4 font-mono">
-                              {renderMoneyWithPct(tradeSummary.grossLoss, pctFromInitial(tradeSummary.grossLoss))}
-                            </td>
+
+                          {/* Gross Profit */}
+                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
+                            <td className="py-2 pr-4 pl-3 text-slate-400">Gross Profit</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l text-emerald-400 ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
+                                {run.grossProfit != null ? formatUsd(run.grossProfit) : "—"}
+                              </td>
+                            ))}
                           </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Commission paid</td>
-                            <td className="text-right py-2 px-4 font-mono">
-                              {renderMoneyWithPct(tradeSummary.swapFeesTotal ?? 0, pctFromInitial(tradeSummary.swapFeesTotal ?? 0))}
-                            </td>
+
+                          {/* Gross Loss */}
+                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
+                            <td className="py-2 pr-4 pl-3 text-slate-400">Gross Loss</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l text-rose-400 ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
+                                {run.grossLoss != null ? formatUsd(Math.abs(run.grossLoss)) : "—"}
+                              </td>
+                            ))}
                           </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Buy &amp; hold return</td>
-                            <td className="text-right py-2 px-4 font-mono">
-                              {renderMoneyWithPct(insightStats.buyHoldAbs, insightStats.buyHoldPct ?? null, { sign: true })}
-                            </td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Max contracts held</td>
-                            <td className="text-right py-2 px-4 font-mono">
-                              {Number.isFinite(insightStats.maxContractsHeld) ? insightStats.maxContractsHeld.toFixed(2) : "—"}
-                            </td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Avg equity run-up duration</td>
-                            <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgRunUpDuration)}</td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Avg equity run-up</td>
-                            <td className="text-right py-2 px-4 font-mono text-emerald-400">
-                              {renderMoneyWithPct(
-                                performanceSeriesStats.avgRunUpValue,
-                                performanceSeriesStats.avgRunUpPct ?? pctFromInitial(performanceSeriesStats.avgRunUpValue),
-                                { sign: true }
-                              )}
-                            </td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Max equity run-up</td>
-                            <td className="text-right py-2 px-4 font-mono text-emerald-400">
-                              {renderMoneyWithPct(
-                                performanceSeriesStats.maxRunUpValue,
-                                performanceSeriesStats.maxRunUpPct ?? pctFromInitial(performanceSeriesStats.maxRunUpValue),
-                                { sign: true }
-                              )}
-                            </td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Avg equity drawdown duration</td>
-                            <td className="text-right py-2 px-4 font-mono">{durationLabel(performanceSeriesStats.avgDrawdownDuration)}</td>
-                          </tr>
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-2 px-4">Avg equity drawdown</td>
-                            <td className="text-right py-2 px-4 font-mono text-rose-400">
-                              {renderMoneyWithPct(
-                                perfAvgDrawdownValue,
-                                performanceSeriesStats.avgDrawdownPct ?? pctFromInitial(perfAvgDrawdownValue),
-                                { sign: true }
-                              )}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="py-2 px-4">Max equity drawdown</td>
-                            <td className="text-right py-2 px-4 font-mono text-rose-400">
-                              {renderMoneyWithPct(
-                                perfMaxDrawdownValue,
-                                performanceSeriesStats.maxDrawdownPct ?? pctFromInitial(perfMaxDrawdownValue),
-                                { sign: true }
-                              )}
-                            </td>
+
+                          {/* Max Equity Drawdown */}
+                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
+                            <td className="py-2 pr-4 pl-3 text-slate-400">Max Equity Drawdown</td>
+                            {simulationRuns.map((run) => (
+                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l text-rose-400 ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
+                                {run.maxDrawdownValue != null ? formatUsd(run.maxDrawdownValue, { sign: true }) : "—"}
+                              </td>
+                            ))}
                           </tr>
                         </tbody>
                       </table>
@@ -5784,7 +5870,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   </div>
                 </div>
               )}
-
             </div>
           )}
           {/* Performance Tab - REMOVED, content moved to Overview */}

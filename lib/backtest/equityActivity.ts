@@ -6,6 +6,10 @@ export interface SimulationEquityPoint {
   equityDelta: number | null;
   marginUsed?: number | null;
   freeMargin?: number | null;
+  selectedPnl?: number | null;
+  selectedEquity?: number | null;
+  selectedSide?: Trading212AccountSnapshot["side"] | null;
+  selectedContracts?: number | null;
 }
 
 export interface TradeActivityWindow {

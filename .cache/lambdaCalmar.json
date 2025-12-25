@@ -3908,5 +3908,175 @@
     "cacheHit": false,
     "cacheStale": false,
     "staleDays": null
+  },
+  "lambdaCalmar:v2|INTC|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z|shrink=0.5|trainEnd=2024-12-19": {
+    "lambdaStar": null,
+    "calmarScore": 0,
+    "trainSpan": {
+      "start": "1980-03-17",
+      "end": "2024-12-19"
+    },
+    "updatedAt": "2025-12-23T23:05:00.301Z",
+    "note": "No-trade baseline selected",
+    "noTrade": true,
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.6328420484701107,
+        "returnPct": -0.5735631365172291,
+        "maxDrawdown": 0.9063290562057503
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.2791918772070308,
+        "returnPct": -0.25432489447240825,
+        "maxDrawdown": 0.9109322843365433
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.6954622734009059,
+        "returnPct": -0.6404122367480518,
+        "maxDrawdown": 0.9208439641396334
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.749087946078417,
+        "returnPct": -0.6955512988031577,
+        "maxDrawdown": 0.9285308920594286
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.6313847897926729,
+        "returnPct": -0.5881614777341302,
+        "maxDrawdown": 0.931542044158625
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.6867728131173945,
+        "returnPct": -0.6519114360562529,
+        "maxDrawdown": 0.9492388510504675
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.5362389777505308,
+        "returnPct": -0.5009405586490467,
+        "maxDrawdown": 0.9341740892287289
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.598844027439403,
+        "returnPct": -0.5650190747752372,
+        "maxDrawdown": 0.9435162561296672
+      },
+      {
+        "lambda": 0.9,
+        "calmar": -0.20606492348177521,
+        "returnPct": -0.18458509983264137,
+        "maxDrawdown": 0.8957618633671366
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.9075015694265536,
+        "returnPct": -0.8656757581516471,
+        "maxDrawdown": 0.9539110314692502
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.9284737169685282,
+        "returnPct": -0.912271698391881,
+        "maxDrawdown": 0.9825498360583143
+      }
+    ],
+    "objective": "calmar",
+    "rangeStartUsed": "2024-12-20",
+    "trainEndUsed": "2024-12-19",
+    "cacheHit": false,
+    "cacheStale": false,
+    "staleDays": null
+  },
+  "lambdaCalmar:v2|INTC|h=1|cov=0.95|obj=calmar|cost=0|lev=5|pos=0.25|sig=z|shrink=0.5|trainEnd=2025-09-24": {
+    "lambdaStar": 0.9,
+    "calmarScore": 0.6037663185007516,
+    "trainSpan": {
+      "start": "1980-03-17",
+      "end": "2025-09-24"
+    },
+    "updatedAt": "2025-12-23T23:15:40.662Z",
+    "note": null,
+    "noTrade": false,
+    "grid": [
+      {
+        "lambda": 0.5,
+        "calmar": -0.5202779452617703,
+        "returnPct": -0.47329295668300864,
+        "maxDrawdown": 0.909692522993413
+      },
+      {
+        "lambda": 0.55,
+        "calmar": -0.06520467282207217,
+        "returnPct": -0.059397041563227115,
+        "maxDrawdown": 0.9109322843365433
+      },
+      {
+        "lambda": 0.6,
+        "calmar": -0.5227233789089084,
+        "returnPct": -0.4840613110682589,
+        "maxDrawdown": 0.926037232309468
+      },
+      {
+        "lambda": 0.65,
+        "calmar": -0.5989162401400275,
+        "returnPct": -0.5607093337942161,
+        "maxDrawdown": 0.9362065948706306
+      },
+      {
+        "lambda": 0.7,
+        "calmar": -0.3114957199350804,
+        "returnPct": -0.2912523092634117,
+        "maxDrawdown": 0.9350122349164616
+      },
+      {
+        "lambda": 0.75,
+        "calmar": -0.40534598394498994,
+        "returnPct": -0.385637685593726,
+        "maxDrawdown": 0.9513790708878996
+      },
+      {
+        "lambda": 0.8,
+        "calmar": -0.1654704554006859,
+        "returnPct": -0.15593087423809715,
+        "maxDrawdown": 0.9423487344644776
+      },
+      {
+        "lambda": 0.85,
+        "calmar": -0.2586057071173423,
+        "returnPct": -0.2438708008839624,
+        "maxDrawdown": 0.9430217283383697
+      },
+      {
+        "lambda": 0.9,
+        "calmar": 0.6037663185007516,
+        "returnPct": 0.5420312717777818,
+        "maxDrawdown": 0.8977500982892391
+      },
+      {
+        "lambda": 0.95,
+        "calmar": -0.7488171669491689,
+        "returnPct": -0.7161114523723735,
+        "maxDrawdown": 0.9563234978839427
+      },
+      {
+        "lambda": 0.99,
+        "calmar": -0.8352011804168465,
+        "returnPct": -0.8200553308343788,
+        "maxDrawdown": 0.9818656271834907
+      }
+    ],
+    "objective": "calmar",
+    "rangeStartUsed": "2025-09-25",
+    "trainEndUsed": "2025-09-24",
+    "cacheHit": false,
+    "cacheStale": false,
+    "staleDays": null
   }
 }
