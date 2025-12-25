@@ -1,7 +1,7 @@
 /**
- * Trading212 CFD Simulation Engine
+ * Generic CFD Simulation Engine
  * 
- * A pure simulation engine that models Trading212's CFD trading mechanics:
+ * A pure simulation engine that models common CFD trading mechanics:
  * - Leverage-based margin trading
  * - Overnight swap fees (financing costs)
  * - Spread costs
@@ -13,12 +13,12 @@
 // Types
 // ============================================================================
 
-export type Trading212Side = "long" | "short";
+export type CfdSide = "long" | "short";
 
-export type Trading212Signal = "long" | "short" | "flat";
+export type CfdSignal = "long" | "short" | "flat";
 // "flat" = no position desired for this bar
 
-export interface Trading212CfdConfig {
+export interface CfdSimConfig {
   leverage: number;           // e.g. 5 for 1:5
   fxFeeRate: number;          // e.g. 0.005 for 0.5% FX fee (applied on realised P&L if we ever model FX)
   dailyLongSwapRate: number;  // per-day rate for long positions (approx, e.g. -0.0001)
@@ -29,14 +29,14 @@ export interface Trading212CfdConfig {
   positionFraction: number;   // fraction of equity to allocate as margin for a new position, e.g. 0.5
 }
 
-export interface Trading212SimBar {
+export interface CfdSimBar {
   date: string;              // YYYY-MM-DD
   price: number;             // we'll use canonical close or adj_close
-  signal: Trading212Signal;  // model's desired regime for this bar
+  signal: CfdSignal;  // model's desired regime for this bar
 }
 
-export interface Trading212CfdPosition {
-  side: Trading212Side;
+export interface CfdPosition {
+  side: CfdSide;
   quantity: number;
   entryPrice: number;
   exposure: number;          // quantity * entryPrice
@@ -46,26 +46,26 @@ export interface Trading212CfdPosition {
   openingEquity: number;     // equity at the time the trade was opened
 }
 
-export interface Trading212AccountSnapshot {
+export interface CfdAccountSnapshot {
   date: string;
   price: number;
   equity: number;            // True equity = freeCash + marginUsed + unrealised P&L
   freeCash: number;
   marginUsed: number;
   freeMargin: number;        // Equity - marginUsed (i.e., freeCash + unrealised P&L)
-  marginStatus: number;      // 0–100%, per Trading212 formula
+  marginStatus: number;      // 0–100%, piecewise margin formula
   unrealisedPnl: number;
   realisedPnl: number;
   swapFeesAccrued: number;
   fxFeesAccrued: number;
-  side: Trading212Side | null;
+  side: CfdSide | null;
   quantity: number;
 }
 
-export interface Trading212Trade {
+export interface CfdTrade {
   entryDate: string;
   exitDate: string;
-  side: Trading212Side;
+  side: CfdSide;
   entryPrice: number;
   exitPrice: number;
   quantity: number;
@@ -78,11 +78,11 @@ export interface Trading212Trade {
   closingEquity?: number;  // account equity after this trade closed
 }
 
-export interface Trading212SimulationResult {
+export interface CfdSimulationResult {
   initialEquity: number;
   finalEquity: number;
-  accountHistory: Trading212AccountSnapshot[];
-  trades: Trading212Trade[];
+  accountHistory: CfdAccountSnapshot[];
+  trades: CfdTrade[];
   maxDrawdown: number;       // in decimal (e.g., 0.15 = 15%)
   marginCallEvents: number;
   stopOutEvents: number;
@@ -98,11 +98,9 @@ export interface Trading212SimulationResult {
 // ============================================================================
 
 /**
- * Compute margin status per Trading212's piecewise definition:
+ * Compute margin status via a piecewise definition:
  * - Above 50%: status = TotalFunds / (TotalFunds + Margin) * 100
  * - Below 50%: status = TotalFunds / Margin * 50
- * 
- * See: https://helpcentre.trading212.com/hc/en-us/articles/360008654957
  * 
  * @param equity - Total funds (free cash + unrealised P&L)
  * @param marginUsed - Margin currently locked for open positions
@@ -152,7 +150,7 @@ function computeMaxDrawdown(equitySeries: number[]): number {
 // ============================================================================
 
 /**
- * Run a Trading212 CFD simulation over a series of bars.
+ * Run a CFD simulation over a series of bars.
  * 
  * Strategy: single-position, driven by signal per bar.
  * - signal = "long" => open/hold long
@@ -161,14 +159,14 @@ function computeMaxDrawdown(equitySeries: number[]): number {
  * 
  * @param bars - Array of simulation bars with date, price, and signal
  * @param initialEquity - Starting account equity
- * @param config - Trading212 CFD configuration
+ * @param config - CFD configuration
  * @returns Simulation result with account history, trades, and metrics
  */
-export function simulateTrading212Cfd(
-  bars: Trading212SimBar[],
+export function simulateCfd(
+  bars: CfdSimBar[],
   initialEquity: number,
-  config: Trading212CfdConfig
-): Trading212SimulationResult {
+  config: CfdSimConfig
+): CfdSimulationResult {
   let equity = initialEquity;
   let freeCash = initialEquity;
   let marginUsed = 0;
@@ -176,14 +174,14 @@ export function simulateTrading212Cfd(
   let swapFeesAccrued = 0;
   let fxFeesAccrued = 0;
 
-  let position: Trading212CfdPosition | null = null;
+  let position: CfdPosition | null = null;
 
   let marginCallEvents = 0;
   let stopOutEvents = 0;
   const stopOutDates: string[] = [];
 
-  const history: Trading212AccountSnapshot[] = [];
-  const trades: Trading212Trade[] = [];
+  const history: CfdAccountSnapshot[] = [];
+  const trades: CfdTrade[] = [];
 
   for (let i = 0; i < bars.length; i++) {
     const bar = bars[i];
@@ -224,7 +222,7 @@ export function simulateTrading212Cfd(
       marginUsed = 0;
 
       // Negative balance protection: do not allow freeCash / equity < 0
-      // Trading212 offers negative balance protection on retail accounts
+      // Many retail brokers offer negative balance protection
       if (freeCash < 0) {
         freeCash = 0;
       }
@@ -291,11 +289,11 @@ export function simulateTrading212Cfd(
     const desired = bar.signal;
 
     // Helper: close current position
-    const doClosePosition = (pos: Trading212CfdPosition): void => {
+    const doClosePosition = (pos: CfdPosition): void => {
       const diff = price - pos.entryPrice;
       const grossPnl =
         pos.side === "long" ? diff * pos.quantity : -diff * pos.quantity;
-      // FX fee: Trading212 charges ~0.5% on the realised result for non-GBP instruments
+      // FX fee: apply on realised result for non-base-currency instruments
       const fxFees = Math.abs(grossPnl) * config.fxFeeRate;
       const netPnl = grossPnl - fxFees;
       realisedPnl += netPnl;
@@ -323,7 +321,7 @@ export function simulateTrading212Cfd(
     };
 
     // Helper: open a new position
-    const doOpenPosition = (side: Trading212Side): Trading212CfdPosition | null => {
+    const doOpenPosition = (side: CfdSide): CfdPosition | null => {
       const equityForPosition = equity; // after updates
       const targetMargin = equityForPosition * config.positionFraction;
       if (targetMargin <= 0) return null;
@@ -339,7 +337,7 @@ export function simulateTrading212Cfd(
       const entryPrice =
         side === "long" ? price + spread / 2 : price - spread / 2;
 
-      const newPos: Trading212CfdPosition = {
+      const newPos: CfdPosition = {
         side,
         quantity: qty,
         entryPrice,
@@ -383,7 +381,7 @@ export function simulateTrading212Cfd(
 
     // 6) Snapshot state at end of day
     let quantity = 0;
-    let side: Trading212Side | null = null;
+    let side: CfdSide | null = null;
     if (position) {
       quantity = position.quantity;
       side = position.side;

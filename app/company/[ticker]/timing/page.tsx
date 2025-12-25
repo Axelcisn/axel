@@ -24,26 +24,16 @@ import { resolveBaseMethod } from '@/lib/forecast/methods';
 import { PriceChart, TrendOverlayState, SimulationRunSummary, VolCell, VolBundle } from '@/components/PriceChart';
 import { useTrendIndicators } from '@/lib/hooks/useTrendIndicators';
 import {
-  Trading212CfdConfig,
-  Trading212SimBar,
-  Trading212Signal,
-  Trading212SimulationResult,
-  Trading212Trade,
-  Trading212AccountSnapshot,
-  simulateTrading212Cfd,
-} from '@/lib/backtest/trading212Cfd';
+  CfdSimConfig,
+  CfdSimBar,
+  CfdSignal,
+  CfdSimulationResult,
+  CfdTrade,
+  CfdAccountSnapshot,
+  simulateCfd,
+} from '@/lib/backtest/cfdSim';
 import { computeWindowSimFromBars, type WindowSimResult } from '@/lib/backtest/windowSim';
-import {
-  fetchT212Trades,
-  fetchT212PairedTrades,
-  convertSimpleTradesToOverlay,
-  mapSymbolToT212Ticker,
-  T212SimpleTrade,
-  T212PairedTrade,
-  PairedTradesSummary,
-  RealTradesOverlay,
-} from '@/lib/trading212/tradesClient';
-import { selectTradesForChartMarkers, type TradeOverlaySource } from '@/lib/trading212/tradeOverlayFallback';
+import { buildSelectedStrategyAnalytics, SelectedStrategyAnalytics } from '@/lib/analytics/selectedStrategyAnalytics';
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import { StickyTickerBar } from '@/components/StickyTickerBar';
@@ -368,7 +358,7 @@ const buildEwmaExpectedBars = (
   h: number,
   lambda: number,
   trainFraction: number
-): Trading212SimBar[] => {
+): CfdSimBar[] => {
   if (!rows || rows.length < 3) return [];
   const prices: number[] = [];
   const dates: string[] = [];
@@ -389,7 +379,7 @@ const buildEwmaExpectedBars = (
       returns.push(Math.log(curr / prev));
     }
   }
-  const bars: Trading212SimBar[] = [];
+  const bars: CfdSimBar[] = [];
   const MIN_TRAIN = 20;
   for (let i = 0; i < returns.length - 1; i++) {
     const priceIdx = i + 1;
@@ -416,14 +406,14 @@ const buildEwmaExpectedBars = (
       continue;
     }
     const expected = S_t * Math.exp(muStarUsed * h);
-    const signal: Trading212Signal = expected > S_t ? "long" : "short";
+    const signal: CfdSignal = expected > S_t ? "long" : "short";
     bars.push({ date: dates[priceIdx], price: prices[priceIdx], signal });
   }
   return bars;
 };
 
 const summarizeSimPerformance = (
-  result: Trading212SimulationResult,
+  result: CfdSimulationResult,
   priceStart: number | null,
   priceEnd: number | null
 ): Partial<SimulationRunSummary> => {
@@ -890,6 +880,8 @@ export default function TimingPage({ params }: TimingPageProps) {
   const lastAutoForecastKeyRef = useRef<string | null>(null);
   const [autoForecastError, setAutoForecastError] = useState<string | null>(null);
   const [selectedSimRunId, setSelectedSimRunId] = useState<string | null>(null);
+  const [showSimulationSettings, setShowSimulationSettings] = useState(false);
+  const simulationSettingsRef = useRef<HTMLDivElement | null>(null);
 
   // Volatility Model state
   const [volModel, setVolModel] = useState<'GBM' | 'GARCH' | 'HAR-RV' | 'Range'>('GBM');
@@ -1120,7 +1112,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const [biasedMaxCalmarResult, setBiasedMaxCalmarResult] = useState<BiasedMaxCalmarResult | null>(null);
   const [biasedMaxCalmarError, setBiasedMaxCalmarError] = useState<string | null>(null);
   const [isLoadingBiasedMaxCalmar, setIsLoadingBiasedMaxCalmar] = useState(false);
-  const [t212CanonicalRows, setT212CanonicalRows] = useState<CanonicalRow[] | null>(null);
+  const [cfdCanonicalRows, setCfdCanonicalRows] = useState<CanonicalRow[] | null>(null);
   const isFetchingCanonicalRowsRef = useRef(false);
   const canonicalRowsPromiseRef = useRef<Promise<CanonicalRow[] | null> | null>(null);
   const canonicalFetchAbortRef = useRef<AbortController | null>(null);
@@ -1129,7 +1121,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   const userHasSetWindowRef = useRef(false);
   const derivedMaxTrainFraction = useMemo(() => {
     if (!biasedMaxCalmarResult?.trainSpan) return null;
-    const rows = t212CanonicalRows;
+    const rows = cfdCanonicalRows;
     if (!rows || rows.length === 0) return null;
     const trainEnd = biasedMaxCalmarResult.trainSpan.end;
     const cutoffIdx = rows.findIndex((r) => r.date > trainEnd);
@@ -1138,7 +1130,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     const frac = trainCount / rows.length;
     if (!Number.isFinite(frac)) return null;
     return Math.min(0.99, Math.max(0.01, frac));
-  }, [biasedMaxCalmarResult?.trainSpan, t212CanonicalRows]);
+  }, [biasedMaxCalmarResult?.trainSpan, cfdCanonicalRows]);
 
   const getMaxEwmaConfig = useCallback(() => {
     if (biasedMaxCalmarResult) {
@@ -1168,7 +1160,7 @@ export default function TimingPage({ params }: TimingPageProps) {
   type BaseMode = 'unbiased' | 'biased' | 'max';
 
   const fetchCanonicalRows = useCallback(async (): Promise<CanonicalRow[] | null> => {
-    if (t212CanonicalRows && t212CanonicalRows.length > 0) return t212CanonicalRows;
+    if (cfdCanonicalRows && cfdCanonicalRows.length > 0) return cfdCanonicalRows;
     if (canonicalRowsPromiseRef.current && canonicalRowsKeyRef.current === canonicalFetchKeyBase) {
       return canonicalRowsPromiseRef.current;
     }
@@ -1192,7 +1184,7 @@ export default function TimingPage({ params }: TimingPageProps) {
             ? data
             : [];
         if (Array.isArray(rows) && rows.length > 0) {
-          setT212CanonicalRows(rows as CanonicalRow[]);
+          setCfdCanonicalRows(rows as CanonicalRow[]);
           return rows as CanonicalRow[];
         }
       } catch (err) {
@@ -1209,12 +1201,12 @@ export default function TimingPage({ params }: TimingPageProps) {
     })();
     canonicalRowsPromiseRef.current = promise;
     return promise;
-  }, [canonicalFetchKeyBase, params.ticker, t212CanonicalRows]);
+  }, [canonicalFetchKeyBase, params.ticker, cfdCanonicalRows]);
 
   useEffect(() => {
-    if (t212CanonicalRows && t212CanonicalRows.length > 0) return;
+    if (cfdCanonicalRows && cfdCanonicalRows.length > 0) return;
     fetchCanonicalRows();
-  }, [fetchCanonicalRows, t212CanonicalRows]);
+  }, [fetchCanonicalRows, cfdCanonicalRows]);
 
   interface SimulationMode {
     baseMode: BaseMode;
@@ -1262,7 +1254,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     return 0.05;
   }, [trendWeight]);
   const resolveRunIdForMode = useCallback(
-    (mode: SimulationMode): T212RunId => {
+    (mode: SimulationMode): CfdRunId => {
       if (mode.baseMode === "unbiased") return "ewma-unbiased";
       if (mode.baseMode === "max") {
         return mode.withTrend ? "ewma-biased-max-trend" : "ewma-biased-max";
@@ -1272,45 +1264,45 @@ export default function TimingPage({ params }: TimingPageProps) {
     []
   );
 
-  // Trading212 CFD Simulation state
+  // Cfd CFD Simulation state
   const [isCfdEnabled, setIsCfdEnabled] = useState(true);  // CFD simulation toggle
   
-  const [t212InitialEquity, setT212InitialEquity] = useState(1000);
-  const [t212Leverage, setT212Leverage] = useState(5);
-  const [t212PositionFraction, setT212PositionFraction] = useState(0.25); // 25% default
+  const [cfdInitialEquity, setCfdInitialEquity] = useState(1000);
+  const [cfdLeverage, setCfdLeverage] = useState(5);
+  const [cfdPositionFraction, setCfdPositionFraction] = useState(0.25); // 25% default
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
-  const [t212ThresholdFrac, setT212ThresholdFrac] = useState<number>(() => estimateDefaultThresholdPct(simCostDefaults));
-  const [t212CostBps, setT212CostBps] = useState<number>(0);
+  const [cfdThresholdFrac, setCfdThresholdFrac] = useState<number>(() => estimateDefaultThresholdPct(simCostDefaults));
+  const [cfdCostBps, setCfdCostBps] = useState<number>(0);
   const [ewmaShrinkK, setEwmaShrinkK] = useState<number>(0.5);
-  const [t212SignalRule, setT212SignalRule] = useState<"bps" | "z">("z");
-  const [t212ZMode, setT212ZMode] = useState<"auto" | "manual" | "optimize">("optimize");
-  const [t212ZEnter, setT212ZEnter] = useState(0.3);
-  const [t212ZExit, setT212ZExit] = useState(0.1);
-  const [t212ZFlip, setT212ZFlip] = useState(0.6);
-  const [t212ZOptimizeResult, setT212ZOptimizeResult] = useState<ZOptimizeResult | null>(null);
+  const [cfdSignalRule, setCfdSignalRule] = useState<"bps" | "z">("z");
+  const [cfdZMode, setCfdZMode] = useState<"auto" | "manual" | "optimize">("optimize");
+  const [cfdZEnter, setCfdZEnter] = useState(0.3);
+  const [cfdZExit, setCfdZExit] = useState(0.1);
+  const [cfdZFlip, setCfdZFlip] = useState(0.6);
+  const [cfdZOptimizeResult, setCfdZOptimizeResult] = useState<ZOptimizeResult | null>(null);
   const [isOptimizingZThresholds, setIsOptimizingZThresholds] = useState(false);
-  const [t212ZOptimizeError, setT212ZOptimizeError] = useState<string | null>(null);
-  const [t212ZDisplayThresholds, setT212ZDisplayThresholds] = useState<ZOptimizeResult["thresholds"] | null>(null);
-  const t212ZOptimizeFailedRef = useRef(false);
-  const [t212DailyLongSwap, setT212DailyLongSwap] = useState(0);  // can tune later
-  const [t212DailyShortSwap, setT212DailyShortSwap] = useState(0);
-  const [isRunningT212Sim, setIsRunningT212Sim] = useState(false);
-  const [t212Error, setT212Error] = useState<string | null>(null);
-  // Trading212 Simulation Runs - multiple scenarios for comparison
-  type T212RunId =
+  const [cfdZOptimizeError, setCfdZOptimizeError] = useState<string | null>(null);
+  const [cfdZDisplayThresholds, setCfdZDisplayThresholds] = useState<ZOptimizeResult["thresholds"] | null>(null);
+  const cfdZOptimizeFailedRef = useRef(false);
+  const [cfdDailyLongSwap, setCfdDailyLongSwap] = useState(0);  // can tune later
+  const [cfdDailyShortSwap, setCfdDailyShortSwap] = useState(0);
+  const [isRunningCfdSim, setIsRunningCfdSim] = useState(false);
+  const [cfdError, setCfdError] = useState<string | null>(null);
+  // Cfd Simulation Runs - multiple scenarios for comparison
+  type CfdRunId =
     | "ewma-unbiased"
     | "ewma-biased"
     | "ewma-biased-max"
     | "ewma-biased-trend"
     | "ewma-biased-max-trend";
 
-  type Trading212SimRun = {
-    id: T212RunId;
+  type CfdSimRun = {
+    id: CfdRunId;
     label: string;
     signalSource: "unbiased" | "biased";
-    result: Trading212SimulationResult;
-    bars: Trading212SimBar[];
-    configSnapshot: Trading212CfdConfig;
+    result: CfdSimulationResult;
+    bars: CfdSimBar[];
+    configSnapshot: CfdSimConfig;
     initialEquity: number;
     windowResult?: WindowSimResult | null;
     lambda?: number;
@@ -1321,7 +1313,7 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   type StrategyKey = "unbiased" | "biased" | "biased-max";
   type BaseRunId = "ewma-unbiased" | "ewma-biased" | "ewma-biased-max";
-  type Trading212BaseRunsById = Partial<Record<BaseRunId, Trading212SimRun>>;
+  type CfdBaseRunsById = Partial<Record<BaseRunId, CfdSimRun>>;
   type SimCompareRangePreset =
     | "chart"
     | "1d"
@@ -1347,34 +1339,33 @@ export default function TimingPage({ params }: TimingPageProps) {
 
   type SimulationStrategySummary = SimulationRunSummary;
   type SimResultCacheEntry = {
-    accountHistory: Trading212AccountSnapshot[];
+    accountHistory: CfdAccountSnapshot[];
     initialEquity: number;
-    trades: Trading212Trade[];
+    trades: CfdTrade[];
   };
 
   // Type for trade overlays passed to PriceChart
-  type Trading212TradeOverlay = {
-    runId: T212RunId;
+  type CfdTradeOverlay = {
+    runId: CfdRunId;
     label: string;
     color: string; // hex color for this run
-    trades: Trading212Trade[];
-    source?: TradeOverlaySource;
+    trades: CfdTrade[];
   };
 
-  const [t212Runs, setT212Runs] = useState<Trading212SimRun[]>([]);
-  const [t212BaseRunsById, setT212BaseRunsById] = useState<Trading212BaseRunsById>({});
-  const [t212CurrentRunId, setT212CurrentRunId] = useState<T212RunId | null>(null);
-  const [t212VisibleRunIds, setT212VisibleRunIds] = useState<Set<T212RunId>>(() => new Set());
+  const [cfdRuns, setCfdRuns] = useState<CfdSimRun[]>([]);
+  const [cfdBaseRunsById, setCfdBaseRunsById] = useState<CfdBaseRunsById>({});
+  const [cfdCurrentRunId, setCfdCurrentRunId] = useState<CfdRunId | null>(null);
+  const [cfdVisibleRunIds, setCfdVisibleRunIds] = useState<Set<CfdRunId>>(() => new Set());
   const [simComparePreset, setSimComparePreset] = useState<SimCompareRangePreset>("chart");
   const [, setSimCompareCustom] = useState<{ start: string; end: string } | null>(null);
   const [visibleWindow, setVisibleWindow] = useState<{ start: string; end: string } | null>(null);
-  const t212RunsRef = useRef<Trading212SimRun[]>([]);
+  const cfdRunsRef = useRef<CfdSimRun[]>([]);
   const defaultWindowSeededRef = useRef(false);
   const baselineVerifyLoggedRef = useRef(false);
 
   useEffect(() => {
-    t212RunsRef.current = t212Runs;
-  }, [t212Runs]);
+    cfdRunsRef.current = cfdRuns;
+  }, [cfdRuns]);
   useEffect(() => {
     defaultWindowSeededRef.current = false;
   }, [params.ticker]);
@@ -1411,7 +1402,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     setSimComparePreset("chart");
     setBiasedMaxCalmarResult(null);
     setBiasedMaxCalmarError(null);
-    setT212CanonicalRows(null);
+    setCfdCanonicalRows(null);
     canonicalRowsPromiseRef.current = null;
     canonicalFetchAbortRef.current?.abort();
     canonicalFetchAbortRef.current = null;
@@ -1426,17 +1417,17 @@ export default function TimingPage({ params }: TimingPageProps) {
     }
     if (defaultWindowSeededRef.current) return;
     if (userHasSetWindowRef.current) return;
-    if (!t212CanonicalRows || t212CanonicalRows.length === 0) return;
-    const end = t212CanonicalRows[t212CanonicalRows.length - 1]?.date;
-    const startIdx = Math.max(0, t212CanonicalRows.length - 252);
-    const start = t212CanonicalRows[startIdx]?.date ?? t212CanonicalRows[0]?.date ?? null;
+    if (!cfdCanonicalRows || cfdCanonicalRows.length === 0) return;
+    const end = cfdCanonicalRows[cfdCanonicalRows.length - 1]?.date;
+    const startIdx = Math.max(0, cfdCanonicalRows.length - 252);
+    const start = cfdCanonicalRows[startIdx]?.date ?? cfdCanonicalRows[0]?.date ?? null;
     if (!start || !end) return;
     defaultWindowSeededRef.current = true;
     setVisibleWindow({ start, end });
-  }, [visibleWindow, t212CanonicalRows]);
+  }, [visibleWindow, cfdCanonicalRows]);
 
   useEffect(() => {
-    setT212Runs((prev) =>
+    setCfdRuns((prev) =>
       prev.map((run) => ({
         ...run,
         windowResult: visibleWindow
@@ -1453,16 +1444,16 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [visibleWindow]);
 
   useEffect(() => {
-    setT212ZOptimizeResult(null);
-    setT212ZOptimizeError(null);
+    setCfdZOptimizeResult(null);
+    setCfdZOptimizeError(null);
     setIsOptimizingZThresholds(false);
   }, [params.ticker]);
 
   useEffect(() => {
-    setT212BaseRunsById((prev) => {
-      const next: Trading212BaseRunsById = { ...prev };
+    setCfdBaseRunsById((prev) => {
+      const next: CfdBaseRunsById = { ...prev };
       const replace = (id: BaseRunId) => {
-        const found = t212Runs.find((r) => r.id === id);
+        const found = cfdRuns.find((r) => r.id === id);
         if (found) {
           next[id] = found;
         }
@@ -1472,23 +1463,23 @@ export default function TimingPage({ params }: TimingPageProps) {
       replace("ewma-biased-max");
       return next;
     });
-  }, [t212Runs]);
+  }, [cfdRuns]);
 
   useEffect(() => {
-    if (t212ZMode === "manual") {
-      setT212ZDisplayThresholds({
-        enterLong: t212ZEnter,
-        enterShort: t212ZEnter,
-        exitLong: t212ZExit,
-        exitShort: t212ZExit,
-        flipLong: t212ZFlip,
-        flipShort: t212ZFlip,
+    if (cfdZMode === "manual") {
+      setCfdZDisplayThresholds({
+        enterLong: cfdZEnter,
+        enterShort: cfdZEnter,
+        exitLong: cfdZExit,
+        exitShort: cfdZExit,
+        flipLong: cfdZFlip,
+        flipShort: cfdZFlip,
       });
     }
-  }, [t212ZMode, t212ZEnter, t212ZExit, t212ZFlip]);
+  }, [cfdZMode, cfdZEnter, cfdZExit, cfdZFlip]);
   const hasMaxRun = useMemo(
-    () => t212Runs.some((r) => r.id === "ewma-biased-max" || r.id === "ewma-biased-max-trend"),
-    [t212Runs]
+    () => cfdRuns.some((r) => r.id === "ewma-biased-max" || r.id === "ewma-biased-max-trend"),
+    [cfdRuns]
   );
   const comparisonRunIds: BaseRunId[] = useMemo(
     () => ["ewma-unbiased", "ewma-biased", "ewma-biased-max"],
@@ -1502,20 +1493,20 @@ export default function TimingPage({ params }: TimingPageProps) {
     ],
     []
   );
-  const activeT212RunId = useMemo(
-    () => (t212VisibleRunIds.size > 0 ? Array.from(t212VisibleRunIds)[0] : null),
-    [t212VisibleRunIds]
+  const activeCfdRunId = useMemo(
+    () => (cfdVisibleRunIds.size > 0 ? Array.from(cfdVisibleRunIds)[0] : null),
+    [cfdVisibleRunIds]
   );
   const referenceSimRun = useMemo(
     () =>
-      t212BaseRunsById["ewma-biased"] ??
-      t212BaseRunsById["ewma-biased-max"] ??
-      t212BaseRunsById["ewma-unbiased"] ??
+      cfdBaseRunsById["ewma-biased"] ??
+      cfdBaseRunsById["ewma-biased-max"] ??
+      cfdBaseRunsById["ewma-unbiased"] ??
       null,
-    [t212BaseRunsById]
+    [cfdBaseRunsById]
   );
   const summarizeRunStats = useCallback(
-    (run: Trading212SimRun, window?: { start: string; end: string } | null): FilteredStats | null => {
+    (run: CfdSimRun, window?: { start: string; end: string } | null): FilteredStats | null => {
       const baseResult =
         window && run.windowResult?.result ? run.windowResult.result : run.result;
       const history = baseResult.accountHistory;
@@ -1584,7 +1575,7 @@ export default function TimingPage({ params }: TimingPageProps) {
       })();
 
       let openedTrades = 0;
-      let prevSide: Trading212AccountSnapshot["side"] | null =
+      let prevSide: CfdAccountSnapshot["side"] | null =
         startIdx > 0 ? history[startIdx - 1]?.side ?? null : null;
       for (let i = startIdx; i <= endIdx; i++) {
         const side = history[i].side;
@@ -1636,22 +1627,22 @@ export default function TimingPage({ params }: TimingPageProps) {
       });
 
       // If runs already exist, immediately switch visible run
-      setT212VisibleRunIds((prevVisible) => {
-        if (t212Runs.length === 0) {
+      setCfdVisibleRunIds((prevVisible) => {
+        if (cfdRuns.length === 0) {
           // No runs yet; let the sync effect handle initial selection
           return prevVisible;
         }
 
         const desired = resolveRunIdForMode(mode);
-        const fallbackForMode: T212RunId =
+        const fallbackForMode: CfdRunId =
           mode.baseMode === "max"
             ? "ewma-biased-max"
             : mode.baseMode === "unbiased"
               ? "ewma-unbiased"
               : "ewma-biased";
 
-        const runIds = new Set(t212Runs.map((r) => r.id));
-        let chosen: T212RunId | null = null;
+        const runIds = new Set(cfdRuns.map((r) => r.id));
+        let chosen: CfdRunId | null = null;
 
         if (runIds.has(desired)) {
           chosen = desired;
@@ -1661,15 +1652,15 @@ export default function TimingPage({ params }: TimingPageProps) {
           chosen = "ewma-biased";
         } else if (runIds.has("ewma-unbiased")) {
           chosen = "ewma-unbiased";
-        } else if (t212Runs.length > 0) {
-          chosen = t212Runs[0].id;
+        } else if (cfdRuns.length > 0) {
+          chosen = cfdRuns[0].id;
         }
 
         if (!chosen) {
           return prevVisible;
         }
 
-        const next = new Set<T212RunId>([chosen]);
+        const next = new Set<CfdRunId>([chosen]);
         console.log(
           "[SIM-CLICK] set visible run to",
           chosen,
@@ -1681,121 +1672,79 @@ export default function TimingPage({ params }: TimingPageProps) {
         return next;
       });
     },
-    [resolveRunIdForMode, t212Runs]
+    [resolveRunIdForMode, cfdRuns]
   );
 
-  // State for real Trading212 trades (from actual account history)
-  const [realT212Trades, setRealT212Trades] = useState<T212SimpleTrade[]>([]);
-  const [realT212PairedTrades, setRealT212PairedTrades] = useState<T212PairedTrade[]>([]);
-  const [realT212Summary, setRealT212Summary] = useState<PairedTradesSummary | null>(null);
-  const [realTradesLoading, setRealTradesLoading] = useState(false);
-  const [showRealTrades, setShowRealTrades] = useState(true); // Toggle visibility of real trades
   const { momentum: chartMomentum, adx: chartAdx } = useTrendIndicators(params.ticker, { momentumPeriod: trendMomentumPeriod });
 
   // State for Yahoo Finance sync
   const [isYahooSyncing, setIsYahooSyncing] = useState(false);
   const [yahooSyncError, setYahooSyncError] = useState<string | null>(null);
 
-  // Toggle visibility of a T212 run on the chart (solo mode: only one run visible at a time)
-  const toggleT212RunVisibility = useCallback((runId: T212RunId) => {
-    setT212VisibleRunIds(new Set<T212RunId>([runId]));
+  // Toggle visibility of a Cfd run on the chart (solo mode: only one run visible at a time)
+  const toggleCfdRunVisibility = useCallback((runId: CfdRunId) => {
+    setCfdVisibleRunIds(new Set<CfdRunId>([runId]));
   }, []);
 
-  // Build overlay for real trades (if enabled and available)
-  const realTradesOverlay: RealTradesOverlay | null = useMemo(() => {
-    if (!showRealTrades || realT212Trades.length === 0) {
-      return null;
-    }
-    return convertSimpleTradesToOverlay(realT212Trades, {
-      runId: "real-trades",
-      label: "Real Trades",
-      color: "#10B981", // emerald-500
-    });
-  }, [showRealTrades, realT212Trades]);
-
   // Build trade overlays for visible runs to pass to PriceChart
-  const t212TradeOverlays: Trading212TradeOverlay[] = useMemo(() => {
-    const runColors: Record<T212RunId, string> = {
+  const cfdTradeOverlays: CfdTradeOverlay[] = useMemo(() => {
+    const runColors: Record<CfdRunId, string> = {
       "ewma-unbiased": "#9CA3AF",     // gray-400
       "ewma-biased": "#3B82F6",       // blue-500
       "ewma-biased-max": "#F59E0B",   // amber-500
       "ewma-biased-trend": "#2563EB", // blue-600
       "ewma-biased-max-trend": "#D97706", // amber-600
     };
-    const simOverlays = t212Runs
-      .filter((run) => t212VisibleRunIds.has(run.id))
-      .map((run) => {
-        const { trades, source } = selectTradesForChartMarkers({
-          windowResult: run.windowResult ?? null,
-          globalTrades: run.result.trades,
-          visibleWindow,
-          strategyStartDate: run.strategyStartDate ?? null,
-        });
-        return {
-          runId: run.id,
-          label: run.label,
-          color: runColors[run.id],
-          trades,
-          source,
-        };
-      });
-    
-    // Include real trades overlay if available and enabled
-    if (realTradesOverlay) {
-      return [
-        ...simOverlays,
-        {
-          runId: realTradesOverlay.runId as T212RunId, // cast for compatibility
-          label: realTradesOverlay.label,
-          color: realTradesOverlay.color,
-          trades: realTradesOverlay.trades,
-        },
-      ];
-    }
-    
-    return simOverlays;
-  }, [t212Runs, t212VisibleRunIds, realTradesOverlay, visibleWindow]);
+    return cfdRuns
+      .filter((run) => cfdVisibleRunIds.has(run.id))
+      .map((run) => ({
+        runId: run.id,
+        label: run.label,
+        color: runColors[run.id],
+        trades: run.windowResult?.result?.trades ?? run.result.trades,
+      }));
+  }, [cfdRuns, cfdVisibleRunIds, visibleWindow]);
 
   // Active run (solo mode) for equity chart
-  const t212ActiveRun = useMemo(() => {
-    console.log("[INIT-ACCOUNT] activeRunId=", activeT212RunId, "visibleSet=", Array.from(t212VisibleRunIds), "t212Runs ids=", t212Runs.map((r) => r.id));
-    return activeT212RunId
-      ? t212Runs.find((run) => run.id === activeT212RunId) ?? null
-      : t212Runs.find((run) => t212VisibleRunIds.has(run.id)) ?? null;
-  }, [t212Runs, activeT212RunId, t212VisibleRunIds]);
+  const cfdActiveRun = useMemo(() => {
+    console.log("[INIT-ACCOUNT] activeRunId=", activeCfdRunId, "visibleSet=", Array.from(cfdVisibleRunIds), "cfdRuns ids=", cfdRuns.map((r) => r.id));
+    return activeCfdRunId
+      ? cfdRuns.find((run) => run.id === activeCfdRunId) ?? null
+      : cfdRuns.find((run) => cfdVisibleRunIds.has(run.id)) ?? null;
+  }, [cfdRuns, activeCfdRunId, cfdVisibleRunIds]);
 
-  const t212AccountHistory: Trading212AccountSnapshot[] | null = useMemo(() => {
-    const res = t212ActiveRun?.windowResult?.result ?? null;
+  const cfdAccountHistory: CfdAccountSnapshot[] | null = useMemo(() => {
+    const res = cfdActiveRun?.windowResult?.result ?? null;
     return res?.accountHistory ?? null;
-  }, [t212ActiveRun]);
+  }, [cfdActiveRun]);
 
-  const t212ActiveTrades: Trading212Trade[] | null = useMemo(() => {
-    const res = t212ActiveRun?.windowResult?.result ?? null;
+  const cfdActiveTrades: CfdTrade[] | null = useMemo(() => {
+    const res = cfdActiveRun?.windowResult?.result ?? null;
     return res?.trades ?? null;
-  }, [t212ActiveRun]);
+  }, [cfdActiveRun]);
 
   useEffect(() => {
     if (process.env.NODE_ENV === "production") return;
-    if (t212Runs.length === 0) return;
+    if (cfdRuns.length === 0) return;
     if (baselineVerifyLoggedRef.current) return;
-    const visibleIds = Array.from(t212VisibleRunIds);
-    const overlaysCount = t212TradeOverlays.length;
-    const equityLen = t212AccountHistory?.length ?? 0;
-    console.log("[T212 DEV VERIFY] baseline seeded", {
-      runCount: t212Runs.length,
+    const visibleIds = Array.from(cfdVisibleRunIds);
+    const overlaysCount = cfdTradeOverlays.length;
+    const equityLen = cfdAccountHistory?.length ?? 0;
+    console.log("[Cfd DEV VERIFY] baseline seeded", {
+      runCount: cfdRuns.length,
       visibleIds,
       overlaysCount,
       equityLen,
     });
     if (visibleIds.length === 0 || overlaysCount === 0 || equityLen === 0) {
-      console.warn("[T212 DEV VERIFY] baseline incomplete", {
+      console.warn("[Cfd DEV VERIFY] baseline incomplete", {
         visibleIds,
         overlaysCount,
         equityLen,
       });
     }
     baselineVerifyLoggedRef.current = true;
-  }, [t212Runs, t212VisibleRunIds, t212TradeOverlays, t212AccountHistory]);
+  }, [cfdRuns, cfdVisibleRunIds, cfdTradeOverlays, cfdAccountHistory]);
 
   // Keep visible run in sync with SimulationMode and available runs
   useEffect(() => {
@@ -1804,22 +1753,22 @@ export default function TimingPage({ params }: TimingPageProps) {
       simulationMode.baseMode,
       "withTrend=",
       simulationMode.withTrend,
-      "t212Runs ids=",
-      t212Runs.map((r) => r.id)
+      "cfdRuns ids=",
+      cfdRuns.map((r) => r.id)
     );
-    if (t212Runs.length === 0) return;
+    if (cfdRuns.length === 0) return;
 
     const desiredRunId = resolveRunIdForMode(simulationMode);
-    const fallbackForMode: T212RunId =
+    const fallbackForMode: CfdRunId =
       simulationMode.baseMode === "max"
         ? "ewma-biased-max"
         : simulationMode.baseMode === "unbiased"
           ? "ewma-unbiased"
           : "ewma-biased";
 
-    const runIds = new Set(t212Runs.map((r) => r.id));
+    const runIds = new Set(cfdRuns.map((r) => r.id));
 
-    let chosen: T212RunId | null = null;
+    let chosen: CfdRunId | null = null;
 
     if (runIds.has(desiredRunId)) {
       chosen = desiredRunId;
@@ -1830,77 +1779,17 @@ export default function TimingPage({ params }: TimingPageProps) {
     } else if (runIds.has("ewma-unbiased")) {
       chosen = "ewma-unbiased";
     } else {
-      chosen = t212Runs[0].id;
+      chosen = cfdRuns[0].id;
     }
 
-    if (chosen != null && !(t212VisibleRunIds.size === 1 && t212VisibleRunIds.has(chosen))) {
+    if (chosen != null && !(cfdVisibleRunIds.size === 1 && cfdVisibleRunIds.has(chosen))) {
       console.log("[INIT-VISIBLE] sync visible run to", chosen);
-      setT212VisibleRunIds(new Set<T212RunId>([chosen]));
+      setCfdVisibleRunIds(new Set<CfdRunId>([chosen]));
     }
-  }, [resolveRunIdForMode, simulationMode, t212Runs, t212VisibleRunIds]);
-
-  // Prepare table rows for real T212 paired trades (with holding period)
-  const realT212TradeRows = useMemo(() => {
-    if (!realT212PairedTrades || realT212PairedTrades.length === 0) return [];
-
-    return realT212PairedTrades.map((t) => {
-      // Compute holding period in days if both dates exist
-      let holdingDays: number | null = null;
-      if (t.entryDate && t.exitDate) {
-        const start = new Date(t.entryDate);
-        const end = new Date(t.exitDate);
-        const diffMs = end.getTime() - start.getTime();
-        holdingDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
-      }
-
-      return {
-        ...t,
-        holdingDays,
-      };
-    });
-  }, [realT212PairedTrades]);
-
-  // Fetch real Trading212 trades for this symbol on mount
-  useEffect(() => {
-    const canonicalSymbol = params.ticker.toUpperCase();
-    const t212Ticker = mapSymbolToT212Ticker(canonicalSymbol);
-
-    if (!t212Ticker) {
-      // No T212 mapping for this symbol
-      return;
-    }
-
-    let cancelled = false;
-    setRealTradesLoading(true);
-
-    // Fetch both raw trades (for overlay) and paired trades (for table)
-    Promise.all([
-      fetchT212Trades(t212Ticker, { maxPages: 5, pageSize: 100 }),
-      fetchT212PairedTrades(t212Ticker, { maxPages: 10, pageSize: 100 }),
-    ])
-      .then(([rawTrades, pairedResponse]) => {
-        if (!cancelled) {
-          setRealT212Trades(rawTrades);
-          setRealT212PairedTrades(pairedResponse.pairedTrades);
-          setRealT212Summary(pairedResponse.summary);
-        }
-      })
-      .catch((err) => {
-        console.error("Failed to load Trading212 trades for", t212Ticker, err);
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setRealTradesLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [params.ticker]);
+  }, [resolveRunIdForMode, simulationMode, cfdRuns, cfdVisibleRunIds]);
 
   const { rows: simulationRunsSummary, simResultsById } = useMemo(() => {
-    const windowedRows = getWindowedRows(t212CanonicalRows, visibleWindow);
+    const windowedRows = getWindowedRows(cfdCanonicalRows, visibleWindow);
     const asOfRow = windowedRows.length > 0 ? windowedRows[windowedRows.length - 1] : null;
     const asOfDate = asOfRow?.date ?? null;
     const prices: number[] = [];
@@ -1965,14 +1854,14 @@ export default function TimingPage({ params }: TimingPageProps) {
     const simResultMap: Record<string, SimResultCacheEntry> = {};
     const storeSimResult = (
       id: string,
-      result?: Trading212SimulationResult | null,
+      result?: CfdSimulationResult | null,
       fallbackInitialEquity?: number | null
     ) => {
       if (!result) return;
       const initialEquity =
         (Number.isFinite(result.initialEquity) ? result.initialEquity : undefined) ??
         (fallbackInitialEquity ?? undefined) ??
-        t212InitialEquity;
+        cfdInitialEquity;
       simResultMap[id] = {
         accountHistory: result.accountHistory ?? [],
         initialEquity,
@@ -1981,7 +1870,7 @@ export default function TimingPage({ params }: TimingPageProps) {
     };
 
     const rows: SimulationStrategySummary[] = comparisonRowSpecs.map((spec, idx) => {
-      const run = t212BaseRunsById[spec.id];
+      const run = cfdBaseRunsById[spec.id];
       const stats = run ? summarizeRunStats(run, visibleWindow) : null;
       const defaults = EWMA_UNBIASED_DEFAULTS[h] ?? { lambda: 0.94, trainFraction: 0.7 };
       const isUnbiased = spec.key === "unbiased" || /unbiased/i.test(spec.label);
@@ -2056,10 +1945,10 @@ export default function TimingPage({ params }: TimingPageProps) {
             h,
             lambda: lambdaUsed,
             trainFraction: trainFracUsed,
-            initialEquity: t212InitialEquity,
-            leverage: t212Leverage,
-            positionFraction: t212PositionFraction,
-            costBps: t212CostBps,
+            initialEquity: cfdInitialEquity,
+            leverage: cfdLeverage,
+            positionFraction: cfdPositionFraction,
+            costBps: cfdCostBps,
           });
           if (process.env.NODE_ENV !== "production") {
             console.log("[EWMA-EXPECTED][RET]", {
@@ -2076,17 +1965,17 @@ export default function TimingPage({ params }: TimingPageProps) {
         // Build bars and simulate for performance breakdown FOR ALL RUNS
         const bars = buildEwmaExpectedBars(windowedRows, h, lambdaUsed, trainFracUsed);
         if (bars.length > 0) {
-          const config: Trading212CfdConfig = {
-            leverage: t212Leverage,
+          const config: CfdSimConfig = {
+            leverage: cfdLeverage,
             fxFeeRate: 0,
             dailyLongSwapRate: 0,
             dailyShortSwapRate: 0,
-            spreadBps: t212CostBps,
+            spreadBps: cfdCostBps,
             marginCallLevel: 0.45,
             stopOutLevel: 0.25,
-            positionFraction: t212PositionFraction,
+            positionFraction: cfdPositionFraction,
           };
-          const simResult = simulateTrading212Cfd(bars, t212InitialEquity, config);
+          const simResult = simulateCfd(bars, cfdInitialEquity, config);
           if (isUnbiased || !simResultMap[canonicalId]) {
             storeSimResult(canonicalId, simResult);
           }
@@ -2146,16 +2035,16 @@ export default function TimingPage({ params }: TimingPageProps) {
     biasedMaxCalmarResult,
     derivedMaxTrainFraction,
     summarizeRunStats,
-    t212BaseRunsById,
+    cfdBaseRunsById,
     visibleWindow,
-    t212CanonicalRows,
+    cfdCanonicalRows,
     forecastByKey,
     h,
     coverage,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
-    t212CostBps,
+    cfdInitialEquity,
+    cfdLeverage,
+    cfdPositionFraction,
+    cfdCostBps,
   ]);
 
   useEffect(() => {
@@ -2193,7 +2082,7 @@ useEffect(() => {
   type SelectedSimPoint = {
     pnlUsd: number;
     equityUsd: number;
-    side?: Trading212AccountSnapshot["side"] | null;
+    side?: CfdAccountSnapshot["side"] | null;
     contracts?: number | null;
   };
 
@@ -2213,7 +2102,7 @@ useEffect(() => {
     const initialEquity =
       (Number.isFinite(cache.initialEquity) ? cache.initialEquity : undefined) ??
       cache.accountHistory[0]?.equity ??
-      t212InitialEquity;
+      cfdInitialEquity;
 
     const simMap: Record<string, SelectedSimPoint> = {};
     cache.accountHistory.forEach((snap) => {
@@ -2238,7 +2127,7 @@ useEffect(() => {
     const selectedSimByDate = simMap;
 
     return { selectedSimByDate, selectedPnlLabel: label };
-  }, [selectedSimRunId, simResultsById, simulationRunsSummary, visibleWindow, t212InitialEquity]);
+  }, [selectedSimRunId, simResultsById, simulationRunsSummary, visibleWindow, cfdInitialEquity]);
 
   const selectedOverviewStats = useMemo(() => {
     if (!selectedSimRunId) return null;
@@ -2289,6 +2178,37 @@ useEffect(() => {
       asOfDate: lastKey ?? null,
     };
   }, [selectedSimRunId, selectedSimByDate, simulationRunsSummary, simResultsById]);
+
+  const selectedAnalytics: SelectedStrategyAnalytics | null = useMemo(
+    () =>
+      buildSelectedStrategyAnalytics({
+        selectedSimRunId,
+        selectedOverviewStats,
+        simulationRunsSummary,
+        simResult: selectedSimRunId ? simResultsById[selectedSimRunId] : null,
+        selectedSimByDate,
+        canonicalRows: cfdCanonicalRows,
+        visibleWindow,
+        initialEquityFallback: cfdInitialEquity,
+      }),
+    [
+      selectedSimRunId,
+      selectedOverviewStats,
+      simulationRunsSummary,
+      simResultsById,
+      selectedSimByDate,
+      cfdCanonicalRows,
+      visibleWindow,
+      cfdInitialEquity,
+    ]
+  );
+
+  const handleOpenSimulationSettings = useCallback(() => {
+    setShowSimulationSettings(true);
+    requestAnimationFrame(() => {
+      simulationSettingsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
 
   // Sync volatility window with GBM window only when auto-sync is enabled and GBM window changes
   useEffect(() => {
@@ -2995,7 +2915,7 @@ useEffect(() => {
   // Fetch current price for header display (canonical fallback)
   const loadCurrentPrice = async () => {
     try {
-      const rows = t212CanonicalRows?.length ? t212CanonicalRows : await fetchCanonicalRows();
+      const rows = cfdCanonicalRows?.length ? cfdCanonicalRows : await fetchCanonicalRows();
       if (!rows || rows.length === 0) return;
       const last = rows[rows.length - 1];
       const price = last?.adj_close ?? last?.close;
@@ -3341,8 +3261,8 @@ useEffect(() => {
         coverage: coverage.toString(),
         shrinkFactor: ewmaShrinkK.toString(),
         minTrainObs: reactionMinTrainObs.toString(),
-        zMode: t212ZMode,
-        zEnter: t212ZEnter.toString(),
+        zMode: cfdZMode,
+        zEnter: cfdZEnter.toString(),
         // Coarse grid for speed: λ step 0.05, train step 0.05
         lambdaMin: "0.50",
         lambdaMax: "0.99",
@@ -3394,15 +3314,15 @@ useEffect(() => {
     } finally {
       setIsOptimizingReaction(false);
     }
-  }, [params?.ticker, h, coverage, reactionMinTrainObs, t212ZEnter, t212ZMode, ewmaShrinkK]);
+  }, [params?.ticker, h, coverage, reactionMinTrainObs, cfdZEnter, cfdZMode, ewmaShrinkK]);
 
   const runZThresholdOptimization = useCallback(async () => {
     if (!params?.ticker) return;
     try {
       setIsOptimizingZThresholds(true);
-      setT212ZOptimizeError(null);
-      setT212ZOptimizeResult(null);
-      t212ZOptimizeFailedRef.current = false;
+      setCfdZOptimizeError(null);
+      setCfdZOptimizeResult(null);
+      cfdZOptimizeFailedRef.current = false;
 
       const query = new URLSearchParams({
         h: String(h),
@@ -3413,10 +3333,10 @@ useEffect(() => {
         trainLenBars: "252",
         valLenBars: "63",
         stepLenBars: "63",
-        costBps: t212CostBps.toString(),
-        initialEquity: t212InitialEquity.toString(),
-        leverage: t212Leverage.toString(),
-        positionFraction: t212PositionFraction.toString(),
+        costBps: cfdCostBps.toString(),
+        initialEquity: cfdInitialEquity.toString(),
+        leverage: cfdLeverage.toString(),
+        positionFraction: cfdPositionFraction.toString(),
         shrinkFactor: ewmaShrinkK.toString(),
       });
 
@@ -3454,14 +3374,14 @@ useEffect(() => {
       } as ZOptimizeResult;
 
       const decision = decideZOptimizeApply(candidate);
-      setT212ZOptimizeResult(candidate);
-      setT212ZDisplayThresholds(decision.applied ? candidate.thresholds : null);
-      setT212ZMode("optimize");
+      setCfdZOptimizeResult(candidate);
+      setCfdZDisplayThresholds(decision.applied ? candidate.thresholds : null);
+      setCfdZMode("optimize");
     } catch (err: any) {
       console.error("[Z-OPTIMIZE] error", err);
-      setT212ZOptimizeError(err?.message || "Failed to optimize z thresholds.");
-      t212ZOptimizeFailedRef.current = true;
-      setT212ZMode("optimize");
+      setCfdZOptimizeError(err?.message || "Failed to optimize z thresholds.");
+      cfdZOptimizeFailedRef.current = true;
+      setCfdZMode("optimize");
     } finally {
       setIsOptimizingZThresholds(false);
     }
@@ -3472,10 +3392,10 @@ useEffect(() => {
     reactionLambda,
     reactionTrainFraction,
     reactionMinTrainObs,
-    t212CostBps,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
+    cfdCostBps,
+    cfdInitialEquity,
+    cfdLeverage,
+    cfdPositionFraction,
     ewmaShrinkK,
   ]);
 
@@ -3493,10 +3413,10 @@ useEffect(() => {
         rangeStart,
         h: String(h),
         coverage: coverage.toString(),
-        equity: t212InitialEquity.toString(),
-        leverage: t212Leverage.toString(),
-        posFrac: t212PositionFraction.toString(),
-        costBps: t212CostBps.toString(),
+        equity: cfdInitialEquity.toString(),
+        leverage: cfdLeverage.toString(),
+        posFrac: cfdPositionFraction.toString(),
+        costBps: cfdCostBps.toString(),
         shrinkFactor: ewmaShrinkK.toString(),
         signalRule: "z",
         objective: biasedMaxObjective,
@@ -3526,7 +3446,7 @@ useEffect(() => {
         trainEndUsed: json.trainEndUsed ?? json.trainSpan?.end ?? null,
       });
 
-      if (!t212CanonicalRows) {
+      if (!cfdCanonicalRows) {
         await fetchCanonicalRows();
       }
     } catch (err: any) {
@@ -3541,17 +3461,17 @@ useEffect(() => {
     visibleWindow?.start,
     h,
     coverage,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
-    t212CostBps,
+    cfdInitialEquity,
+    cfdLeverage,
+    cfdPositionFraction,
+    cfdCostBps,
     ewmaShrinkK,
-    t212CanonicalRows,
+    cfdCanonicalRows,
     biasedMaxObjective,
   ]);
 
   useEffect(() => {
-    t212ZOptimizeFailedRef.current = false;
+    cfdZOptimizeFailedRef.current = false;
   }, [
     params?.ticker,
     h,
@@ -3559,29 +3479,29 @@ useEffect(() => {
     reactionLambda,
     reactionTrainFraction,
     reactionMinTrainObs,
-    t212CostBps,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
+    cfdCostBps,
+    cfdInitialEquity,
+    cfdLeverage,
+    cfdPositionFraction,
     ewmaShrinkK,
   ]);
 
   useEffect(() => {
     if (
-      t212ZMode === "optimize" &&
+      cfdZMode === "optimize" &&
       !isOptimizingZThresholds &&
-      !t212ZOptimizeError &&
-      (!t212ZOptimizeResult || !t212ZDisplayThresholds) &&
-      !t212ZOptimizeFailedRef.current
+      !cfdZOptimizeError &&
+      (!cfdZOptimizeResult || !cfdZDisplayThresholds) &&
+      !cfdZOptimizeFailedRef.current
     ) {
       runZThresholdOptimization();
     }
   }, [
-    t212ZMode,
-    t212ZOptimizeResult,
-    t212ZDisplayThresholds,
+    cfdZMode,
+    cfdZOptimizeResult,
+    cfdZDisplayThresholds,
     isOptimizingZThresholds,
-    t212ZOptimizeError,
+    cfdZOptimizeError,
     runZThresholdOptimization,
   ]);
 
@@ -3590,22 +3510,22 @@ useEffect(() => {
   }, [fetchBiasedMaxCalmar]);
 
   useEffect(() => {
-    if (t212ZMode === "optimize") {
-      setT212ZOptimizeResult(null);
-      setT212ZDisplayThresholds(null);
+    if (cfdZMode === "optimize") {
+      setCfdZOptimizeResult(null);
+      setCfdZDisplayThresholds(null);
     }
   }, [
-    t212ZMode,
+    cfdZMode,
     params.ticker,
     h,
     coverage,
     reactionLambda,
     reactionTrainFraction,
     reactionMinTrainObs,
-    t212CostBps,
-    t212InitialEquity,
-    t212Leverage,
-    t212PositionFraction,
+    cfdCostBps,
+    cfdInitialEquity,
+    cfdLeverage,
+    cfdPositionFraction,
     ewmaShrinkK,
   ]);
 
@@ -3633,19 +3553,19 @@ useEffect(() => {
   }, []);
 
   const handleApplyOptimizedZThresholds = useCallback(() => {
-    if (t212ZOptimizeResult) {
-      setT212ZMode("optimize");
-      setT212ZDisplayThresholds(t212ZOptimizeResult.thresholds);
+    if (cfdZOptimizeResult) {
+      setCfdZMode("optimize");
+      setCfdZDisplayThresholds(cfdZOptimizeResult.thresholds);
     }
-  }, [t212ZOptimizeResult]);
+  }, [cfdZOptimizeResult]);
 
   useEffect(() => {
-    setT212SignalRule("z");
-    setT212ZMode("optimize");
+    setCfdSignalRule("z");
+    setCfdZMode("optimize");
   }, [params.ticker]);
 
-  // Trading212 CFD Simulation: Build bars from any EWMA path (Unbiased or Biased)
-  type Trading212SimBarsOptions = {
+  // Cfd CFD Simulation: Build bars from any EWMA path (Unbiased or Biased)
+  type CfdSimBarsOptions = {
     useTrendTilt?: boolean;
     trendWeight?: number | null;
     trendZByDate?: Map<string, number>;
@@ -3657,8 +3577,8 @@ useEffect(() => {
     zFlip?: number;
     optimizedThresholds?: ZOptimizeResult["thresholds"] | null;
   };
-  type Trading212SimBarsResult = {
-    bars: Trading212SimBar[];
+  type CfdSimBarsResult = {
+    bars: CfdSimBar[];
     thresholdsUsed: {
       enterLong: number;
       enterShort: number;
@@ -3776,12 +3696,12 @@ useEffect(() => {
     return thresholds;
   }, []);
 
-  const buildTrading212SimBarsFromEwmaPath = useCallback((
+  const buildCfdSimBarsFromEwmaPath = useCallback((
     canonicalRows: CanonicalRow[],
     ewmaPathArg: EwmaWalkerPathPoint[] | null,
     thresholdPct: number,
-    options?: Trading212SimBarsOptions
-  ): Trading212SimBarsResult => {
+    options?: CfdSimBarsOptions
+  ): CfdSimBarsResult => {
     if (!ewmaPathArg) return { bars: [], thresholdsUsed: null };
 
     const useTrendTilt =
@@ -3832,7 +3752,7 @@ useEffect(() => {
       return { bars: [], thresholdsUsed: null };
     }
 
-    const bars: Trading212SimBar[] = [];
+    const bars: CfdSimBar[] = [];
     let qPrev = 0; // -1 short, 0 flat, +1 long
 
     for (const row of canonicalRows) {
@@ -3868,7 +3788,7 @@ useEffect(() => {
 
       if (!Number.isFinite(edgeFrac)) continue;
 
-      let signal: Trading212Signal = "flat";
+      let signal: CfdSignal = "flat";
 
       if (signalRule === "bps") {
         if (edgeFrac > thresholdPct) {
@@ -3912,8 +3832,8 @@ useEffect(() => {
     return { bars, thresholdsUsed: thresholds };
   }, [computeAutoZThresholds]);
 
-  // Trading212 CFD Simulation: Reusable helper to run sim for a specific EWMA source
-  interface RunTrading212SimOptions {
+  // Cfd CFD Simulation: Reusable helper to run sim for a specific EWMA source
+  interface RunCfdSimOptions {
     autoSelect?: boolean;
     useTrendTilt?: boolean;
     trendWeight?: number | null;
@@ -3922,23 +3842,23 @@ useEffect(() => {
     ewmaPathOverride?: EwmaWalkerPathPoint[] | null;
   }
 
-  const runTrading212SimForSource = useCallback(
+  const runCfdSimForSource = useCallback(
     async (
       source: "unbiased" | "biased",
-      runId: T212RunId,
+      runId: CfdRunId,
       label: string,
-      opts?: RunTrading212SimOptions
+      opts?: RunCfdSimOptions
     ) => {
       const { autoSelect, useTrendTilt, trendWeight } = opts ?? {};
-      setT212Error(null);
-      setIsRunningT212Sim(true);
+      setCfdError(null);
+      setIsRunningCfdSim(true);
 
       try {
         const isMaxRun = runId === "ewma-biased-max" || runId === "ewma-biased-max-trend";
         const isNoTradeBaseline = isMaxRun && biasedMaxCalmarResult?.lambdaStar == null;
 
         // Fetch canonical rows if not cached (deduped)
-        let rows = t212CanonicalRows;
+        let rows = cfdCanonicalRows;
         if (!rows) {
           rows = await fetchCanonicalRows() ?? null;
         }
@@ -3951,8 +3871,8 @@ useEffect(() => {
         const ewmaPathForSim = opts?.ewmaPathOverride ?? null;
 
         if (!isNoTradeBaseline && (!ewmaPathForSim || ewmaPathForSim.length === 0)) {
-          setT212Error('EWMA simulation paths have been removed. This feature is no longer supported.');
-          setIsRunningT212Sim(false);
+          setCfdError('EWMA simulation paths have been removed. This feature is no longer supported.');
+          setIsRunningCfdSim(false);
           return;
         }
 
@@ -3978,7 +3898,7 @@ useEffect(() => {
         }
 
         // Debug: Log sim window
-        console.log("[T212] Sim window", {
+        console.log("[Cfd] Sim window", {
           simStartDate,
           firstRow: rowsForSim[0]?.date,
           lastRow: rowsForSim[rowsForSim.length - 1]?.date,
@@ -3986,13 +3906,13 @@ useEffect(() => {
         });
 
         if (!rowsForSim || rowsForSim.length === 0) {
-          throw new Error('No canonical rows available for Trading212 sim.');
+          throw new Error('No canonical rows available for Cfd sim.');
         }
 
         if (
-          t212SignalRule === "z" &&
-          t212ZMode === "optimize" &&
-          !t212ZOptimizeResult &&
+          cfdSignalRule === "z" &&
+          cfdZMode === "optimize" &&
+          !cfdZOptimizeResult &&
           !isNoTradeBaseline
         ) {
           throw new Error('Optimize z thresholds first to run the simulation.');
@@ -4031,15 +3951,15 @@ useEffect(() => {
           }
         }
 
-        const zOptimizeDecision = t212ZOptimizeResult
-          ? decideZOptimizeApply(t212ZOptimizeResult)
+        const zOptimizeDecision = cfdZOptimizeResult
+          ? decideZOptimizeApply(cfdZOptimizeResult)
           : { applied: false };
         const effectiveZMode =
-          t212SignalRule === "z" && t212ZMode === "optimize"
+          cfdSignalRule === "z" && cfdZMode === "optimize"
             ? zOptimizeDecision.applied
               ? "optimize"
               : "auto"
-            : t212ZMode;
+            : cfdZMode;
 
         const built = isNoTradeBaseline
           ? {
@@ -4055,28 +3975,28 @@ useEffect(() => {
                 })),
               thresholdsUsed: null,
             }
-          : buildTrading212SimBarsFromEwmaPath(
+          : buildCfdSimBarsFromEwmaPath(
               rowsForSim,
               ewmaPathForSim,
-              t212ThresholdFrac,
+              cfdThresholdFrac,
               {
                 useTrendTilt: canUseTrendTilt,
                 trendWeight: canUseTrendTilt ? trendWeight! : null,
                 trendZByDate,
                 horizon: h,
                 zMode: effectiveZMode,
-                signalRule: t212SignalRule,
-                zEnter: t212ZEnter,
-                zExit: t212ZExit,
-                zFlip: t212ZFlip,
-                optimizedThresholds: zOptimizeDecision.applied ? t212ZOptimizeResult?.thresholds ?? null : null,
+                signalRule: cfdSignalRule,
+                zEnter: cfdZEnter,
+                zExit: cfdZExit,
+                zFlip: cfdZFlip,
+                optimizedThresholds: zOptimizeDecision.applied ? cfdZOptimizeResult?.thresholds ?? null : null,
               }
             );
         const bars = built.bars;
-        if (t212SignalRule === "z") {
-          setT212ZDisplayThresholds(built.thresholdsUsed);
+        if (cfdSignalRule === "z") {
+          setCfdZDisplayThresholds(built.thresholdsUsed);
         } else {
-          setT212ZDisplayThresholds(null);
+          setCfdZDisplayThresholds(null);
         }
 
         if (bars.length === 0) {
@@ -4085,23 +4005,23 @@ useEffect(() => {
 
         const strategyStartDate = simStartDate;
 
-        const config: Trading212CfdConfig = {
-          leverage: t212Leverage,
+        const config: CfdSimConfig = {
+          leverage: cfdLeverage,
           fxFeeRate: 0.005,
-          dailyLongSwapRate: t212DailyLongSwap,
-          dailyShortSwapRate: t212DailyShortSwap,
-          spreadBps: t212CostBps,
+          dailyLongSwapRate: cfdDailyLongSwap,
+          dailyShortSwapRate: cfdDailyShortSwap,
+          spreadBps: cfdCostBps,
           marginCallLevel: 0.45,
           stopOutLevel: 0.25,
-          positionFraction: t212PositionFraction,
+          positionFraction: cfdPositionFraction,
         };
 
-        const result = simulateTrading212Cfd(bars, t212InitialEquity, config);
+        const result = simulateCfd(bars, cfdInitialEquity, config);
         const windowResult = visibleWindow
           ? computeWindowSimFromBars(
               bars,
               visibleWindow,
-              t212InitialEquity,
+              cfdInitialEquity,
               config,
               strategyStartDate
             )
@@ -4109,11 +4029,11 @@ useEffect(() => {
 
         // Debug: Log sim run stored
         if (process.env.NODE_ENV !== "production") {
-          console.log("[T212] Sim run stored", {
+          console.log("[Cfd] Sim run stored", {
             runId,
             label,
             source,
-            equityStart: t212InitialEquity,
+            equityStart: cfdInitialEquity,
             equityEnd: result.finalEquity,
             trades: result.trades.length,
             stopOuts: result.stopOutEvents,
@@ -4139,39 +4059,39 @@ useEffect(() => {
           : isMaxRun
             ? derivedMaxTrainFraction ?? reactionTrainFraction
             : reactionTrainFraction;
-        const signalSource: Trading212SimRun['signalSource'] = source;
-        const runRecord: Trading212SimRun = {
+        const signalSource: CfdSimRun['signalSource'] = source;
+        const runRecord: CfdSimRun = {
           id: runId,
           label,
           signalSource,
           result,
           bars,
           configSnapshot: config,
-          initialEquity: t212InitialEquity,
+          initialEquity: cfdInitialEquity,
           windowResult,
           lambda: storedLambda ?? undefined,
           trainFraction: storedTrainFraction,
           trendTiltEnabled: canUseTrendTilt,
           strategyStartDate,
         };
-        setT212Runs((prev) => {
+        setCfdRuns((prev) => {
           const other = prev.filter((r) => r.id !== runId);
           return [...other, runRecord];
         });
         setTimeout(() => {
-          const exists = t212RunsRef.current.some((r) => r.id === runId);
+          const exists = cfdRunsRef.current.some((r) => r.id === runId);
           if (!exists) {
-            console.warn("[T212 GUARD] run dropped after store", { runId });
+            console.warn("[Cfd GUARD] run dropped after store", { runId });
           }
         }, 0);
         if (comparisonRunIds.includes(runId as BaseRunId)) {
-          setT212BaseRunsById((prev) => ({
+          setCfdBaseRunsById((prev) => ({
             ...prev,
             [runId as BaseRunId]: runRecord,
           }));
           if (process.env.NODE_ENV !== "production") {
             const stats = summarizeRunStats(runRecord);
-            console.log("[T212][BASE-RUN] stored", {
+            console.log("[Cfd][BASE-RUN] stored", {
               runId,
               label,
               lambda: runRecord.lambda,
@@ -4187,36 +4107,36 @@ useEffect(() => {
         }
 
         if (opts?.autoSelect) {
-          setT212CurrentRunId(runId);
+          setCfdCurrentRunId(runId);
         }
       } catch (err: any) {
-        console.error('[T212 Sim]', err);
-        setT212Error(err?.message ?? 'Failed to run Trading212 simulation.');
+        console.error('[Cfd Sim]', err);
+        setCfdError(err?.message ?? 'Failed to run Cfd simulation.');
       } finally {
-        setIsRunningT212Sim(false);
+        setIsRunningCfdSim(false);
       }
     },
     [
       params.ticker,
-      t212CanonicalRows,
+      cfdCanonicalRows,
       reactionMapSummary,
-      t212ThresholdFrac,
-      t212Leverage,
-      t212DailyLongSwap,
-      t212DailyShortSwap,
-      t212PositionFraction,
-      t212InitialEquity,
-      t212CostBps,
-      t212SignalRule,
-      t212ZMode,
-      t212ZEnter,
-      t212ZExit,
-      t212ZFlip,
-      t212ZOptimizeResult,
+      cfdThresholdFrac,
+      cfdLeverage,
+      cfdDailyLongSwap,
+      cfdDailyShortSwap,
+      cfdPositionFraction,
+      cfdInitialEquity,
+      cfdCostBps,
+      cfdSignalRule,
+      cfdZMode,
+      cfdZEnter,
+      cfdZExit,
+      cfdZFlip,
+      cfdZOptimizeResult,
       reactionLambda,
       reactionTrainFraction,
       reactionOptimizationBest,
-      buildTrading212SimBarsFromEwmaPath,
+      buildCfdSimBarsFromEwmaPath,
       h,
       trendShortWindow,
       trendLongWindow,
@@ -4229,16 +4149,16 @@ useEffect(() => {
     ]
   );
 
-  // Debug: Log T212 table row values whenever runs change
+  // Debug: Log Cfd table row values whenever runs change
   useEffect(() => {
-    if (t212Runs.length === 0) return;
+    if (cfdRuns.length === 0) return;
     if (process.env.NODE_ENV !== "development") return;
-    console.log("[T212] Table rows updated:");
-    t212Runs.forEach((run) => {
+    console.log("[Cfd] Table rows updated:");
+    cfdRuns.forEach((run) => {
       const r = run.result;
       const ret = (r.finalEquity - r.initialEquity) / r.initialEquity;
       const maxDdPct = r.maxDrawdown * 100;
-      console.log("[T212] Table row", run.id, {
+      console.log("[Cfd] Table row", run.id, {
         label: run.label,
         retPct: (ret * 100).toFixed(1) + "%",
         maxDdPct: maxDdPct.toFixed(1) + "%",
@@ -4249,17 +4169,17 @@ useEffect(() => {
         trainFraction: run.trainFraction,
       });
     });
-  }, [t212Runs]);
+  }, [cfdRuns]);
 
-  // Clear T212 runs when CFD is disabled (but keep EWMA overlay selection)
+  // Clear Cfd runs when CFD is disabled (but keep EWMA overlay selection)
   useEffect(() => {
-    if (!isCfdEnabled && t212RunsRef.current.length > 0) {
-      console.log("[T212] CFD disabled, clearing runs (keeping EWMA overlay selection)");
-      setT212Runs([]);
-      setT212BaseRunsById({});
-      setT212CurrentRunId(null);
+    if (!isCfdEnabled && cfdRunsRef.current.length > 0) {
+      console.log("[Cfd] CFD disabled, clearing runs (keeping EWMA overlay selection)");
+      setCfdRuns([]);
+      setCfdBaseRunsById({});
+      setCfdCurrentRunId(null);
       baselineVerifyLoggedRef.current = false;
-      // Don't clear t212VisibleRunIds - keep EWMA overlay active on chart
+      // Don't clear cfdVisibleRunIds - keep EWMA overlay active on chart
     }
   }, [isCfdEnabled]);
 
@@ -4281,29 +4201,29 @@ useEffect(() => {
         "shrink",
         ewmaShrinkK,
         "eq",
-        t212InitialEquity,
+        cfdInitialEquity,
         "lev",
-        t212Leverage,
+        cfdLeverage,
         "posFrac",
-        t212PositionFraction,
+        cfdPositionFraction,
         "thresh",
-        t212ThresholdFrac,
+        cfdThresholdFrac,
         "cost",
-        t212CostBps,
+        cfdCostBps,
         "rule",
-        t212SignalRule,
+        cfdSignalRule,
         "zMode",
-        t212ZMode,
+        cfdZMode,
         "zEnter",
-        t212ZEnter,
+        cfdZEnter,
         "zExit",
-        t212ZExit,
+        cfdZExit,
         "zFlip",
-        t212ZFlip,
+        cfdZFlip,
         "swapL",
-        t212DailyLongSwap,
+        cfdDailyLongSwap,
         "swapS",
-        t212DailyShortSwap,
+        cfdDailyShortSwap,
         "trendS",
         trendShortWindow,
         "trendL",
@@ -4321,18 +4241,18 @@ useEffect(() => {
       reactionTrainFraction,
       reactionMinTrainObs,
       ewmaShrinkK,
-      t212InitialEquity,
-      t212Leverage,
-      t212PositionFraction,
-      t212ThresholdFrac,
-      t212CostBps,
-      t212SignalRule,
-      t212ZMode,
-      t212ZEnter,
-      t212ZExit,
-      t212ZFlip,
-      t212DailyLongSwap,
-      t212DailyShortSwap,
+      cfdInitialEquity,
+      cfdLeverage,
+      cfdPositionFraction,
+      cfdThresholdFrac,
+      cfdCostBps,
+      cfdSignalRule,
+      cfdZMode,
+      cfdZEnter,
+      cfdZExit,
+      cfdZFlip,
+      cfdDailyLongSwap,
+      cfdDailyShortSwap,
       trendShortWindow,
       trendLongWindow,
       trendMomentumPeriod,
@@ -4341,7 +4261,7 @@ useEffect(() => {
   );
   const prevSimConfigKeyRef = useRef<string | null>(null);
 
-  // Clear T212 runs when key parameters change to trigger fresh re-computation
+  // Clear Cfd runs when key parameters change to trigger fresh re-computation
   useEffect(() => {
     if (prevSimConfigKeyRef.current === null) {
       prevSimConfigKeyRef.current = simConfigKey;
@@ -4349,24 +4269,24 @@ useEffect(() => {
     }
     if (prevSimConfigKeyRef.current !== simConfigKey) {
       prevSimConfigKeyRef.current = simConfigKey;
-      if (t212RunsRef.current.length > 0) {
-        console.log("[T212 settings] changed, clearing sims", {
-          t212InitialEquity,
-          t212Leverage,
-          t212PositionFraction,
-          t212ThresholdFrac,
-          t212CostBps,
-          t212SignalRule,
-          t212ZMode,
-          t212ZEnter,
-          t212ZExit,
-          t212ZFlip,
+      if (cfdRunsRef.current.length > 0) {
+        console.log("[Cfd settings] changed, clearing sims", {
+          cfdInitialEquity,
+          cfdLeverage,
+          cfdPositionFraction,
+          cfdThresholdFrac,
+          cfdCostBps,
+          cfdSignalRule,
+          cfdZMode,
+          cfdZEnter,
+          cfdZExit,
+          cfdZFlip,
         });
       }
-      setT212Runs([]);
-      setT212BaseRunsById({});
-      setT212CurrentRunId(null);
-      setT212VisibleRunIds(new Set<T212RunId>()); // Ensure visible selection is cleared when runs are wiped
+      setCfdRuns([]);
+      setCfdBaseRunsById({});
+      setCfdCurrentRunId(null);
+      setCfdVisibleRunIds(new Set<CfdRunId>()); // Ensure visible selection is cleared when runs are wiped
       baselineVerifyLoggedRef.current = false;
     }
   }, [simConfigKey]);
@@ -6766,9 +6686,9 @@ useEffect(() => {
       }
 
       // After a successful sync, clear the cached canonical rows so they get re-fetched
-      setT212CanonicalRows(null);
+      setCfdCanonicalRows(null);
       
-      // Show success briefly (the new data will load when T212 sim is run next)
+      // Show success briefly (the new data will load when Cfd sim is run next)
       console.log(`Yahoo sync complete for ${symbol}`);
     } catch (err: unknown) {
       console.error("Yahoo sync error", err);
@@ -7004,6 +6924,179 @@ useEffect(() => {
       </div>
       {/* Price Chart Section */}
       <div className="mb-4">
+        {showSimulationSettings && (
+          <div
+            ref={simulationSettingsRef}
+            id="simulation-settings-panel"
+            className={`mb-4 rounded-2xl border p-4 ${
+              isDarkMode ? "border-slate-800 bg-slate-900/60 text-slate-100" : "border-slate-200 bg-white text-slate-900"
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold">Simulation settings</div>
+              <button
+                type="button"
+                onClick={() => setShowSimulationSettings(false)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  isDarkMode
+                    ? "bg-slate-800 text-slate-200 hover:bg-slate-700"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Horizon (days)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={h}
+                  onChange={(e) => handleHorizonChange(Math.max(1, Number(e.target.value) || 1))}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Coverage</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  max="0.99"
+                  value={coverage}
+                  onChange={(e) => handleCoverageChange(Math.min(0.99, Math.max(0.01, Number(e.target.value) || coverage)))}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Volatility model</label>
+                <select
+                  value={volModel}
+                  onChange={(e) => handleModelChange(e.target.value as 'GBM' | 'GARCH' | 'HAR-RV' | 'Range')}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                >
+                  <option value="GBM">GBM</option>
+                  <option value="GARCH">GARCH</option>
+                  <option value="HAR-RV">HAR-RV</option>
+                  <option value="Range">Range</option>
+                </select>
+              </div>
+              {volModel === 'GARCH' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400">GARCH estimator</label>
+                  <select
+                    value={garchEstimator}
+                    onChange={(e) => handleGarchEstimatorChange(e.target.value as 'Normal' | 'Student-t')}
+                    className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                      isDarkMode
+                        ? "bg-slate-900 border-slate-700 text-slate-100"
+                        : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="Student-t">Student-t</option>
+                  </select>
+                </div>
+              )}
+              {volModel === 'Range' && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400">Range estimator</label>
+                  <select
+                    value={rangeEstimator}
+                    onChange={(e) => handleEstimatorChange(e.target.value as 'P' | 'GK' | 'RS' | 'YZ')}
+                    className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                      isDarkMode
+                        ? "bg-slate-900 border-slate-700 text-slate-100"
+                        : "bg-white border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <option value="P">Parkinson</option>
+                    <option value="GK">Garman-Klass</option>
+                    <option value="RS">Rogers-Satchell</option>
+                    <option value="YZ">Yang-Zhang</option>
+                  </select>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Initial equity ($)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={cfdInitialEquity}
+                  onChange={(e) => setCfdInitialEquity(Number(e.target.value) || 0)}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Leverage</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={cfdLeverage}
+                  onChange={(e) => setCfdLeverage(Number(e.target.value) || 0)}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Position size (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step="0.5"
+                  value={Math.round(cfdPositionFraction * 1000) / 10}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    if (Number.isFinite(next)) {
+                      setCfdPositionFraction(Math.max(0, Math.min(100, next)) / 100);
+                    }
+                  }}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400">Cost (bps)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.1"
+                  value={cfdCostBps}
+                  onChange={(e) => setCfdCostBps(Number(e.target.value) || 0)}
+                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                    isDarkMode
+                      ? "bg-slate-900 border-slate-700 text-slate-100"
+                      : "bg-white border-slate-200 text-slate-800"
+                  }`}
+                />
+              </div>
+            </div>
+          </div>
+        )}
         {process.env.NODE_ENV === "development" && (() => {
           console.debug("[VOL-TRANS][parent]", { volSelectionKey, isVolForecastLoading, volForecastError });
           return null;
@@ -7011,7 +7104,7 @@ useEffect(() => {
         <PriceChart 
           symbol={params.ticker} 
           className="w-full"
-          canonicalRows={t212CanonicalRows}
+          canonicalRows={cfdCanonicalRows}
           horizon={h}
           livePrice={livePrice}
           forecastOverlay={forecastOverlayProps}
@@ -7055,10 +7148,10 @@ useEffect(() => {
             gbmLambda,
             onGbmLambdaChange: setGbmLambda,
           }}
-          tradeOverlays={t212TradeOverlays}
-          t212AccountHistory={t212AccountHistory}
-          activeT212RunId={activeT212RunId}
-          onToggleT212Run={toggleT212RunVisibility}
+          tradeOverlays={cfdTradeOverlays}
+          cfdAccountHistory={cfdAccountHistory}
+          activeCfdRunId={activeCfdRunId}
+          onToggleCfdRun={toggleCfdRunVisibility}
           simulationMode={simulationMode}
           onChangeSimulationMode={handleChangeSimulationMode}
           hasMaxRun={hasMaxRun}
@@ -7070,29 +7163,31 @@ useEffect(() => {
           selectedSimByDate={selectedSimByDate}
           selectedPnlLabel={selectedPnlLabel}
           selectedOverviewStats={selectedOverviewStats}
+          selectedAnalytics={selectedAnalytics}
           simComparePreset={simComparePreset}
           visibleWindow={visibleWindow}
           onChangeSimComparePreset={handleSimComparePresetChange}
           onChangeSimCompareCustom={handleSimCompareCustomChange}
           onVisibleWindowChange={handleVisibleWindowChange}
-          t212InitialEquity={t212InitialEquity}
-          t212Leverage={t212Leverage}
-          t212PositionFraction={t212PositionFraction}
-          t212ThresholdFrac={t212ThresholdFrac}
-          t212CostBps={t212CostBps}
-          t212ZMode={t212ZMode}
-          t212SignalRule={t212SignalRule}
-          t212ZDisplayThresholds={t212ZDisplayThresholds}
-          t212ZOptimized={t212ZOptimizeResult}
+          cfdInitialEquity={cfdInitialEquity}
+          cfdLeverage={cfdLeverage}
+          cfdPositionFraction={cfdPositionFraction}
+          cfdThresholdFrac={cfdThresholdFrac}
+          cfdCostBps={cfdCostBps}
+          cfdZMode={cfdZMode}
+          cfdSignalRule={cfdSignalRule}
+          cfdZDisplayThresholds={cfdZDisplayThresholds}
+          cfdZOptimized={cfdZOptimizeResult}
           isOptimizingZThresholds={isOptimizingZThresholds}
-          t212ZOptimizeError={t212ZOptimizeError}
+          cfdZOptimizeError={cfdZOptimizeError}
           onApplyOptimizedZThresholds={handleApplyOptimizedZThresholds}
-          onChangeT212InitialEquity={setT212InitialEquity}
-          onChangeT212Leverage={setT212Leverage}
-          onChangeT212PositionFraction={setT212PositionFraction}
-          onChangeT212ThresholdPct={setT212ThresholdFrac}
-          onChangeT212CostBps={setT212CostBps}
+          onChangeCfdInitialEquity={setCfdInitialEquity}
+          onChangeCfdLeverage={setCfdLeverage}
+          onChangeCfdPositionFraction={setCfdPositionFraction}
+          onChangeCfdThresholdPct={setCfdThresholdFrac}
+          onChangeCfdCostBps={setCfdCostBps}
           onOptimizeZThresholds={runZThresholdOptimization}
+          onOpenSimulationSettings={handleOpenSimulationSettings}
         />
       </div>
       

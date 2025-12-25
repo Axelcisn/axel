@@ -3,7 +3,7 @@ import { defaultReactionConfig, buildEwmaReactionMap, buildEwmaTiltConfigFromRea
 import { runEwmaWalker } from "@/lib/volatility/ewmaWalker";
 import { ensureCanonicalOrHistory } from "@/lib/storage/canonical";
 import { optimizeZHysteresisThresholds } from "@/lib/volatility/zWfoOptimize";
-import { Trading212CfdConfig } from "@/lib/backtest/trading212Cfd";
+import { CfdSimConfig } from "@/lib/backtest/cfdSim";
 import {
   buildZWfoThresholdCacheKey,
   getZWfoThresholdCache,
@@ -124,7 +124,7 @@ export async function GET(
     const minFlatPctLast63 = Number.isFinite(minFlatPctLast63Raw) ? minFlatPctLast63Raw : 1;
     const enforceRecencyChecks = enforceRecency !== false;
 
-    const tradingConfig: Trading212CfdConfig = {
+    const tradingConfig: CfdSimConfig = {
       leverage,
       fxFeeRate: 0.005,
       dailyLongSwapRate: 0,

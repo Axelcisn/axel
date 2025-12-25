@@ -1,4 +1,4 @@
-import { simulateTrading212Cfd, Trading212CfdConfig, Trading212Signal, Trading212SimBar } from "@/lib/backtest/trading212Cfd";
+import { simulateCfd, CfdSimConfig, CfdSignal, CfdSimBar } from "@/lib/backtest/cfdSim";
 import { ensureCanonicalOrHistory } from "@/lib/storage/canonical";
 import {
   bucketIdForZ,
@@ -131,13 +131,13 @@ function buildZSignalBars(
   path: EwmaWalkerPoint[],
   horizon: number,
   thresholds: { enter: number; exit: number; flip: number }
-): Trading212SimBar[] {
+): CfdSimBar[] {
   if (!path.length) return [];
   const ewmaMap = new Map<string, EwmaWalkerPoint>();
   path.forEach((p) => ewmaMap.set(p.date_tp1, p));
 
   const sqrtH = Math.sqrt(horizon);
-  const bars: Trading212SimBar[] = [];
+  const bars: CfdSimBar[] = [];
   let qPrev = 0;
 
   for (const row of rows) {
@@ -164,7 +164,7 @@ function buildZSignalBars(
     }
     qPrev = q;
 
-    let signal: Trading212Signal = "flat";
+    let signal: CfdSignal = "flat";
     if (q > 0) signal = "long";
     else if (q < 0) signal = "short";
 
@@ -280,7 +280,7 @@ export async function optimizeEwmaLambdaCalmar(
       });
       if (bars.length === 0) continue;
 
-      const simConfig: Trading212CfdConfig = {
+      const simConfig: CfdSimConfig = {
         leverage,
         fxFeeRate: 0,
         dailyLongSwapRate: 0,
@@ -291,7 +291,7 @@ export async function optimizeEwmaLambdaCalmar(
         positionFraction,
       };
 
-      const simResult = simulateTrading212Cfd(bars, initialEquity, simConfig);
+      const simResult = simulateCfd(bars, initialEquity, simConfig);
       const returnPct = simResult.finalEquity / initialEquity - 1;
       const maxDrawdown = simResult.maxDrawdown ?? 0;
       const calmar = maxDrawdown > 0 ? returnPct / maxDrawdown : returnPct;

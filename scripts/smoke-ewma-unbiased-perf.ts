@@ -1,10 +1,10 @@
 import { loadCanonicalDataFromFS, loadCanonicalDataWithYahooSupplement } from "../lib/storage/canonical";
 import {
-  simulateTrading212Cfd,
-  type Trading212SimBar,
-  type Trading212SimulationResult,
-  type Trading212Trade,
-} from "../lib/backtest/trading212Cfd";
+  simulateCfd,
+  type CfdSimBar,
+  type CfdSimulationResult,
+  type CfdTrade,
+} from "../lib/backtest/cfdSim";
 import { parseSymbolsFromArgs } from "./_utils/cli";
 
 type CanonicalRow = {
@@ -39,8 +39,8 @@ type PerfSummary = {
   avgDrawdownPct?: number;
   maxDrawdownValue?: number;
   maxDrawdownPct?: number;
-  trades: Trading212Trade[];
-  accountHistory: Trading212SimulationResult["accountHistory"];
+  trades: CfdTrade[];
+  accountHistory: CfdSimulationResult["accountHistory"];
 };
 
 type Perf = PerfSummary;
@@ -78,7 +78,7 @@ function variance(arr: number[], mu: number): number {
   return arr.length ? arr.reduce((a, b) => a + (b - mu) * (b - mu), 0) / arr.length : 0;
 }
 
-function buildEwmaExpectedBars(rows: CanonicalRow[], h: number, lambda: number, trainFraction: number): Trading212SimBar[] {
+function buildEwmaExpectedBars(rows: CanonicalRow[], h: number, lambda: number, trainFraction: number): CfdSimBar[] {
   if (!rows || rows.length < 3) return [];
   const prices: number[] = [];
   const dates: string[] = [];
@@ -99,7 +99,7 @@ function buildEwmaExpectedBars(rows: CanonicalRow[], h: number, lambda: number, 
       returns.push(Math.log(curr / prev));
     }
   }
-  const bars: Trading212SimBar[] = [];
+  const bars: CfdSimBar[] = [];
   const MIN_TRAIN = EWMA_UNBIASED_DEFAULTS.minTrain;
   for (let i = 0; i < returns.length - 1; i++) {
     const priceIdx = i + 1;
@@ -133,7 +133,7 @@ function buildEwmaExpectedBars(rows: CanonicalRow[], h: number, lambda: number, 
 }
 
 function summarizeSimPerformance(
-  result: Trading212SimulationResult,
+  result: CfdSimulationResult,
   priceStart: number | null,
   priceEnd: number | null
 ): PerfSummary {
@@ -538,7 +538,7 @@ async function runForSymbol(symbol: string): Promise<{ symbol: string; pass: boo
     stopOutLevel: 0.25,
     positionFraction: PARAMS.positionFraction,
   };
-  const simResult = simulateTrading212Cfd(bars, PARAMS.initialEquity, config);
+  const simResult = simulateCfd(bars, PARAMS.initialEquity, config);
   const priceStart = toNum(rows[rows.length - bars.length - 1]?.adj_close ?? rows[rows.length - bars.length - 1]?.close) ?? toNum(rows[0]?.adj_close ?? rows[0]?.close) ?? null;
   const priceEnd = toNum(rows[rows.length - 1]?.adj_close ?? rows[rows.length - 1]?.close) ?? null;
   const perf = summarizeSimPerformance(simResult, priceStart, priceEnd);

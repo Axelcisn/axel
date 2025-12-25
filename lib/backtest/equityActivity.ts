@@ -1,4 +1,4 @@
-import type { Trading212AccountSnapshot } from "./trading212Cfd";
+import type { CfdAccountSnapshot } from "./cfdSim";
 
 export interface SimulationEquityPoint {
   date: string;
@@ -8,7 +8,7 @@ export interface SimulationEquityPoint {
   freeMargin?: number | null;
   selectedPnl?: number | null;
   selectedEquity?: number | null;
-  selectedSide?: Trading212AccountSnapshot["side"] | null;
+  selectedSide?: CfdAccountSnapshot["side"] | null;
   selectedContracts?: number | null;
 }
 
@@ -22,8 +22,8 @@ export interface TradeActivityWindow {
  * Uses side transitions, including the side before the window, to detect opens/closes.
  */
 export function computeTradeActivityWindow(
-  history: Trading212AccountSnapshot[],
-  prevSideBefore: Trading212AccountSnapshot["side"] | null
+  history: CfdAccountSnapshot[],
+  prevSideBefore: CfdAccountSnapshot["side"] | null
 ): TradeActivityWindow {
   if (!history || history.length === 0) {
     return { activityStartDate: null, activityEndDate: null };
@@ -31,7 +31,7 @@ export function computeTradeActivityWindow(
 
   let activityStartDate: string | null = null;
   let activityEndDate: string | null = null;
-  let prevSide: Trading212AccountSnapshot["side"] | null = prevSideBefore ?? null;
+  let prevSide: CfdAccountSnapshot["side"] | null = prevSideBefore ?? null;
 
   for (let i = 0; i < history.length; i++) {
     const snap = history[i];

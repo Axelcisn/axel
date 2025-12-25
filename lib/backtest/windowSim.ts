@@ -1,10 +1,10 @@
 import {
-  simulateTrading212Cfd,
-  type Trading212CfdConfig,
-  type Trading212SimBar,
-  type Trading212SimulationResult,
-  type Trading212Signal,
-} from "./trading212Cfd";
+  simulateCfd,
+  type CfdSimConfig,
+  type CfdSimBar,
+  type CfdSimulationResult,
+  type CfdSignal,
+} from "./cfdSim";
 
 export type FirstTradeReason =
   | "boundary_open_detected"
@@ -18,17 +18,17 @@ export type WindowSimResult = {
   firstTradeDate: string | null;
   firstTradeReason?: FirstTradeReason;
   lastCloseDate: string | null;
-  result: Trading212SimulationResult | null;
-  bars: Trading212SimBar[];
+  result: CfdSimulationResult | null;
+  bars: CfdSimBar[];
 };
 
-const signalToInt = (signal: Trading212Signal): number => {
+const signalToInt = (signal: CfdSignal): number => {
   if (signal === "flat") return 0;
   return 1;
 };
 
 export function computeFirstTradeDateFromSignals(
-  bars: Trading212SimBar[],
+  bars: CfdSimBar[],
   window: { start: string; end: string } | null,
   strategyStart?: string | null
 ): { date: string | null; reason: FirstTradeReason } {
@@ -89,7 +89,7 @@ export function computeFirstTradeDateFromSignals(
 }
 
 export function computeLastCloseDateFromSignals(
-  bars: Trading212SimBar[],
+  bars: CfdSimBar[],
   window: { start: string; end: string } | null,
   strategyStart?: string | null
 ): string | null {
@@ -128,10 +128,10 @@ export function computeLastCloseDateFromSignals(
 }
 
 export function computeWindowSimFromBars(
-  bars: Trading212SimBar[],
+  bars: CfdSimBar[],
   window: { start: string; end: string } | null,
   initialEquity: number,
-  config: Trading212CfdConfig,
+  config: CfdSimConfig,
   strategyStart?: string | null
 ): WindowSimResult {
   if (!window || !bars.length) {
@@ -157,7 +157,7 @@ export function computeWindowSimFromBars(
     return { firstTradeDate: null, firstTradeReason, lastCloseDate: null, result: null, bars: [] };
   }
 
-  const result = simulateTrading212Cfd(barsWindow, initialEquity, config);
+  const result = simulateCfd(barsWindow, initialEquity, config);
   return {
     firstTradeDate,
     firstTradeReason,
