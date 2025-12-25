@@ -5435,8 +5435,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                           radius={[2, 2, 0, 0]}
                           isAnimationActive={false}
                           maxBarSize={sharedBarSizing.maxBarSize}
-                          barGap={0}
-                          barCategoryGap="0%"
                         >
                           {simulationEquityData.map((entry, index) => {
                             const positive = (entry.selectedPnl ?? 0) >= 0;
