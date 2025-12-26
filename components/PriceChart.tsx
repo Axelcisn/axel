@@ -34,7 +34,8 @@ import { applyActivityMaskToEquitySeries, computeTradeActivityWindow } from "@/l
 import type { MomentumScorePoint } from "@/lib/indicators/momentum";
 import type { AdxPoint } from "@/lib/indicators/adx";
 import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
-import { SelectedStrategyAnalytics } from "@/lib/analytics/selectedStrategyAnalytics";
+import type { SelectedStrategyAnalytics } from "@/lib/analytics/selectedStrategyAnalytics";
+import { Settings2, Plus, Minus } from "lucide-react";
 
 const SYNC_ID = "timing-sync";
 const CHART_MARGIN = { top: 8, right: 0, left: 0, bottom: 0 };
@@ -81,23 +82,6 @@ const CheckIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <path
       d="M5 13l4 4L19 7"
       strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-const GearIcon = (props: React.SVGProps<SVGSVGElement>) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" {...props}>
-    <path
-      d="M12 9a3 3 0 100 6 3 3 0 000-6z"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33h.01A1.65 1.65 0 0010.91 5H11a2 2 0 014 0v.09c0 .69.4 1.31 1.02 1.6h.01a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.01a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09c-.69 0-1.31.4-1.6 1.02z"
-      strokeWidth="1.2"
       strokeLinecap="round"
       strokeLinejoin="round"
     />
@@ -169,6 +153,58 @@ export interface TrendEwmaSignal {
 
 const TREND_EWMA_SHORT_COLOR = "#facc15"; // amber/yellow
 const TREND_EWMA_LONG_COLOR = "#3b82f6";  // blue
+
+type TvCardProps = {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+  isDarkMode: boolean;
+  plain?: boolean;
+};
+
+const TvCard: React.FC<TvCardProps> = ({ title, children, right, isDarkMode, plain }) => (
+  <div
+    className={`rounded-3xl ${
+      plain
+        ? `${isDarkMode ? "border border-slate-800/40 bg-transparent" : "border border-slate-200 bg-transparent"}`
+        : `${isDarkMode ? "border border-slate-800/70 bg-slate-900/40" : "border border-slate-200 bg-white"}`
+    } overflow-hidden`}
+  >
+    <div className="px-5 pt-4 flex items-center justify-between">
+      <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">{title}</div>
+      {right}
+    </div>
+    <div className="px-5 pb-5 pt-3">{children}</div>
+  </div>
+);
+
+type TvSectionProps = {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+  isDarkMode: boolean;
+};
+
+const TvSection: React.FC<TvSectionProps> = ({ title, defaultOpen = false, children, isDarkMode }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div
+      className={`rounded-3xl border ${isDarkMode ? "border-slate-800/50" : "border-slate-200"} overflow-hidden`}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-5 py-4 flex items-center justify-between"
+      >
+        <span className={`text-sm font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-900"}`}>
+          {title}
+        </span>
+        <span className="text-slate-400">{open ? <Minus size={16} /> : <Plus size={16} />}</span>
+      </button>
+      {open && <div className="px-5 pb-5">{children}</div>}
+    </div>
+  );
+};
 
 /**
  * Normalize a date-like string into YYYY-MM-DD to keep chart + overlay data aligned.
@@ -693,6 +729,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const [showSimRangeMenu, setShowSimRangeMenu] = useState(false);
   const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(visibleWindow?.start ?? "");
   const [customSimRangeEnd, setCustomSimRangeEnd] = useState<string>(visibleWindow?.end ?? "");
+  const [showSettingsPopover, setShowSettingsPopover] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const settingsPopoverRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
     if (!showSimRangeMenu) return;
@@ -717,6 +756,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
   }, [showSimRangeMenu]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!showSettingsPopover) return;
+      const target = e.target as Node;
+      if (
+        settingsPopoverRef.current &&
+        !settingsPopoverRef.current.contains(target) &&
+        settingsButtonRef.current &&
+        !settingsButtonRef.current.contains(target)
+      ) {
+        setShowSettingsPopover(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showSettingsPopover]);
 
   const [fullData, setFullData] = useState<PricePoint[]>([]);
   const [selectedRange, setSelectedRange] = useState<PriceRange>("1M");
@@ -1934,23 +1990,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       (p) => p.trendEwmaLong != null && !Number.isFinite(p.trendEwmaLong)
     ).length;
 
-    console.log("[PriceChart] chart data lengths", {
-      range: selectedRange,
-      showTrendEwma,
-      chartData: chartData.length,
-      chartDataWithEwma: chartDataWithEwma.length,
-      chartDataWithForecastBand: chartDataWithForecastBand.length,
-      chartDataWithEquity: chartDataWithEquity.length,
-      hasTrendEwmaData,
-      chartHasTrendEwmaShort,
-      chartHasTrendEwmaLong,
-      priceYDomain,
-      priceYMinValue,
-      priceYMaxValue,
-      invalidCloseCount,
-      invalidTrendShort,
-      invalidTrendLong,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[PriceChart] chart data lengths", {
+        range: selectedRange,
+        showTrendEwma,
+        chartData: chartData.length,
+        chartDataWithEwma: chartDataWithEwma.length,
+        chartDataWithForecastBand: chartDataWithForecastBand.length,
+        chartDataWithEquity: chartDataWithEquity.length,
+        hasTrendEwmaData,
+        chartHasTrendEwmaShort,
+        chartHasTrendEwmaLong,
+        priceYDomain,
+        priceYMinValue,
+        priceYMaxValue,
+        invalidCloseCount,
+        invalidTrendShort,
+        invalidTrendLong,
+      });
+    }
 
     if (typeof window !== "undefined") {
       (window as any).__priceChartDebug = {
@@ -2112,7 +2170,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [syncedDates, windowedAccountHistory, selectedSimByDate, selectedPnlByDate]);
 
   useEffect(() => {
-    console.log("[SELECTED RUN]", selectedSimRunId);
+    if (process.env.NODE_ENV === "development") {
+      console.log("[SELECTED RUN]", selectedSimRunId);
+    }
   }, [selectedSimRunId]);
 
   useEffect(() => {
@@ -2121,7 +2181,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       0
     );
     const firstSel = simulationEquityData.find((p) => Number.isFinite((p as any).selectedPnl));
-    console.log("[CHART SEL]", { nSel, first: firstSel });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[CHART SEL]", { nSel, first: firstSel });
+    }
   }, [simulationEquityData]);
   const simViewLength = simulationEquityData.length;
   const carryInBlocksWindowSim = useMemo(() => {
@@ -2216,14 +2278,16 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [simulationEquityData]);
 
   useEffect(() => {
-    console.log('[SIM-CHART] data source', {
-      simulationMode,
-      activeCfdRunId,
-      equityPanelSample: equityPanelData.slice(0, 3),
-      filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
-      priceChartSample: chartDataWithForecastBand.slice(0, 3),
-      simulationEquitySample: simulationEquityData.slice(0, 3),
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log('[SIM-CHART] data source', {
+        simulationMode,
+        activeCfdRunId,
+        equityPanelSample: equityPanelData.slice(0, 3),
+        filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
+        priceChartSample: chartDataWithForecastBand.slice(0, 3),
+        simulationEquitySample: simulationEquityData.slice(0, 3),
+      });
+    }
   }, [
     simulationMode,
     activeCfdRunId,
@@ -2690,6 +2754,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [equitySummary, hoveredDate, selectedOverviewStats, tradeSummary]);
 
   useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
       console.log('[UI] Simulation header metrics', {
         simulationMode,
         equitySummary: {
@@ -2707,6 +2772,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           openedTradesLog: tradeSummary.totalTrades - tradeSummary.closedTradesCount,
         },
       });
+    }
   }, [simulationMode, equitySummary, tradeSummary]);
 
   // Additional derived stats for the insight tabs (buy & hold, size, risk ratios)
@@ -2930,13 +2996,13 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   );
 
   const profitStructureData = useMemo(() => {
-    if (!selectedAnalytics?.performance.profitStructure) return [];
-    const ps = selectedAnalytics.performance.profitStructure;
+    const ps = selectedAnalytics?.performance.profitStructure;
+    if (!ps) return [];
     return [
-      { label: "Gross profit", value: ps.grossProfit ?? 0, fill: "rgba(16, 185, 129, 0.8)" },
-      { label: "Gross loss", value: ps.grossLoss != null ? -Math.abs(ps.grossLoss) : 0, fill: "rgba(248, 113, 113, 0.8)" },
-      { label: "Commission", value: ps.commission != null ? -Math.abs(ps.commission) : 0, fill: "rgba(250, 204, 21, 0.8)" },
-      { label: "Net P&L", value: ps.netProfit ?? 0, fill: "rgba(56, 189, 248, 0.9)" },
+      { label: "Total profit", value: ps.grossProfit ?? 0, fill: "rgba(16,185,129,0.85)" },
+      { label: "Total loss", value: ps.grossLoss != null ? -Math.abs(ps.grossLoss) : 0, fill: "rgba(248,113,113,0.85)" },
+      { label: "Commission", value: ps.commission != null ? -Math.abs(ps.commission) : 0, fill: "rgba(250,204,21,0.85)" },
+      { label: "Total P&L", value: ps.netProfit ?? 0, fill: "rgba(56,189,248,0.9)" },
     ];
   }, [selectedAnalytics]);
 
@@ -2985,6 +3051,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     };
   }, [selectedAnalytics]);
 
+  const bands = selectedAnalytics?.performance.benchmark?.bands ?? benchmarkBands;
+
   const returnBreakdown = selectedAnalytics?.performance.returnBreakdown;
 
   const bandPosition = (value: number | null, min: number | null, max: number | null) => {
@@ -3007,7 +3075,27 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     [selectedAnalytics]
   );
 
-  const overviewCards = selectedAnalytics?.overviewCards;
+  const oc = selectedAnalytics?.overviewCards ?? null;
+  const kpi = {
+    pnlAbs: oc?.pnlAbs ?? overviewStats.pnlAbs,
+    pnlPct: oc?.pnlPct ?? overviewStats.pnlPct,
+    maxDdAbs: oc?.maxDrawdownAbs ?? overviewStats.maxDrawdownAbs,
+    maxDdPct: oc?.maxDrawdownPct ?? overviewStats.maxDrawdownPct,
+    totalTrades: oc?.totalTrades ?? overviewStats.totalTrades,
+    wins: oc?.profitableTrades ?? overviewStats.profitableTrades,
+    winPct: oc?.pctProfitable ?? overviewStats.pctProfitable,
+    profitFactor: oc?.profitFactor ?? overviewStats.profitFactor,
+    asOf: oc?.asOfDate ?? overviewStats.asOfDate,
+    label: oc?.label ?? overviewStats.label,
+  };
+
+  const strategyButtons = useMemo(
+    () =>
+      (simulationRuns ?? []).filter((r) =>
+        ["unbiased", "biased", "biased-max"].includes(r.id)
+      ),
+    [simulationRuns]
+  );
 
   // === Trade Marker Types and Data ===
   type TradeMarkerType = 'entry' | 'exit' | 'pair';
@@ -3479,16 +3567,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       });
     }
 
-    console.log(
-      "[PriceChart] data length:",
-      chartDataForRender?.length,
-      "sample:",
-      chartDataForRender?.slice(0, 3),
-      "range:",
-      selectedRange,
-      "showTrendEwma:",
-      showTrendEwma
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[PriceChart] data length:",
+        chartDataForRender?.length,
+        "sample:",
+        chartDataForRender?.slice(0, 3),
+        "range:",
+        selectedRange,
+        "showTrendEwma:",
+        showTrendEwma
+      );
+    }
 
     return (
       <div className="relative">
@@ -4609,84 +4699,271 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       
       {selectedAnalytics ? (
         <div className="mt-6 space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="inline-flex rounded-full border border-slate-700/60 bg-slate-900/30 p-1 shadow-sm focus-within:ring-1 focus-within:ring-emerald-500">
-              {[
-                { id: "unbiased", label: "EWMA Unbiased" },
-                { id: "biased", label: "EWMA Biased" },
-                { id: "biased-max", label: "EWMA Biased (Max)" },
-              ].map((opt) => {
-                const isActive = selectedSimRunId === opt.id;
+          <div className="flex items-center justify-between relative">
+            <div className="flex items-center gap-2">
+              {strategyButtons.map((r) => {
+                const active = r.id === selectedSimRunId;
                 return (
                   <button
-                    key={opt.id}
+                    key={r.id}
                     type="button"
-                    aria-pressed={isActive}
-                    onClick={() => onSelectSimulationRun?.(opt.id as any)}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 ${
-                      isActive
-                        ? "bg-emerald-600 text-white shadow"
-                        : "text-slate-200 hover:bg-slate-800/70"
-                    }`}
+                    onClick={() => onSelectSimulationRun?.(r.id)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition
+                      ${
+                        active
+                          ? isDarkMode
+                            ? "bg-slate-100 text-slate-900"
+                            : "bg-slate-900 text-white"
+                          : isDarkMode
+                            ? "bg-slate-800/70 text-slate-200 hover:bg-slate-700/80"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
                   >
-                    {opt.label}
+                    {r.label}
                   </button>
                 );
               })}
             </div>
+
             <button
               type="button"
-              onClick={() => onOpenSimulationSettings?.()}
-              className={`inline-flex items-center justify-center w-9 h-9 rounded-full border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 ${
-                isDarkMode
-                  ? "border-slate-700 text-slate-200 hover:border-emerald-400 hover:text-white"
-                  : "border-slate-300 text-slate-700 hover:border-emerald-500 hover:text-emerald-700"
-              }`}
-              aria-label="Open simulation settings"
+              ref={settingsButtonRef}
+              onClick={() => setShowSettingsPopover((v) => !v)}
+              className={`h-9 w-9 rounded-full border flex items-center justify-center
+                ${isDarkMode ? "border-slate-700 text-slate-200 hover:bg-white/5" : "border-slate-200 text-slate-700 hover:bg-slate-100"}`}
+              title="Simulation settings"
             >
-              <GearIcon className="w-4 h-4" />
+              <Settings2 size={16} />
             </button>
+            {showSettingsPopover && (
+              <div
+                ref={settingsPopoverRef}
+                className={`absolute right-0 top-12 z-30 w-[360px] rounded-2xl border shadow-2xl ${
+                  isDarkMode
+                    ? "border-slate-700/70 bg-slate-900/90 text-slate-100"
+                    : "border-slate-200 bg-white text-slate-900"
+                }`}
+              >
+                <div className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+                  Simulation settings
+                </div>
+                <div className="grid grid-cols-1 gap-3 px-4 pb-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Horizon (days)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={horizonCoverage?.h ?? ""}
+                        onChange={(e) =>
+                          horizonCoverage?.onHorizonChange?.(Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Coverage</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        max="0.99"
+                        value={horizonCoverage?.coverage ?? ""}
+                        onChange={(e) =>
+                          horizonCoverage?.onCoverageChange?.(
+                            Math.min(0.99, Math.max(0.01, Number(e.target.value) || (horizonCoverage?.coverage ?? 0.95)))
+                          )
+                        }
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] text-slate-400">Volatility model</label>
+                    <select
+                      value={horizonCoverage?.volModel}
+                      onChange={(e) => horizonCoverage?.onModelChange?.(e.target.value as any)}
+                      className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                        isDarkMode
+                          ? "bg-slate-900 border-slate-700 text-slate-100"
+                          : "bg-white border-slate-200 text-slate-800"
+                      }`}
+                    >
+                      <option value="GBM">GBM</option>
+                      <option value="GARCH">GARCH</option>
+                      <option value="HAR-RV">HAR-RV</option>
+                      <option value="Range">Range</option>
+                    </select>
+                  </div>
+
+                  {horizonCoverage?.volModel === "GARCH" && (
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">GARCH estimator</label>
+                      <select
+                        value={horizonCoverage?.garchEstimator}
+                        onChange={(e) => horizonCoverage?.onGarchEstimatorChange?.(e.target.value as any)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      >
+                        <option value="Normal">Normal</option>
+                        <option value="Student-t">Student-t</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {horizonCoverage?.volModel === "Range" && (
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Range estimator</label>
+                      <select
+                        value={horizonCoverage?.rangeEstimator}
+                        onChange={(e) => horizonCoverage?.onRangeEstimatorChange?.(e.target.value as any)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      >
+                        <option value="P">Parkinson</option>
+                        <option value="GK">Garman-Klass</option>
+                        <option value="RS">Rogers-Satchell</option>
+                        <option value="YZ">Yang-Zhang</option>
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Initial equity ($)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={_cfdInitialEquity}
+                        onChange={(e) => _onChangeCfdInitialEquity?.(Number(e.target.value) || 0)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Leverage</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={_cfdLeverage}
+                        onChange={(e) => _onChangeCfdLeverage?.(Number(e.target.value) || 0)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Position size (%)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.5"
+                        value={Math.round(_cfdPositionFraction * 1000) / 10}
+                        onChange={(e) => {
+                          const next = Number(e.target.value);
+                          if (Number.isFinite(next)) {
+                            _onChangeCfdPositionFraction?.(Math.max(0, Math.min(100, next)) / 100);
+                          }
+                        }}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Cost (bps)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={_cfdCostBps}
+                        onChange={(e) => _onChangeCfdCostBps?.(Number(e.target.value) || 0)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-            <div className={`rounded-2xl border p-3 ${isDarkMode ? "border-slate-800 bg-transparent" : "border-slate-200 bg-transparent"}`}>
-              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Total P&L</div>
-              <div className="mt-1 flex items-baseline gap-2 text-sm font-mono">
-                <span className={overviewCards?.pnlAbs != null && overviewCards.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}>
-                  {formatUsd(overviewCards?.pnlAbs, { sign: true })}
-                </span>
-                <span className="text-slate-400">{overviewCards?.pnlPct != null ? formatPct(overviewCards.pnlPct) : "—"}</span>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">TOTAL P&L</div>
+              <div className="mt-2 flex items-baseline gap-3">
+                <div className={`text-sm font-mono ${kpi.pnlAbs != null && kpi.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {formatUsd(kpi.pnlAbs, { sign: true })}
+                </div>
+                <div className="text-sm text-slate-400">
+                  {kpi.pnlPct != null ? formatPct(kpi.pnlPct) : "—"}
+                </div>
               </div>
             </div>
-            <div className={`rounded-2xl border p-3 ${isDarkMode ? "border-slate-800 bg-transparent" : "border-slate-200 bg-transparent"}`}>
-              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Max DD</div>
-              <div className="mt-1 flex items-baseline gap-2 text-sm font-mono">
-                <span className="text-rose-300">{formatUsd(overviewCards?.maxDrawdownAbs, { sign: true })}</span>
-                <span className="text-slate-400">{overviewCards?.maxDrawdownPct != null ? formatPct(overviewCards.maxDrawdownPct) : "—"}</span>
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">MAX DRAWDOWN</div>
+              <div className="mt-2 flex items-baseline gap-3">
+                <div className="text-sm font-mono text-rose-400">
+                  {formatUsd(kpi.maxDdAbs, { sign: true })}
+                </div>
+                <div className="text-sm text-slate-400">
+                  {kpi.maxDdPct != null ? formatPct(kpi.maxDdPct) : "—"}
+                </div>
               </div>
             </div>
-            <div className={`rounded-2xl border p-3 ${isDarkMode ? "border-slate-800 bg-transparent" : "border-slate-200 bg-transparent"}`}>
-              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Total trades</div>
-              <div className="mt-1 text-sm font-mono text-slate-100">
-                {overviewCards?.totalTrades ?? "—"}
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">TOTAL TRADES</div>
+              <div className="mt-2 text-sm font-mono text-slate-100">
+                {kpi.totalTrades ?? "—"}
               </div>
             </div>
-            <div className={`rounded-2xl border p-3 ${isDarkMode ? "border-slate-800 bg-transparent" : "border-slate-200 bg-transparent"}`}>
-              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Profitable trades</div>
-              <div className="mt-1 flex items-baseline gap-2 text-sm font-mono">
-                <span className="text-slate-100">{overviewCards?.profitableTrades ?? "—"}</span>
-                <span className="text-slate-400">
-                  {overviewCards?.pctProfitable != null ? `${overviewCards.pctProfitable.toFixed(1)}%` : "—"}
-                </span>
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">PROFITABLE TRADES</div>
+              <div className="mt-2 flex items-baseline gap-3">
+                <div className="text-sm font-mono text-slate-100">
+                  {kpi.wins ?? "—"}
+                </div>
+                <div className="text-sm text-slate-400">
+                  {kpi.winPct != null ? formatPct(kpi.winPct / 100) : "—"}
+                </div>
               </div>
             </div>
-            <div className={`rounded-2xl border p-3 ${isDarkMode ? "border-slate-800 bg-transparent" : "border-slate-200 bg-transparent"}`}>
-              <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">Profit factor</div>
-              <div className="mt-1 text-sm font-mono text-slate-100">
-                {overviewCards?.profitFactor == null
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">PROFIT FACTOR</div>
+              <div className="mt-2 text-sm font-mono text-slate-100">
+                {kpi.profitFactor == null
                   ? "—"
-                  : overviewCards.profitFactor === Infinity
+                  : kpi.profitFactor === Infinity
                     ? "∞"
-                    : overviewCards.profitFactor.toFixed(2)}
+                    : kpi.profitFactor.toFixed(2)}
               </div>
             </div>
           </div>
@@ -4753,7 +5030,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                     type="category"
                     axisLine={false}
                     tickLine={false}
-                    padding={{ left: 12, right: 12 }}
+                    padding={{ left: 0, right: 0 }}
                     minTickGap={14}
                     tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
                   />
@@ -4821,213 +5098,234 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
             )}
           </div>
 
-          <Accordion type="multiple" className="w-full">
-            <AccordionItem value="performance">
-              <AccordionTrigger className="text-sm font-semibold">Performance</AccordionTrigger>
-              <AccordionContent className="space-y-4">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className={`${chartFrameClasses} border ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                    <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">Profit structure</div>
-                    <div className="h-[220px] px-4 pb-4">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={profitStructureData} margin={CHART_MARGIN} barCategoryGap="18%">
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(148,163,184,0.12)' : 'rgba(100,116,139,0.14)'} />
-                          <XAxis dataKey="label" tick={{ fill: isDarkMode ? '#94a3b8' : '#475569', fontSize: 11 }} tickLine={false} axisLine={false} />
-                          <YAxis tick={{ fill: isDarkMode ? '#94a3b8' : '#475569', fontSize: 11 }} axisLine={false} tickLine={false} />
-                          <Tooltip
-                            formatter={(v: any) => (Number.isFinite(v) ? formatUsd(v as number, { sign: true }) : '—')}
-                            contentStyle={{ backgroundColor: isDarkMode ? '#0f172a' : '#fff', borderRadius: 12, borderColor: isDarkMode ? '#1e293b' : '#e2e8f0' }}
-                          />
-                          <Bar dataKey="value" radius={[6, 6, 4, 4]}>
-                            {profitStructureData.map((d, idx) => (
-                              <Cell key={`${d.label}-${idx}`} fill={d.fill} />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                  <div className={`${chartFrameClasses} border ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                    <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">Benchmarking</div>
-                    <div className="px-4 pb-4 space-y-4">
-                      {[
-                        { title: "Buy & hold", band: benchmarkBands.buyHold, color: "from-amber-500/20 via-amber-400/25 to-amber-500/20", label: "buyHold" },
-                        { title: "Strategy", band: benchmarkBands.strategy, color: "from-sky-500/20 via-sky-400/25 to-sky-500/20", label: "strategy" },
-                      ].map((section) => (
-                        <div key={section.title} className="space-y-2">
-                          <div className="flex items-center justify-between text-xs uppercase tracking-[0.08em] text-slate-400">
-                            <span>{section.title}</span>
-                            <span className="font-mono text-slate-100">
-                              {section.label === "strategy"
-                                ? formatUsd(selectedAnalytics.performance.benchmark?.strategyAbs, { sign: true })
-                                : formatUsd(selectedAnalytics.performance.benchmark?.buyHoldAbs, { sign: true })}
-                            </span>
-                          </div>
-                          <div className={`relative h-28 rounded-2xl border ${isDarkMode ? 'border-slate-800/70' : 'border-slate-200'} bg-gradient-to-r ${section.color}`}>
-                            {[
-                              { key: "max", value: section.band.max, label: "Max" },
-                              { key: "current", value: section.band.current, label: "Current" },
-                              { key: "min", value: section.band.min, label: "Min" },
-                            ].map((point) => {
-                              const left = bandPosition(point.value, section.band.min, section.band.max);
-                              return (
-                                <div key={point.key} className="absolute top-1/2 -translate-y-1/2" style={{ left: `${left}%` }}>
-                                  <div className="flex flex-col items-center gap-1">
-                                    <span className="text-[10px] uppercase text-slate-300">{point.label}</span>
-                                    <span
-                                      className={`h-9 w-9 rounded-full shadow-md flex items-center justify-center border ${
-                                        section.label === "strategy"
-                                          ? "bg-sky-500 text-white border-sky-300"
-                                          : "bg-amber-500 text-white border-amber-200"
-                                      }`}
-                                    >
-                                      {point.value != null ? formatUsd(point.value, { compact: true, sign: true }) : "—"}
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                          <div className="grid grid-cols-3 text-xs text-slate-400">
-                            <div>
-                              <div className="text-[11px] uppercase">Min</div>
-                              <div className="font-mono text-slate-100">{formatUsd(section.band.min, { sign: true })}</div>
-                              <div className="text-[11px]">{formatPct(section.band.minPct)}</div>
-                            </div>
-                            <div className="text-center">
-                              <div className="text-[11px] uppercase">Current</div>
-                              <div className="font-mono text-slate-100">{formatUsd(section.band.current, { sign: true })}</div>
-                              <div className="text-[11px]">{formatPct(section.band.currentPct)}</div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-[11px] uppercase">Max</div>
-                              <div className="font-mono text-slate-100">{formatUsd(section.band.max, { sign: true })}</div>
-                              <div className="text-[11px]">{formatPct(section.band.maxPct)}</div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+          <TvSection title="Performance" defaultOpen={false} isDarkMode={isDarkMode}>
+            <div className="space-y-4">
+              <TvCard title="PROFIT STRUCTURE" isDarkMode={isDarkMode} plain>
+                <div className="h-[260px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={profitStructureData}
+                      margin={{ top: 8, right: 12, left: 0, bottom: 8 }}
+                      barCategoryGap="22%"
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        vertical={false}
+                        stroke={
+                          isDarkMode
+                            ? "rgba(148,163,184,0.10)"
+                            : "rgba(100,116,139,0.14)"
+                        }
+                      />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fill: isDarkMode ? "#94a3b8" : "#475569", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fill: isDarkMode ? "#94a3b8" : "#475569", fontSize: 11 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        formatter={(v: any) => formatUsd(v as number, { sign: true })}
+                        contentStyle={{
+                          backgroundColor: isDarkMode ? "#0b1221" : "#fff",
+                          borderRadius: 12,
+                          borderColor: isDarkMode ? "#1e293b" : "#e2e8f0",
+                          color: isDarkMode ? "#e2e8f0" : "#0f172a",
+                        }}
+                        labelStyle={{ color: isDarkMode ? "#e2e8f0" : "#0f172a" }}
+                        wrapperStyle={{ outline: "none" }}
+                      />
+                      <Bar dataKey="value" radius={[10, 10, 6, 6]}>
+                        {profitStructureData.map((d, i) => (
+                          <Cell key={i} fill={d.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
+              </TvCard>
 
-                <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                  <div className={`${chartFrameClasses} border ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'} xl:col-span-2`}>
-                    <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">Returns (All / Long / Short)</div>
-                    <div className="px-4 pb-4">
-                      <table className="w-full text-xs">
-                        <thead className={isDarkMode ? "text-slate-500" : "text-slate-600"}>
-                          <tr>
-                            <th className="text-left py-2">Metric</th>
-                            <th className="text-right py-2">All</th>
-                            <th className="text-right py-2">Long</th>
-                            <th className="text-right py-2">Short</th>
+              <TvCard title="RETURNS (ALL / LONG / SHORT)" isDarkMode={isDarkMode} plain>
+                {(() => {
+                  const rb = returnBreakdown;
+                  const basis =
+                    rb?.all?.initialCapital ?? selectedAnalytics.equitySeries.initialEquity;
+                  const cell = (v: number | null | undefined, color?: string, signed = true) => {
+                    if (v == null || !Number.isFinite(v)) {
+                      return <div className="text-right font-mono">—</div>;
+                    }
+                    const pct = basis && basis !== 0 ? v / basis : null;
+                    const displayVal = signed ? formatUsd(v, { sign: true }) : formatUsd(Math.abs(v));
+                    return (
+                      <div className={`text-right font-mono ${color ?? ""}`}>
+                        <div>{displayVal}</div>
+                        <div className="text-[11px] text-slate-500">{formatPct(pct)}</div>
+                      </div>
+                    );
+                  };
+
+                  if (!rb) return <div className="text-xs text-slate-500">No returns breakdown.</div>;
+
+                  const rows = [
+                    {
+                      key: "initialCapital",
+                      label: "Initial capital",
+                      render: (b: any) => (
+                        <div className="text-right font-mono text-slate-200">{formatUsd(b?.initialCapital)}</div>
+                      ),
+                    },
+                    {
+                      key: "openPnl",
+                      label: "Open P&L",
+                      render: (b: any) =>
+                        cell(b?.openPnl, b?.openPnl != null && b.openPnl >= 0 ? "text-emerald-400" : "text-rose-400"),
+                    },
+                    {
+                      key: "netPnl",
+                      label: "Net P&L",
+                      render: (b: any) =>
+                        cell(b?.netPnl, b?.netPnl != null && b.netPnl >= 0 ? "text-emerald-400" : "text-rose-400"),
+                    },
+                    {
+                      key: "grossProfit",
+                      label: "Gross profit",
+                      render: (b: any) => cell(b?.grossProfit, "text-emerald-400"),
+                    },
+                    {
+                      key: "grossLoss",
+                      label: "Gross loss",
+                      render: (b: any) =>
+                        cell(b?.grossLoss != null ? -Math.abs(b.grossLoss) : null, "text-rose-400", false),
+                    },
+                    {
+                      key: "profitFactor",
+                      label: "Profit factor",
+                      render: (b: any) => (
+                        <div className="text-right font-mono">
+                          {b?.profitFactor == null
+                            ? "—"
+                            : b.profitFactor === Infinity
+                              ? "∞"
+                              : b.profitFactor.toFixed(3)}
+                        </div>
+                      ),
+                    },
+                    {
+                      key: "commission",
+                      label: "Commission",
+                      render: (b: any) =>
+                        cell(
+                          b?.commission != null ? -Math.abs(b.commission) : null,
+                          "text-amber-300",
+                          false
+                        ),
+                    },
+                    {
+                      key: "expectedPayoff",
+                      label: "Expected payoff",
+                      render: (b: any) => (
+                        <div className="text-right font-mono">{formatUsd(b?.expectedPayoff, { sign: true })}</div>
+                      ),
+                    },
+                  ];
+
+                  return (
+                    <div className="overflow-hidden rounded-3xl border border-slate-800/60 bg-transparent">
+                      <table className="w-full text-sm">
+                        <thead className="bg-transparent">
+                          <tr className="text-xs text-slate-500">
+                            <th className="text-left py-3 px-4">Metric</th>
+                            <th className="text-right py-3 px-4">All</th>
+                            <th className="text-right py-3 px-4">Long</th>
+                            <th className="text-right py-3 px-4">Short</th>
                           </tr>
                         </thead>
-                        <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                          {[
-                            { key: "initialCapital", label: "Initial capital", format: (v: number | null | undefined) => formatUsd(v, { compact: false }) },
-                            { key: "openPnl", label: "Open P&L", format: (v: number | null | undefined) => formatUsd(v, { sign: true }) },
-                            { key: "netPnl", label: "Net P&L", format: (v: number | null | undefined) => formatUsd(v, { sign: true }) },
-                            { key: "grossProfit", label: "Gross profit", format: (v: number | null | undefined) => formatUsd(v, { sign: true }) },
-                            { key: "grossLoss", label: "Gross loss", format: (v: number | null | undefined) => formatUsd(v, { sign: true }) },
-                            {
-                              key: "profitFactor",
-                              label: "Profit factor",
-                              format: (v: number | null | undefined) => {
-                                if (v == null) return "—";
-                                if (v === Infinity) return "∞";
-                                return v.toFixed(2);
-                              },
-                            },
-                          { key: "commission", label: "Commission", format: (v: number | null | undefined) => formatUsd(v, { sign: true }) },
-                          { key: "expectedPayoff", label: "Expected payoff", format: (v: number | null | undefined) => formatUsd(v, { sign: true }) },
-                          ].map((row) => (
-                            <tr key={row.key} className={`border-t ${isDarkMode ? "border-slate-800/40" : "border-slate-200"} last:border-b-0`}>
-                            <td className="py-2">{row.label}</td>
-                            <td className="py-2 text-right font-mono">
-                                {row.format(
-                                  (returnBreakdown?.all as Record<string, number | null | undefined> | undefined)?.[
-                                    row.key
-                                  ]
-                                )}
-                            </td>
-                            <td className="py-2 text-right font-mono">
-                                {row.format(
-                                  (returnBreakdown?.long as Record<string, number | null | undefined> | undefined)?.[
-                                    row.key
-                                  ]
-                                )}
-                            </td>
-                            <td className="py-2 text-right font-mono">
-                                {row.format(
-                                  (returnBreakdown?.short as Record<string, number | null | undefined> | undefined)?.[
-                                    row.key
-                                  ]
-                                )}
-                            </td>
-                          </tr>
-                        ))}
+                        <tbody>
+                          {rows.map((r) => (
+                            <tr key={r.key} className="border-t border-slate-800/40">
+                              <td className="py-4 px-4 text-slate-300">{r.label}</td>
+                              <td className="py-3 px-4">{r.render(rb.all)}</td>
+                              <td className="py-3 px-4">{r.render(rb.long)}</td>
+                              <td className="py-3 px-4">{r.render(rb.short)}</td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
+                  );
+                })()}
+              </TvCard>
+
+              <TvCard
+                title="BENCHMARK COMPARISON"
+                right={
+                  <span className="text-xs text-slate-400">
+                    {formatUsd(selectedAnalytics.performance.benchmark?.buyHoldAbs)}
+                  </span>
+                }
+                isDarkMode={isDarkMode}
+                plain
+              >
+                <table className="w-full text-sm">
+                  <tbody className="text-slate-200">
+                    <tr className="border-b border-slate-800/40">
+                      <td className="py-3">Buy &amp; hold return</td>
+                      <td className="py-3 text-right font-mono">
+                        {formatUsd(selectedAnalytics.performance.benchmark?.buyHoldAbs, { sign: true })} ·{" "}
+                        {formatPct(selectedAnalytics.performance.benchmark?.buyHoldPct)}
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-800/40">
+                      <td className="py-3">Buy &amp; hold % gain</td>
+                      <td className="py-3 text-right font-mono">
+                        {formatPct(selectedAnalytics.performance.benchmark?.buyHoldPct)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3">Strategy outperformance</td>
+                      <td className="py-3 text-right font-mono">
+                        {formatUsd(
+                          (selectedAnalytics.performance.benchmark?.strategyAbs ?? 0) -
+                            (selectedAnalytics.performance.benchmark?.buyHoldAbs ?? 0),
+                          { sign: true }
+                        )}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </TvCard>
+
+              <TvCard title="RISK-ADJUSTED PERFORMANCE" isDarkMode={isDarkMode} plain>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Sharpe ratio</span>
+                    <span className="font-mono text-slate-100">
+                      {selectedAnalytics.performance.riskAdjusted?.sharpe != null
+                        ? selectedAnalytics.performance.riskAdjusted.sharpe.toFixed(2)
+                        : "—"}
+                    </span>
                   </div>
-                  <div className="space-y-4">
-                    <div className={`${chartFrameClasses} border ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                      <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">Benchmark comparison</div>
-                      <div className="px-4 pb-4">
-                        <table className="w-full text-xs">
-                          <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                            <tr className={`border-b ${isDarkMode ? "border-slate-800/40" : "border-slate-200"}`}>
-                              <td className="py-2">Buy &amp; hold return</td>
-                              <td className="py-2 text-right font-mono">
-                                {formatUsd(selectedAnalytics.performance.benchmark?.buyHoldAbs, { sign: true })} · {formatPct(selectedAnalytics.performance.benchmark?.buyHoldPct)}
-                              </td>
-                            </tr>
-                            <tr className={`border-b ${isDarkMode ? "border-slate-800/40" : "border-slate-200"}`}>
-                              <td className="py-2">Buy &amp; hold % gain</td>
-                              <td className="py-2 text-right font-mono">{formatPct(selectedAnalytics.performance.benchmark?.buyHoldPct)}</td>
-                            </tr>
-                            <tr>
-                              <td className="py-2">Strategy outperformance</td>
-                              <td className="py-2 text-right font-mono">
-                                {formatUsd(
-                                  (selectedAnalytics.performance.benchmark?.strategyAbs ?? 0) -
-                                    (selectedAnalytics.performance.benchmark?.buyHoldAbs ?? 0),
-                                  { sign: true }
-                                )}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                    <div className={`${chartFrameClasses} border ${isDarkMode ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-white'}`}>
-                      <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">Risk-adjusted performance</div>
-                      <div className="px-4 pb-4 space-y-2 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Sharpe ratio</span>
-                          <span className="font-mono text-slate-100">
-                            {(selectedAnalytics.performance.riskAdjusted?.sharpe ?? null) != null
-                              ? selectedAnalytics.performance.riskAdjusted?.sharpe?.toFixed(2)
-                              : "—"}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-slate-400">Sortino ratio</span>
-                          <span className="font-mono text-slate-100">
-                            {(selectedAnalytics.performance.riskAdjusted?.sortino ?? null) != null
-                              ? selectedAnalytics.performance.riskAdjusted?.sortino?.toFixed(2)
-                              : "—"}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500">Computed from daily equity returns (252d annualization)</div>
-                      </div>
-                    </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Sortino ratio</span>
+                    <span className="font-mono text-slate-100">
+                      {selectedAnalytics.performance.riskAdjusted?.sortino != null
+                        ? selectedAnalytics.performance.riskAdjusted.sortino.toFixed(2)
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Computed from daily equity returns (252d annualization)
                   </div>
                 </div>
-              </AccordionContent>
-            </AccordionItem>
+              </TvCard>
+            </div>
+          </TvSection>
+
+          <Accordion type="multiple" className="w-full">
             <AccordionItem value="trades">
               <AccordionTrigger className="text-sm font-semibold">Trades analysis</AccordionTrigger>
               <AccordionContent>

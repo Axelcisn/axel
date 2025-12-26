@@ -33,7 +33,7 @@ import {
   simulateCfd,
 } from '@/lib/backtest/cfdSim';
 import { computeWindowSimFromBars, type WindowSimResult } from '@/lib/backtest/windowSim';
-import { buildSelectedStrategyAnalytics, SelectedStrategyAnalytics } from '@/lib/analytics/selectedStrategyAnalytics';
+import { buildSelectedStrategyAnalytics, type SelectedStrategyAnalytics } from '@/lib/analytics/selectedStrategyAnalytics';
 import { TickerSearch } from '@/components/TickerSearch';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import { StickyTickerBar } from '@/components/StickyTickerBar';
@@ -6922,6 +6922,26 @@ useEffect(() => {
           {actionButtons}
         </div>
       </div>
+      {/* Trend Analysis Section */}
+      <div className="mb-8">
+        <TrendSection
+          ticker={params.ticker}
+          horizon={h}
+          coverage={coverage}
+          shortWindowOverride={trendShortWindow}
+          longWindowOverride={trendLongWindow}
+          onEwmaWindowChange={(short, long) => {
+            setTrendShortWindow(short);
+            setTrendLongWindow(long);
+          }}
+          momentumPeriodOverride={trendMomentumPeriod}
+          onMomentumPeriodChange={setTrendMomentumPeriod}
+          ewmaCrossoverOverride={trendEwmaCrossover}
+          trendWeight={trendWeight}
+          trendWeightUpdatedAt={trendWeightUpdatedAt}
+        />
+      </div>
+
       {/* Price Chart Section */}
       <div className="mb-4">
         {showSimulationSettings && (
@@ -7449,24 +7469,6 @@ useEffect(() => {
           </div>
         )}
       </div>
-
-      {/* Trend Analysis Section */}
-      <TrendSection
-        ticker={params.ticker}
-        horizon={h}
-        coverage={coverage}
-        shortWindowOverride={trendShortWindow}
-        longWindowOverride={trendLongWindow}
-        onEwmaWindowChange={(short, long) => {
-          setTrendShortWindow(short);
-          setTrendLongWindow(long);
-        }}
-        momentumPeriodOverride={trendMomentumPeriod}
-        onMomentumPeriodChange={setTrendMomentumPeriod}
-        ewmaCrossoverOverride={trendEwmaCrossover}
-        trendWeight={trendWeight}
-        trendWeightUpdatedAt={trendWeightUpdatedAt}
-      />
 
       {/* Unified Forecast Bands Card - Full Width */}
       <div className="mb-8">

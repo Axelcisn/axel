@@ -1,10 +1,13 @@
-import { CanonicalRow } from "@/lib/types/canonical";
-import { CfdAccountSnapshot, CfdTrade } from "@/lib/backtest/cfdSim";
+import type { CanonicalRow } from "@/lib/types/canonical";
+import type {
+  Trading212AccountSnapshot,
+  Trading212Trade,
+} from "@/lib/backtest/trading212Cfd";
 
 type SelectedSimPoint = {
   pnlUsd: number;
   equityUsd: number;
-  side?: CfdAccountSnapshot["side"] | null;
+  side?: Trading212AccountSnapshot["side"] | null;
   contracts?: number | null;
 };
 
@@ -27,6 +30,14 @@ type SimulationRunLike = {
   maxDrawdownValue?: number;
   maxDrawdownPct?: number;
   stopOutEvents?: number;
+  avgRunUpDuration?: number;
+  maxRunUpDuration?: number;
+  avgRunUpValue?: number;
+  maxRunUpValue?: number;
+  avgDrawdownDuration?: number;
+  maxDrawdownDuration?: number;
+  avgDrawdownValue?: number;
+  avgDrawdownPct?: number;
 };
 
 type ReturnBreakdown = {
@@ -62,7 +73,7 @@ export type SelectedStrategyAnalytics = {
       equity: number;
       pnl: number;
       pct: number;
-      side?: CfdAccountSnapshot["side"] | null;
+      side?: Trading212AccountSnapshot["side"] | null;
       contracts?: number | null;
     }>;
     buyHold?: Array<{
@@ -149,7 +160,7 @@ export type SelectedStrategyAnalytics = {
       largestLossPct: number | null;
       avgBars: number | null;
     };
-    list: CfdTrade[];
+    list: Trading212Trade[];
   };
   capital: {
     accountSizeRequired: number | null;
@@ -192,9 +203,9 @@ type BuildSelectedAnalyticsParams = {
   simulationRunsSummary: SimulationRunLike[];
   simResult:
     | {
-        accountHistory: CfdAccountSnapshot[];
+        accountHistory: Trading212AccountSnapshot[];
         initialEquity: number;
-        trades: CfdTrade[];
+        trades: Trading212Trade[];
       }
     | null
     | undefined;
@@ -203,6 +214,9 @@ type BuildSelectedAnalyticsParams = {
   visibleWindow?: { start: string; end: string } | null;
   initialEquityFallback: number;
 };
+
+const absOrNull = (v?: number | null) =>
+  v == null || !Number.isFinite(v) ? null : Math.abs(v);
 
 const normalizeDate = (value: string | null | undefined): string | null => {
   if (!value) return null;
@@ -355,6 +369,10 @@ export function buildSelectedStrategyAnalytics({
   const initialEquity = Number.isFinite(simResult.initialEquity)
     ? simResult.initialEquity
     : initialEquityFallback;
+  const grossLossAbs = absOrNull(runSummary?.grossLoss);
+  const grossLossLongAbs = absOrNull(runSummary?.grossLossLong);
+  const grossLossShortAbs = absOrNull(runSummary?.grossLossShort);
+  const commissionAbs = absOrNull(runSummary?.commissionPaid);
 
   const strategySeries = (() => {
     if (selectedSimByDate && Object.keys(selectedSimByDate).length > 0) {
@@ -411,14 +429,12 @@ export function buildSelectedStrategyAnalytics({
   })();
 
   const pnlSeries = strategySeries.map((p) => ({ date: p.date, strategy: p.pnl }));
-  const buyHoldPnlSeries = buyHoldSeries?.map((p) => ({ date: p.date, buyHold: p.valueAbs }));
-  const combinedPnlSeries =
-    buyHoldPnlSeries && buyHoldPnlSeries.length > 0
-      ? pnlSeries.map((p) => {
-          const buy = buyHoldPnlSeries.find((b) => b.date === p.date)?.buyHold ?? null;
-          return { date: p.date, strategy: p.strategy, buyHold: buy };
-        })
-      : pnlSeries;
+  const buyHoldByDate = new Map((buyHoldSeries ?? []).map((p) => [p.date, p.valueAbs]));
+  const combinedPnlSeries = pnlSeries.map((p) => ({
+    date: p.date,
+    strategy: p.strategy,
+    buyHold: buyHoldByDate.get(p.date) ?? null,
+  }));
 
   const excursions =
     simResult.trades?.map((trade) => ({
@@ -451,8 +467,8 @@ export function buildSelectedStrategyAnalytics({
           ? (wins.length / simResult.trades.length) * 100
           : null,
       profitFactor:
-        runSummary?.grossProfit != null && runSummary?.grossLoss != null && runSummary.grossLoss !== 0
-          ? runSummary.grossProfit / Math.abs(runSummary.grossLoss)
+        grossLossAbs != null && grossLossAbs > 0 && runSummary?.grossProfit != null
+          ? runSummary.grossProfit / grossLossAbs
           : null,
       label: runSummary?.label ?? null,
       asOfDate: lastPoint?.date ?? null,
@@ -460,8 +476,8 @@ export function buildSelectedStrategyAnalytics({
 
   const profitStructure = {
     grossProfit: runSummary?.grossProfit,
-    grossLoss: runSummary?.grossLoss,
-    commission: runSummary?.commissionPaid,
+    grossLoss: grossLossAbs ?? undefined,
+    commission: commissionAbs ?? undefined,
     netProfit:
       runSummary?.netProfit ??
       (lastPoint ? lastPoint.pnl + initialEquity - initialEquity : undefined),
@@ -490,11 +506,12 @@ export function buildSelectedStrategyAnalytics({
     const variance =
       values.reduce((acc, r) => acc + (r - mean) * (r - mean), 0) / values.length;
     const std = variance > 0 ? Math.sqrt(variance) : 0;
-    const downside = values.filter((r) => r < 0);
+    // Downside deviation with full-sample denominator (MAR = 0)
     const downsideVar =
-      downside.length > 0
-        ? downside.reduce((acc, r) => acc + r * r, 0) / downside.length
-        : 0;
+      values.reduce((acc, r) => {
+        const d = Math.min(0, r);  // only downside contributes
+        return acc + d * d;
+      }, 0) / values.length;
     const downsideStd = downsideVar > 0 ? Math.sqrt(downsideVar) : 0;
     const scale = Math.sqrt(252);
     const sharpe = std > 0 ? (mean / std) * scale : null;
@@ -537,7 +554,7 @@ export function buildSelectedStrategyAnalytics({
     Math.min(12, Math.max(6, Math.ceil(Math.sqrt(Math.max(1, trades.length)))))
   );
 
-  const computeDurationBars = (t: CfdTrade) => {
+  const computeDurationBars = (t: Trading212Trade) => {
     if (!t.entryDate || !t.exitDate) return null;
     const start = new Date(t.entryDate);
     const end = new Date(t.exitDate);
@@ -553,8 +570,8 @@ export function buildSelectedStrategyAnalytics({
   })();
 
   const profitFactor =
-    runSummary?.grossLoss != null && runSummary.grossLoss !== 0 && runSummary?.grossProfit != null
-      ? runSummary.grossProfit / Math.abs(runSummary.grossLoss)
+    grossLossAbs != null && grossLossAbs > 0 && runSummary?.grossProfit != null
+      ? runSummary.grossProfit / grossLossAbs
       : null;
 
   const returnBreakdown: SelectedStrategyAnalytics["performance"]["returnBreakdown"] = {
@@ -563,10 +580,9 @@ export function buildSelectedStrategyAnalytics({
       openPnl: runSummary?.openPnl ?? null,
       netPnl: runSummary?.netProfit ?? null,
       grossProfit: runSummary?.grossProfit ?? null,
-      grossLoss: runSummary?.grossLoss ?? null,
+      grossLoss: grossLossAbs,
       profitFactor,
-      commission:
-        runSummary?.commissionPaid != null ? -Math.abs(runSummary.commissionPaid) : null,
+      commission: commissionAbs,
       expectedPayoff: trades.length ? totalPnl / trades.length : null,
     },
     long: {
@@ -574,14 +590,14 @@ export function buildSelectedStrategyAnalytics({
       openPnl: null,
       netPnl: runSummary?.netProfitLong ?? null,
       grossProfit: runSummary?.grossProfitLong ?? null,
-      grossLoss: runSummary?.grossLossLong ?? null,
+      grossLoss: grossLossLongAbs,
       profitFactor:
-        runSummary?.grossLossLong != null &&
-        runSummary.grossLossLong !== 0 &&
+        grossLossLongAbs != null &&
+        grossLossLongAbs > 0 &&
         runSummary?.grossProfitLong != null
-          ? runSummary.grossProfitLong / Math.abs(runSummary.grossLossLong)
+          ? runSummary.grossProfitLong / grossLossLongAbs
           : null,
-      commission: null,
+      commission: commissionAbs,
       expectedPayoff:
         longTrades.length && runSummary?.netProfitLong != null
           ? runSummary.netProfitLong / longTrades.length
@@ -592,14 +608,14 @@ export function buildSelectedStrategyAnalytics({
       openPnl: null,
       netPnl: runSummary?.netProfitShort ?? null,
       grossProfit: runSummary?.grossProfitShort ?? null,
-      grossLoss: runSummary?.grossLossShort ?? null,
+      grossLoss: grossLossShortAbs,
       profitFactor:
-        runSummary?.grossLossShort != null &&
-        runSummary.grossLossShort !== 0 &&
+        grossLossShortAbs != null &&
+        grossLossShortAbs > 0 &&
         runSummary?.grossProfitShort != null
-          ? runSummary.grossProfitShort / Math.abs(runSummary.grossLossShort)
+          ? runSummary.grossProfitShort / grossLossShortAbs
           : null,
-      commission: null,
+      commission: commissionAbs,
       expectedPayoff:
         shortTrades.length && runSummary?.netProfitShort != null
           ? runSummary.netProfitShort / shortTrades.length
@@ -648,6 +664,49 @@ export function buildSelectedStrategyAnalytics({
   const runupDd = computeRunUpDrawdownStats(
     strategySeries.map((p) => ({ date: p.date, equity: p.equity }))
   );
+
+  const intrabarMaxRunUp =
+    trades.length > 0
+      ? trades.reduce((max, t) => {
+          const v = t.runUp;
+          if (v == null || !Number.isFinite(v)) return max;
+          return max == null ? v : Math.max(max, v);
+        }, null as number | null)
+      : null;
+
+  const intrabarMaxDrawdown =
+    trades.length > 0
+      ? trades.reduce((max, t) => {
+          const v = t.drawdown;
+          if (v == null || !Number.isFinite(v)) return max;
+          return max == null ? v : Math.max(max, v);
+        }, null as number | null)
+      : null;
+
+  const runupsDrawdowns = {
+    runUps: {
+      avgDuration: runSummary?.avgRunUpDuration ?? runupDd.runUps.avgDuration ?? null,
+      maxDuration: runSummary?.maxRunUpDuration ?? runupDd.runUps.maxDuration ?? null,
+      avgValue: runSummary?.avgRunUpValue ?? runupDd.runUps.avgValue ?? null,
+      maxValue: runSummary?.maxRunUpValue ?? runupDd.runUps.maxValue ?? null,
+    },
+    drawdowns: {
+      avgDuration: runSummary?.avgDrawdownDuration ?? runupDd.drawdowns.avgDuration ?? null,
+      maxDuration: runSummary?.maxDrawdownDuration ?? runupDd.drawdowns.maxDuration ?? null,
+      avgValue: runSummary?.avgDrawdownValue ?? runupDd.drawdowns.avgValue ?? null,
+      maxValue: runSummary?.maxDrawdownValue ?? runupDd.drawdowns.maxValue ?? null,
+      avgPct: runSummary?.avgDrawdownPct ?? runupDd.drawdowns.avgPct ?? null,
+      maxPct: runSummary?.maxDrawdownPct ?? runupDd.drawdowns.maxPct ?? null,
+    },
+    intrabar: {
+      maxRunUp: intrabarMaxRunUp,
+      maxDrawdown: intrabarMaxDrawdown,
+    },
+    maxEquityDrawdownReturn:
+      runSummary?.maxDrawdownValue != null && initialEquity
+        ? runSummary.maxDrawdownValue / initialEquity
+        : runupDd.drawdowns.maxPct ?? null,
+  };
 
   const bandStats = (
     values: Array<{ value: number; date?: string }> | null | undefined
@@ -742,18 +801,7 @@ export function buildSelectedStrategyAnalytics({
       list: trades,
     },
     capital,
-    runupsDrawdowns: {
-      runUps: runupDd.runUps,
-      drawdowns: runupDd.drawdowns,
-      intrabar: {
-        maxRunUp: null,
-        maxDrawdown: null,
-      },
-      maxEquityDrawdownReturn:
-        runSummary?.maxDrawdownValue != null && initialEquity
-          ? runSummary.maxDrawdownValue / initialEquity
-          : runupDd.drawdowns.maxPct ?? null,
-    },
+    runupsDrawdowns,
     dailyReturns,
     perf: {
       profitStructure,
