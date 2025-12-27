@@ -193,7 +193,7 @@ export type SelectedStrategyAnalytics = {
     };
     maxEquityDrawdownReturn: number | null;
   };
-  dailyReturns?: Array<{ date: string; return: number }>;
+  dailyReturns?: Array<{ date: string; ret: number }>;
   perf?: SelectedStrategyAnalytics["performance"];
 };
 
@@ -487,36 +487,44 @@ export function buildSelectedStrategyAnalytics({
     const series = strategySeries
       .filter((p) => p.equity != null && Number.isFinite(p.equity))
       .sort((a, b) => a.date.localeCompare(b.date));
-    const returns: Array<{ date: string; return: number }> = [];
+    const returns: Array<{ date: string; ret: number }> = [];
     for (let i = 1; i < series.length; i++) {
       const prev = series[i - 1].equity;
       const curr = series[i].equity;
       if (prev > 0 && curr > 0) {
-        returns.push({ date: series[i].date, return: curr / prev - 1 });
+        returns.push({ date: series[i].date, ret: curr / prev - 1 });
       }
     }
     return returns;
   })();
 
   const riskAdjusted = (() => {
-    if (!dailyReturns.length) return { sharpe: null, sortino: null };
-    const values = dailyReturns.map((d) => d.return);
-    const mean =
-      values.reduce((a, b) => a + b, 0) / values.length;
-    const variance =
-      values.reduce((acc, r) => acc + (r - mean) * (r - mean), 0) / values.length;
-    const std = variance > 0 ? Math.sqrt(variance) : 0;
-    // Downside deviation with full-sample denominator (MAR = 0)
-    const downsideVar =
-      values.reduce((acc, r) => {
-        const d = Math.min(0, r);  // only downside contributes
-        return acc + d * d;
-      }, 0) / values.length;
-    const downsideStd = downsideVar > 0 ? Math.sqrt(downsideVar) : 0;
+    if (!dailyReturns || dailyReturns.length < 2) return { sharpe: null, sortino: null };
+
+    const values = dailyReturns.map((d) => d.ret).filter((v) => Number.isFinite(v));
+    if (values.length < 2) return { sharpe: null, sortino: null };
+
+    const rfrDaily = 0;
+    const target = 0;
+
+    const excess = values.map((r) => r - rfrDaily);
+    const mean = excess.reduce((a, b) => a + b, 0) / excess.length;
+
+    const varAll = excess.reduce((a, r) => a + (r - mean) * (r - mean), 0) / excess.length;
+    const std = Math.sqrt(varAll);
+
+    const ddVar =
+      excess.reduce((a, r) => {
+        const d = Math.min(0, r - target);
+        return a + d * d;
+      }, 0) / excess.length;
+    const dd = Math.sqrt(ddVar);
+
     const scale = Math.sqrt(252);
-    const sharpe = std > 0 ? (mean / std) * scale : null;
-    const sortino = downsideStd > 0 ? (mean / downsideStd) * scale : null;
-    return { sharpe, sortino };
+    return {
+      sharpe: std > 0 ? (mean / std) * scale : null,
+      sortino: dd > 0 ? (mean / dd) * scale : null,
+    };
   })();
 
   const returns = {

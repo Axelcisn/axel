@@ -89,10 +89,10 @@ export default function TrendSection({
   
   // ADX state
   const [adxPeriod, setAdxPeriod] = useState<number>(14);
-  // Collapsible controls for cards (only extra info collapses)
-  const [ewmaOpen, setEwmaOpen] = useState<boolean>(true);
-  const [momentumOpen, setMomentumOpen] = useState<boolean>(true);
-  const [adxOpen, setAdxOpen] = useState<boolean>(true);
+  // Collapsible controls for cards (only extra info collapses) - default closed
+  const [ewmaOpen, setEwmaOpen] = useState<boolean>(false);
+  const [momentumOpen, setMomentumOpen] = useState<boolean>(false);
+  const [adxOpen, setAdxOpen] = useState<boolean>(false);
   
   // Use trend indicators hooks
   const {
@@ -216,11 +216,11 @@ export default function TrendSection({
           )}
 
           {/* Three Column Trend Cards */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             
             {/* EWMA Trend Card */}
-            <div className="rounded-2xl border border-slate-800 bg-transparent p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="rounded-2xl border border-slate-800 bg-transparent p-4">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-semibold text-white">EWMA Trend</h4>
                   <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-400 cursor-help">
@@ -263,12 +263,12 @@ export default function TrendSection({
               </div>
 
               {/* EWMA Presets */}
-              <div className="flex flex-wrap gap-2 mb-3">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {(['short', 'medium', 'long'] as const).map((preset) => (
                   <button
                     key={preset}
                     onClick={() => handleEwmaPresetChange(preset)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                       ewmaPreset === preset
                         ? 'bg-violet-500/20 text-violet-300 border border-violet-500/50'
                         : 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-slate-200'
@@ -279,48 +279,10 @@ export default function TrendSection({
                 ))}
               </div>
 
-              {/* Short/Long selectors (always visible) */}
-              <div className="flex items-center gap-4 mb-4 text-xs">
-                <label className="flex items-center gap-2 text-slate-400">
-                  <span className="text-xs">Short</span>
-                  <select
-                    value={shortWindow}
-                    onChange={(e) => {
-                      const next = Number(e.target.value) || shortWindow;
-                      setShortWindow(next);
-                      setEwmaPreset('custom');
-                      onEwmaWindowChange?.(next, longWindow, 'custom');
-                    }}
-                    className="ml-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-slate-100 text-xs"
-                  >
-                    {[5, 10, 14, 20, 30, 50].map((v) => (
-                      <option key={v} value={v}>{v}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="flex items-center gap-2 text-slate-400">
-                  <span className="text-xs">Long</span>
-                  <select
-                    value={longWindow}
-                    onChange={(e) => {
-                      const next = Number(e.target.value) || longWindow;
-                      setLongWindow(next);
-                      setEwmaPreset('custom');
-                      onEwmaWindowChange?.(shortWindow, next, 'custom');
-                    }}
-                    className="ml-1 rounded-md border border-slate-700 bg-slate-900 px-2 py-1 text-slate-100 text-xs"
-                  >
-                    {[20, 30, 50, 100, 200].map((v) => (
-                      <option key={v} value={v}>{v}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
               {/* EWMA Metrics (collapsible) */}
               {ewmaOpen && (
-                <div className="space-y-3">
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2 text-xs">
+                <div className="space-y-2">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
                     <div className="contents">
                       <dt className="text-slate-400">Latest Price</dt>
                       <dd className="font-mono text-slate-100">
@@ -360,7 +322,7 @@ export default function TrendSection({
                   </div>
 
                   <div className="pt-2 border-t border-slate-700/50">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1 text-xs">
                       <dt className="text-slate-400">Last crossover</dt>
                       <dd className="font-mono text-slate-100">
                         {ewmaCrossover.lastEvent?.date || '—'}
@@ -378,8 +340,8 @@ export default function TrendSection({
             </div>
 
             {/* Price Momentum Card */}
-            <div className="rounded-2xl border border-slate-800 bg-transparent p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="rounded-2xl border border-slate-800 bg-transparent p-4">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-semibold text-white">Price Momentum</h4>
                   <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-400 cursor-help">
@@ -416,12 +378,12 @@ export default function TrendSection({
               </div>
 
               {/* Period Selection */}
-              <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {[5, 10, 14, 30].map((period) => (
                   <button
                     key={period}
                     onClick={() => onMomentumPeriodChange?.(period)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                       (momentumPeriodOverride || 10) === period
                         ? 'bg-violet-500/20 text-violet-300 border border-violet-500/50'
                         : 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-slate-200'
@@ -434,8 +396,8 @@ export default function TrendSection({
 
               {momentum ? (
                 momentumOpen ? (
-                  <div className="space-y-3">
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2 text-xs">
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
                     <div className="contents">
                       <dt className="text-slate-400">Momentum ({momentum.period}D)</dt>
                       <dd className={`font-mono ${
@@ -480,9 +442,9 @@ export default function TrendSection({
                     </div>
                   </div>
 
-                  <div className="pt-2 border-t border-slate-700/50">
-                    <h5 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">SIGNALS</h5>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
+                    <div className="pt-2 border-t border-slate-700/50">
+                      <h5 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">SIGNALS</h5>
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1 text-xs">
                       <dt className="text-slate-400">Zero-cross</dt>
                       <dd className="font-mono text-slate-100">
                         {momentum.lastZeroCross ? 
@@ -525,8 +487,8 @@ export default function TrendSection({
             </div>
 
             {/* ADX Trend Strength Card */}
-            <div className="rounded-2xl border border-slate-800 bg-transparent p-6">
-              <div className="flex items-center justify-between mb-4">
+            <div className="rounded-2xl border border-slate-800 bg-transparent p-4">
+              <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-semibold text-white">Trend Strength (ADX)</h4>
                   <span className="relative group flex h-4 w-4 items-center justify-center rounded-full border border-slate-600 text-[10px] text-slate-400 cursor-help">
@@ -566,12 +528,12 @@ export default function TrendSection({
               </div>
 
               {/* ADX Period Selection */}
-              <div className="flex flex-wrap gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-2">
                 {[7, 14, 21, 28].map((period) => (
                   <button
                     key={period}
                     onClick={() => setAdxPeriod(period)}
-                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                    className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
                       adxPeriod === period
                         ? 'bg-violet-500/20 text-violet-300 border border-violet-500/50'
                         : 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-slate-500 hover:text-slate-200'
@@ -584,8 +546,8 @@ export default function TrendSection({
 
               {adx ? (
                 adxOpen ? (
-                  <div className="space-y-3">
-                  <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-2 text-xs">
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
                     <div className="contents">
                       <dt className="text-slate-400">ADX ({adx.period}D)</dt>
                       <dd className="font-mono text-slate-100">{adx.latest?.adx?.toFixed(1) || '—'}</dd>
@@ -621,8 +583,8 @@ export default function TrendSection({
                   </div>
 
                   <div className="pt-2 border-t border-slate-700/50">
-                    <h5 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">SIGNALS</h5>
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1.5 text-xs">
+                    <h5 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">SIGNALS</h5>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-y-1 text-xs">
                       <dt className="text-slate-400">Environment</dt>
                       <dd className="font-mono text-slate-100">
                         {adx.latest?.adx ? (adx.latest.adx >= 25 ? 'Trending' : 'Range-bound') : '—'}
@@ -662,15 +624,6 @@ export default function TrendSection({
             </div>
 
           </div>
-
-          {/* Empty state */}
-          {!isLoadingAny && !combinedError && (!ewmaPath || ewmaPath.length === 0) && (
-            <div className={`text-center py-8 rounded-xl border ${
-              isDarkMode ? 'bg-transparent text-slate-500 border-slate-800/50' : 'bg-transparent text-gray-500 border-gray-200'
-            }`}>
-              No EWMA data available for trend analysis
-            </div>
-          )}
         </div>
       )}
 

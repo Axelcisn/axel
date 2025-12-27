@@ -2307,17 +2307,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return [-(absMax + pad), absMax + pad];
   }, [simulationEquityData]);
 
-  // Risk/return metrics from equity series
+  // Risk/return metrics from equity series (prefer analytics output)
   const riskMetrics = useMemo(() => {
+    if (selectedAnalytics?.performance.riskAdjusted) {
+      return {
+        sharpeRatio: selectedAnalytics.performance.riskAdjusted.sharpe ?? null,
+        sortinoRatio: selectedAnalytics.performance.riskAdjusted.sortino ?? null,
+      };
+    }
+
     const series = equityPanelData
       .filter((p) => p.equity != null && Number.isFinite(p.equity))
       .map((p) => p.equity as number);
-    
     if (series.length < 2) {
-      return {
-        sharpeRatio: null,
-        sortinoRatio: null,
-      };
+      return { sharpeRatio: null, sortinoRatio: null };
     }
 
     const returns: number[] = [];
@@ -2326,33 +2329,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         returns.push(series[i] / series[i - 1] - 1);
       }
     }
+    if (!returns.length) return { sharpeRatio: null, sortinoRatio: null };
 
-    if (returns.length === 0) {
-      return {
-        sharpeRatio: null,
-        sortinoRatio: null,
-      };
-    }
+    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((a, r) => a + (r - mean) * (r - mean), 0) / returns.length;
+    const std = Math.sqrt(variance);
 
-    const meanReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((a, r) => a + Math.pow(r - meanReturn, 2), 0) / returns.length;
-    const stdReturn = Math.sqrt(variance);
+    const downsideVar =
+      returns.reduce((a, r) => {
+        const d = Math.min(0, r);
+        return a + d * d;
+      }, 0) / returns.length;
+    const downsideStd = Math.sqrt(downsideVar);
 
-    const negativeReturns = returns.filter((r) => r < 0);
-    const downsideVariance =
-      negativeReturns.length > 0
-        ? negativeReturns.reduce((a, r) => a + Math.pow(r, 2), 0) / negativeReturns.length
-        : 0;
-    const downsideDeviation = Math.sqrt(downsideVariance);
-
-    const sharpeRatio = stdReturn > 0 ? (meanReturn / stdReturn) * Math.sqrt(252) : null;
-    const sortinoRatio = downsideDeviation > 0 ? (meanReturn / downsideDeviation) * Math.sqrt(252) : null;
-
+    const scale = Math.sqrt(252);
     return {
-      sharpeRatio,
-      sortinoRatio,
+      sharpeRatio: std > 0 ? (mean / std) * scale : null,
+      sortinoRatio: downsideStd > 0 ? (mean / downsideStd) * scale : null,
     };
-  }, [equityPanelData]);
+  }, [equityPanelData, selectedAnalytics]);
 
   // Fast lookup helpers for equity series (filtered by date range)
   const equityLookup = useMemo(() => {
