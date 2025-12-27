@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useCapitalLiveQuote } from "@/lib/hooks/useCapitalLiveQuote";
-import { debounce } from "@/lib/utils/debounce";
+import type { CapitalMarketSearchItem } from "@/lib/marketData/capital";
 
 type DiagnoseResponse = {
   baseUrl: string;
@@ -19,6 +19,14 @@ type DiagnoseResponse = {
   };
 };
 
+function debounce<T extends (...args: any[]) => void>(fn: T, delayMs: number) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return (...args: Parameters<T>) => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delayMs);
+  };
+}
+
 export default function CapitalDemoPage() {
   const defaultEpic = useMemo(() => "OIL_CRUDE", []);
   const [epic, setEpic] = useState(defaultEpic);
@@ -30,9 +38,10 @@ export default function CapitalDemoPage() {
   const [sessionTestLoading, setSessionTestLoading] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<CapitalMarketSearchItem[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const searchInflight = useRef<AbortController | null>(null);
 
   const { data, error, loading } = useCapitalLiveQuote(epic, 3000);
 
@@ -94,8 +103,14 @@ export default function CapitalDemoPage() {
         setSearchLoading(true);
         setSearchError(null);
         try {
+          if (searchInflight.current) {
+            searchInflight.current.abort();
+          }
+          const controller = new AbortController();
+          searchInflight.current = controller;
           const res = await fetch(`/api/capital/markets?searchTerm=${encodeURIComponent(term)}`, {
             cache: "no-store",
+            signal: controller.signal,
           });
           const json = await res.json();
           if (!res.ok) {

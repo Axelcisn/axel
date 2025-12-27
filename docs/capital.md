@@ -54,3 +54,15 @@ Visit `/capital-demo`. It shows setup status and, once valid, starts polling a l
 ## Session test
 - `GET /api/capital/session-test` validates identifier/password and key without returning CST/X-SECURITY-TOKEN.
 - The `/capital-demo` page has a “Session test” button once the key is accepted.
+
+**Security:** never paste API keys/passwords into chat or commit them. If a key is leaked, rotate it immediately in Capital.com. Put secrets ONLY in `.env.local` (never in `.env.example`). CLI scripts load `.env.local` automatically.
+
+## Auth troubleshooting
+1) If `capital:doctor` reports **API KEY REJECTED (invalid.api.key)**: regenerate a new key, copy it at creation (only shown once), ensure it is Enabled/Play, update `.env.local`, and restart dev server.
+2) If API key is accepted but session fails: set an alternate API-key custom password in `CAPITAL_PASSWORD_ALT` and rerun `npm run capital:doctor`.
+
+## Auth quick fix (doctor flow)
+- Key rejected: regenerate/copy at creation, enable, update `.env.local`, restart, rerun doctor.
+- Key accepted but session fails: use the API-key custom password; set `CAPITAL_PASSWORD_ALT` to try a second candidate and rerun doctor.
+
+If `/session/encryptionKey` returns `error.invalid.api.key`, the API key itself is wrong/disabled/expired/masked — password is irrelevant until the key is accepted.

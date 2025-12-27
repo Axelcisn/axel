@@ -1,6 +1,9 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import IntervalMiniChart from './IntervalMiniChart';
+import { exponentialMovingAverage } from '@/lib/indicators/utils';
+import { computeSessionVwap } from '@/lib/indicators/vwap';
 
 type TimingRowKind = 'section' | 'group' | 'metric';
 
@@ -14,21 +17,14 @@ type TimingRow = {
   parentId?: string;
 };
 
-type ColumnKey =
-  | 'interval1Value'
-  | 'interval1Gap'
-  | 'interval2Value'
-  | 'interval2Gap'
-  | 'interval3Value'
-  | 'interval3Gap';
+type IntervalKey = 'interval1' | 'interval2' | 'interval3';
 
-type IntervalData = {
-  close: number;
-  ema20: number;
-  ema50: number;
-  ema200: number;
-  vwap: number;
+type IntervalMetric = {
+  value: number | null;
+  gap: number | null;
 };
+
+type MetricRowValues = Partial<Record<IntervalKey, IntervalMetric>>;
 
 type IntervalGroup = 'SECONDS' | 'MINUTES' | 'HOURS' | 'DAYS';
 
@@ -39,8 +35,33 @@ type IntervalOption = {
   group: IntervalGroup;
 };
 
+type Candle = {
+  time?: number | string | Date | null;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  close?: number | null;
+  volume?: number | null;
+};
+
+type IntervalComputation = {
+  candles: Candle[];
+  ema20Series: (number | null)[] | null;
+  ema50Series: (number | null)[] | null;
+  ema200Series: (number | null)[] | null;
+  vwapSeries: (number | null)[] | null;
+  hasVolume: boolean;
+  lastClose: number | null;
+  ema20Value: number | null;
+  ema50Value: number | null;
+  ema200Value: number | null;
+  vwapValue: number | null;
+};
+
 type BiasedMetricsTableProps = {
-  interval1Data?: IntervalData;
+  interval1Candles?: Candle[];
+  interval2Candles?: Candle[];
+  interval3Candles?: Candle[];
   onIntervalsChange?: (value: {
     interval1: IntervalOption;
     interval2: IntervalOption;
@@ -97,15 +118,6 @@ const ROWS: TimingRow[] = [
   { id: 'vwap', label: 'VWAP', level: 2, kind: 'metric', parentId: 'group-vwap' },
 ];
 
-const METRIC_COLUMNS: ColumnKey[] = [
-  'interval1Value',
-  'interval1Gap',
-  'interval2Value',
-  'interval2Gap',
-  'interval3Value',
-  'interval3Gap',
-];
-
 const INDENT_CLASSES: Record<TimingRowLevel, string> = {
   0: '',
   1: 'pl-4',
@@ -124,11 +136,114 @@ const cellClass =
 const cellClassNoR =
   'px-3 py-2 border-b border-slate-800 text-right text-sm text-slate-200 align-middle';
 
-const EMPTY_METRIC_COLS = 7;
+const EMPTY_METRIC_COLS = 4;
 
 type IntervalSelectProps = {
   value: IntervalOption;
   onChange: (option: IntervalOption) => void;
+};
+
+const toNumber = (value: unknown): number | null => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
+
+const normalizeCandles = (candles?: Candle[]): Candle[] =>
+  (candles ?? []).map((c) => ({
+    time: c?.time ?? null,
+    open: toNumber(c?.open),
+    high: toNumber(c?.high),
+    low: toNumber(c?.low),
+    close: toNumber(c?.close),
+    volume: toNumber(c?.volume),
+  }));
+
+const toUtcDateKey = (time: Candle['time']) => {
+  if (time == null) return null;
+  const date = typeof time === 'number'
+    ? new Date((time as number) > 1e12 ? (time as number) : (time as number) * 1000)
+    : new Date(time);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+};
+
+const lastFinite = (series?: (number | null)[] | null): number | null => {
+  if (!series) return null;
+  for (let i = series.length - 1; i >= 0; i -= 1) {
+    const v = series[i];
+    if (v != null && Number.isFinite(v)) return v;
+  }
+  return null;
+};
+
+const computeIntervalData = (candles?: Candle[]): IntervalComputation => {
+  const normalized = normalizeCandles(candles);
+  const usable = normalized
+    .filter((c) => c.time != null && c.close != null && Number.isFinite(c.close))
+    .map((c) => ({
+      time: c.time,
+      open: c.open ?? c.close,
+      high: c.high ?? c.close,
+      low: c.low ?? c.close,
+      close: c.close as number,
+      volume: Number.isFinite(c.volume ?? NaN) ? (c.volume as number) : null,
+    })) as Candle[];
+
+  if (!usable.length) {
+    return {
+      candles: [],
+      ema20Series: null,
+      ema50Series: null,
+      ema200Series: null,
+      vwapSeries: null,
+      hasVolume: false,
+      lastClose: null,
+      ema20Value: null,
+      ema50Value: null,
+      ema200Value: null,
+      vwapValue: null,
+    };
+  }
+
+  const closeSeries = usable.map((c) => c.close as number);
+  const lastClose = closeSeries.length ? closeSeries[closeSeries.length - 1] : null;
+
+  const computeEma = (period: number) => {
+    if (closeSeries.length < period) return null;
+    const ema = exponentialMovingAverage(closeSeries, period);
+    return ema.map((v) => (Number.isFinite(v) ? v : null));
+  };
+
+  const ema20Series = computeEma(20);
+  const ema50Series = computeEma(50);
+  const ema200Series = computeEma(200);
+
+  const hasVolume = usable.some((c) => Number.isFinite(c.volume ?? NaN) && (c.volume as number) > 0);
+  const rawVwap = hasVolume ? computeSessionVwap(usable, (bar) => toUtcDateKey(bar.time)) : null;
+  const vwapSeries =
+    rawVwap?.length && hasVolume
+      ? rawVwap.map((v) => (Number.isFinite(v ?? NaN) ? (v as number) : null))
+      : hasVolume
+        ? []
+        : null;
+
+  return {
+    candles: usable,
+    ema20Series,
+    ema50Series,
+    ema200Series,
+    vwapSeries: vwapSeries ?? null,
+    hasVolume,
+    lastClose,
+    ema20Value: lastFinite(ema20Series),
+    ema50Value: lastFinite(ema50Series),
+    ema200Value: lastFinite(ema200Series),
+    vwapValue: hasVolume ? lastFinite(vwapSeries) : null,
+  };
 };
 
 const IntervalSelect: React.FC<IntervalSelectProps> = ({ value, onChange }) => {
@@ -275,30 +390,16 @@ const IntervalSelect: React.FC<IntervalSelectProps> = ({ value, onChange }) => {
   );
 };
 
-const renderMetricCells = (rowValues?: Partial<Record<ColumnKey, string>>) => {
-  const values = rowValues ?? {};
-  return (
-    <>
-      {METRIC_COLUMNS.map((col) => (
-        <td key={col} className={cellClass}>
-          {values[col] ?? '—'}
-        </td>
-      ))}
-      <td className={cellClass}>
-        <button
-          type="button"
-          disabled
-          className="cursor-not-allowed rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-500"
-        >
-          Calc
-        </button>
-      </td>
-    </>
-  );
-};
+const formatNumber = (n: number | null | undefined) =>
+  Number.isFinite(n ?? NaN) ? (n as number).toFixed(2) : '—';
+
+const formatSigned = (n: number | null | undefined) =>
+  Number.isFinite(n ?? NaN) ? `${(n as number) >= 0 ? '+' : ''}${(n as number).toFixed(2)}` : '—';
 
 export default function BiasedMetricsTable({
-  interval1Data,
+  interval1Candles,
+  interval2Candles,
+  interval3Candles,
   onIntervalsChange,
 }: BiasedMetricsTableProps) {
   const [interval1, setInterval1] = useState<IntervalOption>(() => getOptionById('1m'));
@@ -326,22 +427,101 @@ export default function BiasedMetricsTable({
     emitIntervals(interval1, interval2, opt);
   };
 
+  useEffect(() => {
+    emitIntervals(interval1, interval2, interval3);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const intervalData = useMemo(
+    () => ({
+      interval1: computeIntervalData(interval1Candles),
+      interval2: computeIntervalData(interval2Candles),
+      interval3: computeIntervalData(interval3Candles),
+    }),
+    [interval1Candles, interval2Candles, interval3Candles]
+  );
+
   const metricValues = useMemo(() => {
-    const fmt = (n: number) => (Number.isFinite(n) ? n.toFixed(2) : '—');
-    if (!interval1Data) return {};
-    return {
-      'ema-20': { interval1Value: fmt(interval1Data.ema20) },
-      'ema-50': { interval1Value: fmt(interval1Data.ema50) },
-      'ema-200': { interval1Value: fmt(interval1Data.ema200) },
-      vwap: { interval1Value: fmt(interval1Data.vwap) },
-    } as Record<string, Partial<Record<ColumnKey, string>>>;
-  }, [interval1Data]);
+    const buildCell = (value: number | null, close: number | null): IntervalMetric | undefined => {
+      if (value == null || !Number.isFinite(value)) return undefined;
+      const gap = close != null && Number.isFinite(close) ? close - value : null;
+      return { value, gap };
+    };
+
+    const metrics: Record<string, MetricRowValues> = {};
+    const addMetric = (id: string, selector: (data: IntervalComputation) => number | null) => {
+      const intervals: MetricRowValues = {};
+      (['interval1', 'interval2', 'interval3'] as IntervalKey[]).forEach((key) => {
+        const data = intervalData[key];
+        const cell = buildCell(selector(data), data.lastClose);
+        if (cell) intervals[key] = cell;
+      });
+      if (Object.keys(intervals).length) {
+        metrics[id] = intervals;
+      }
+    };
+
+    addMetric('ema-20', (data) => data.ema20Value);
+    addMetric('ema-50', (data) => data.ema50Value);
+    addMetric('ema-200', (data) => data.ema200Value);
+    addMetric('vwap', (data) => (data.hasVolume ? data.vwapValue : null));
+
+    return metrics;
+  }, [intervalData]);
 
   const headerCellClass =
     'px-3 py-3 border-b border-slate-800 border-r border-slate-800 last:border-r-0 text-center text-xs font-semibold uppercase tracking-wide';
 
-  const subHeaderCellClass =
-    'px-3 py-2 border-b border-slate-800 border-r border-slate-800 last:border-r-0 text-center text-[11px] uppercase tracking-wide text-slate-400';
+  const renderMetricCells = (rowValues?: MetricRowValues) => {
+    const renderCellContent = (metric?: IntervalMetric) => {
+      const hasValue = metric?.value != null && Number.isFinite(metric.value);
+      const hasGap = metric?.gap != null && Number.isFinite(metric.gap);
+      if (!hasValue && !hasGap) {
+        return <span className="text-slate-500">—</span>;
+      }
+      const gapVal = hasGap ? (metric?.gap as number) : null;
+      const gapClass =
+        gapVal == null
+          ? 'text-slate-500'
+          : gapVal >= 0
+            ? 'text-emerald-400'
+            : 'text-rose-400';
+      return (
+        <div className="flex flex-col items-end leading-tight">
+          <span className="font-semibold text-slate-100">{formatNumber(metric?.value)}</span>
+          <span className={`text-xs ${gapClass}`}>Δ {formatSigned(gapVal)}</span>
+        </div>
+      );
+    };
+
+    return (
+      <>
+        {(['interval1', 'interval2', 'interval3'] as IntervalKey[]).map((col) => (
+          <td key={col} className={cellClass}>
+            {renderCellContent(rowValues?.[col])}
+          </td>
+        ))}
+        <td className={cellClass}>
+          <button
+            type="button"
+            disabled
+            className="cursor-not-allowed rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold text-slate-500"
+          >
+            Calc
+          </button>
+        </td>
+      </>
+    );
+  };
+
+  const chartConfigs = useMemo(
+    () => [
+      { key: 'interval1' as const, label: interval1.label, data: intervalData.interval1 },
+      { key: 'interval2' as const, label: interval2.label, data: intervalData.interval2 },
+      { key: 'interval3' as const, label: interval3.label, data: intervalData.interval3 },
+    ],
+    [interval1.label, interval2.label, interval3.label, intervalData]
+  );
 
   return (
     <div className="overflow-hidden rounded-xl border border-slate-800">
@@ -350,34 +530,20 @@ export default function BiasedMetricsTable({
           <thead className="sticky top-0 bg-transparent">
             <tr className="text-slate-300">
               <th
-                rowSpan={2}
                 className={`text-left ${headerCellClass}`}
               >
                 Metrics
               </th>
-              <th colSpan={2} className={headerCellClass}>
+              <th className={headerCellClass}>
                 <IntervalSelect value={interval1} onChange={handleInterval1Change} />
               </th>
-              <th colSpan={2} className={headerCellClass}>
+              <th className={headerCellClass}>
                 <IntervalSelect value={interval2} onChange={handleInterval2Change} />
               </th>
-              <th colSpan={2} className={headerCellClass}>
+              <th className={headerCellClass}>
                 <IntervalSelect value={interval3} onChange={handleInterval3Change} />
               </th>
-              <th
-                rowSpan={2}
-                className={headerCellClass}
-              >
-                Action
-              </th>
-            </tr>
-            <tr>
-              <th className={subHeaderCellClass}>Value</th>
-              <th className={subHeaderCellClass}>Gap</th>
-              <th className={subHeaderCellClass}>Value</th>
-              <th className={subHeaderCellClass}>Gap</th>
-              <th className={subHeaderCellClass}>Value</th>
-              <th className={subHeaderCellClass}>Gap</th>
+              <th className={headerCellClass}>Action</th>
             </tr>
           </thead>
           <tbody>
@@ -390,9 +556,9 @@ export default function BiasedMetricsTable({
                 : `${labelBase} border-r border-slate-800 last:border-r-0`;
               const fillerClass = suppressVerticals ? cellClassNoR : cellClass;
 
-              return (
+              const baseRow = (
                 <tr
-                  key={row.id}
+                  key={`${row.id}-row`}
                   className={`${suppressVerticals ? 'bg-black' : ''} ${isMetric ? 'hover:bg-white/0' : ''}`}
                 >
                   <td className={labelClass}>{row.label}</td>
@@ -405,6 +571,43 @@ export default function BiasedMetricsTable({
                   )}
                 </tr>
               );
+
+              if (row.id === 'section-biased') {
+                const chartCellBase =
+                  'border-b border-slate-800 border-r border-slate-800 last:border-r-0 px-1 py-2 align-top';
+                return (
+                  <React.Fragment key={row.id}>
+                    {baseRow}
+                    <tr className="bg-slate-950/30" key={`${row.id}-charts`}>
+                      <td className="px-3 py-2 border-b border-slate-800 border-r border-slate-800 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                        Charts
+                      </td>
+                      {chartConfigs.map((cfg, idx) => {
+                        const borderClass = idx === chartConfigs.length - 1 ? 'border-r border-slate-800' : '';
+                        return (
+                          <td key={cfg.key} className={`${chartCellBase} ${borderClass}`}>
+                            <IntervalMiniChart
+                              title={cfg.label}
+                              candles={cfg.data.candles}
+                              ema20={cfg.data.ema20Series}
+                              ema50={cfg.data.ema50Series}
+                              ema200={cfg.data.ema200Series}
+                              vwap={cfg.data.vwapSeries}
+                              vwapAvailable={
+                                cfg.data.hasVolume && (cfg.data.vwapSeries?.some((v) => v != null) ?? false)
+                              }
+                              height={150}
+                            />
+                          </td>
+                        );
+                      })}
+                      <td className={cellClass}></td>
+                    </tr>
+                  </React.Fragment>
+                );
+              }
+
+              return baseRow;
             })}
           </tbody>
         </table>

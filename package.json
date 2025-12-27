@@ -11,17 +11,21 @@
     "test:ewma-reaction": "tsx ./test-ewma-reaction.ts",
     "test:ewma-tilt": "tsx ./test-ewma-tilt.ts",
     "smoke:test": "bash scripts/smoke-test.sh",
+    "smoke:timing": "tsx scripts/smoke-timing-ema.ts",
     "test": "jest",
-    "capital:check": "tsx scripts/capitalKeyCheck.ts"
+    "capital:check": "tsx scripts/capitalKeyCheck.ts",
+    "capital:doctor": "tsx scripts/capitalDoctor.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",
+    "lightweight-charts": "^5.1.0",
     "lucide-react": "^0.562.0",
     "next": "14.2.33",
     "react": "^18",
     "react-dom": "^18",
     "recharts": "^3.4.1",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

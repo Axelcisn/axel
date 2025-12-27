@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { MarketSessionBadge } from '@/components/MarketSessionBadge';
 import BiasedMetricsTable from '@/components/timing/BiasedMetricsTable';
 import { useLiveQuote } from '@/lib/hooks/useLiveQuote';
+import { useYahooCandles, type YahooCandle } from '@/lib/hooks/useYahooCandles';
 import { CompanyInfo } from '@/lib/types/company';
 
 type TimingPageProps = {
@@ -56,6 +57,69 @@ export default function TimingPage({ params }: TimingPageProps) {
   }, [headerTimestamp]);
 
   const tickerDisplay = symbol.toUpperCase();
+
+  const [intervalIds, setIntervalIds] = useState({
+    interval1: '1m',
+    interval2: '15m',
+    interval3: '1h',
+  });
+
+  const rangeDays = 30;
+  const yahooInterval = (id: string) => {
+    if (id === '1h') return '60m';
+    return id;
+  };
+
+  const { candles: candles1, error: candles1Error } = useYahooCandles(
+    symbol,
+    yahooInterval(intervalIds.interval1),
+    rangeDays
+  );
+  const { candles: candles2, error: candles2Error } = useYahooCandles(
+    symbol,
+    yahooInterval(intervalIds.interval2),
+    rangeDays
+  );
+  const { candles: candles3, error: candles3Error } = useYahooCandles(
+    symbol,
+    yahooInterval(intervalIds.interval3),
+    rangeDays
+  );
+
+  const mapCandles = (candles: YahooCandle[] | null) =>
+    candles?.map((c) => ({
+      time: c.t,
+      open: c.o,
+      high: c.h,
+      low: c.l,
+      close: c.c,
+      volume: c.v,
+    })) ?? undefined;
+
+  const devDebug = useMemo(() => {
+    if (process.env.NODE_ENV !== 'development') return null;
+    const summarize = (cs: YahooCandle[] | null | undefined) => {
+      if (!cs || cs.length === 0) return { len: 0, first: null, last: null };
+      return { len: cs.length, first: cs[0]?.t ?? null, last: cs[cs.length - 1]?.t ?? null };
+    };
+    return {
+      i1: summarize(candles1),
+      i2: summarize(candles2),
+      i3: summarize(candles3),
+    };
+  }, [candles1, candles2, candles3]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== 'development') return;
+    if ((candles1 && candles1.length === 0) || (candles2 && candles2.length === 0) || (candles3 && candles3.length === 0)) {
+      // eslint-disable-next-line no-console
+      console.warn('Empty candles', {
+        symbol,
+        intervalIds,
+        errors: { candles1Error, candles2Error, candles3Error },
+      });
+    }
+  }, [candles1, candles2, candles3, candles1Error, candles2Error, candles3Error, symbol, intervalIds]);
 
   return (
     <div className="bg-background text-foreground">
@@ -116,7 +180,35 @@ export default function TimingPage({ params }: TimingPageProps) {
         </div>
       </div>
       <div className="mx-auto mt-4 w-full max-w-[1400px] px-6 pb-12 md:px-10">
-        <BiasedMetricsTable />
+        {process.env.NODE_ENV === 'development' && devDebug && (
+          <div className="mb-3 rounded-lg border border-slate-800/80 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+            <div className="space-x-3">
+              <span>
+                {intervalIds.interval1}: {devDebug.i1.len} candles (first: {devDebug.i1.first ?? '—'} last: {devDebug.i1.last ?? '—'})
+              </span>
+              <span className="text-slate-500">|</span>
+              <span>
+                {intervalIds.interval2}: {devDebug.i2.len} candles (first: {devDebug.i2.first ?? '—'} last: {devDebug.i2.last ?? '—'})
+              </span>
+              <span className="text-slate-500">|</span>
+              <span>
+                {intervalIds.interval3}: {devDebug.i3.len} candles (first: {devDebug.i3.first ?? '—'} last: {devDebug.i3.last ?? '—'})
+              </span>
+            </div>
+          </div>
+        )}
+        <BiasedMetricsTable
+          interval1Candles={mapCandles(candles1)}
+          interval2Candles={mapCandles(candles2)}
+          interval3Candles={mapCandles(candles3)}
+          onIntervalsChange={(value) => {
+            setIntervalIds({
+              interval1: value.interval1.id,
+              interval2: value.interval2.id,
+              interval3: value.interval3.id,
+            });
+          }}
+        />
       </div>
     </div>
   );

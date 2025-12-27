@@ -1,3 +1,4 @@
+import "./_loadEnv";
 import { setTimeout as delay } from "timers/promises";
 
 const DEMO = "https://demo-api-capital.backend-capital.com";

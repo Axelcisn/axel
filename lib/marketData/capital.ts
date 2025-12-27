@@ -17,7 +17,7 @@ export type CapitalQuote = {
   source: "capital";
 };
 
-export type CapitalMarketSummary = {
+export type CapitalMarketSearchItem = {
   epic: string;
   instrumentName: string;
   instrumentType: string;
@@ -206,7 +206,7 @@ export async function getCapitalQuote(epic: string): Promise<CapitalQuote> {
 export async function searchCapitalMarkets(
   searchTerm: string,
   limit = 20
-): Promise<CapitalMarketSummary[]> {
+): Promise<CapitalMarketSearchItem[]> {
   const trimmed = searchTerm.trim();
   if (!trimmed) return [];
 
