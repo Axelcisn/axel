@@ -7237,25 +7237,6 @@ useEffect(() => {
 
             {/* Right Column: Optimization Results */}
             <div className="space-y-4">
-              <div className={`rounded-xl p-4 border ${
-                isDarkMode 
-                  ? 'bg-transparent border-slate-700/50' 
-                  : 'bg-transparent border-gray-200'
-              }`}>
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className={`text-sm font-medium ${
-                    isDarkMode ? 'text-slate-300' : 'text-gray-700'
-                  }`}>REMOVED - Optimization Result</h4>
-                </div>
-                
-                <div className={`p-4 rounded-md ${
-                  isDarkMode 
-                    ? 'bg-gray-700 text-gray-300' 
-                    : 'bg-gray-100 text-gray-600'
-                }`}>
-                  <p className="text-sm">This section has been removed.</p>
-                </div>
-              </div>
             </div>
           </div>
         ) : !isLoadingReaction && !reactionError && (
@@ -7268,28 +7249,6 @@ useEffect(() => {
           </div>
         )}
       </div>
-
-      {/* Unified Forecast Bands Card - Full Width */}
-      <div className="mb-8">
-        <div className={`p-6 border rounded-lg shadow-sm ${
-          isDarkMode 
-            ? 'bg-gray-800 border-gray-600' 
-            : 'bg-white border-gray-200'
-        }`} data-testid="card-forecast-bands">
-          <h3 className={`text-xl font-semibold mb-4 ${
-            isDarkMode ? 'text-white' : 'text-gray-900'
-          }`}>REMOVED - Forecast Bands</h3>
-          
-          <div className={`p-4 rounded-md ${
-            isDarkMode 
-              ? 'bg-gray-700 text-gray-300' 
-              : 'bg-gray-100 text-gray-600'
-          }`}>
-            <p className="text-sm">This section has been removed.</p>
-          </div>
-          </div>
-        </div>
-
       {/* Data Preview Panel (A-2) */}
       {previewData && (
         <div className="mb-8 p-6 border rounded-lg bg-white shadow-sm">
