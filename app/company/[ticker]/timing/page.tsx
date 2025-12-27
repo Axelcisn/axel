@@ -6997,59 +6997,7 @@ useEffect(() => {
                   }`}
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-400">Volatility model</label>
-                <select
-                  value={volModel}
-                  onChange={(e) => handleModelChange(e.target.value as 'GBM' | 'GARCH' | 'HAR-RV' | 'Range')}
-                  className={`w-full rounded-md border px-2 py-1.5 text-sm ${
-                    isDarkMode
-                      ? "bg-slate-900 border-slate-700 text-slate-100"
-                      : "bg-white border-slate-200 text-slate-800"
-                  }`}
-                >
-                  <option value="GBM">GBM</option>
-                  <option value="GARCH">GARCH</option>
-                  <option value="HAR-RV">HAR-RV</option>
-                  <option value="Range">Range</option>
-                </select>
-              </div>
-              {volModel === 'GARCH' && (
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400">GARCH estimator</label>
-                  <select
-                    value={garchEstimator}
-                    onChange={(e) => handleGarchEstimatorChange(e.target.value as 'Normal' | 'Student-t')}
-                    className={`w-full rounded-md border px-2 py-1.5 text-sm ${
-                      isDarkMode
-                        ? "bg-slate-900 border-slate-700 text-slate-100"
-                        : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="Normal">Normal</option>
-                    <option value="Student-t">Student-t</option>
-                  </select>
-                </div>
-              )}
-              {volModel === 'Range' && (
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400">Range estimator</label>
-                  <select
-                    value={rangeEstimator}
-                    onChange={(e) => handleEstimatorChange(e.target.value as 'P' | 'GK' | 'RS' | 'YZ')}
-                    className={`w-full rounded-md border px-2 py-1.5 text-sm ${
-                      isDarkMode
-                        ? "bg-slate-900 border-slate-700 text-slate-100"
-                        : "bg-white border-slate-200 text-slate-800"
-                    }`}
-                  >
-                    <option value="P">Parkinson</option>
-                    <option value="GK">Garman-Klass</option>
-                    <option value="RS">Rogers-Satchell</option>
-                    <option value="YZ">Yang-Zhang</option>
-                  </select>
-                </div>
-              )}
+
               <div className="space-y-1.5">
                 <label className="text-xs text-slate-400">Initial equity ($)</label>
                 <input
@@ -7148,25 +7096,6 @@ useEffect(() => {
             onHorizonChange: handleHorizonChange,
             onCoverageChange: handleCoverageChange,
             isLoading: forecastStatus === "loading",
-            volModel,
-            onModelChange: handleModelChange,
-            garchEstimator,
-            onGarchEstimatorChange: handleGarchEstimatorChange,
-            rangeEstimator,
-            onRangeEstimatorChange: handleEstimatorChange,
-            recommendedModel: recommendedModel ? parseMethodToUIState(recommendedModel) : null,
-            windowSize: volModel === 'GBM' ? gbmWindow : volWindow,
-            onWindowSizeChange: (n) => {
-              if (volModel === 'GBM') {
-                setGbmWindow(n);
-              } else {
-                setVolWindow(n);
-              }
-            },
-            degreesOfFreedom: garchDf,
-            onDegreesOfFreedomChange: setGarchDf,
-            gbmLambda,
-            onGbmLambdaChange: setGbmLambda,
           }}
           tradeOverlays={cfdTradeOverlays}
           cfdAccountHistory={cfdAccountHistory}
@@ -7211,57 +7140,11 @@ useEffect(() => {
         />
       </div>
       
-      {/* GBM Forecast Inspector */}
-      <div className="mb-8">
-        <GbmForecastInspector
-          symbol={tickerParam}
-          volModel={volModel}
-          horizon={h}
-          coverage={coverage}
-          activeForecast={activeForecast}
-          baseForecast={baseForecast}
-          conformalState={conformalState}
-          forecastStatus={forecastStatus}
-          forecastError={forecastError}
-        />
-      </div>
-
       {modelAvailabilityMessage && (
         <div className={`mb-4 text-sm ${isDarkMode ? 'text-amber-200' : 'text-amber-700'}`}>
           {modelAvailabilityMessage}
         </div>
       )}
-
-      {/* GARCH Forecast Inspector */}
-      <div className="mb-8">
-        <GarchForecastInspector
-          symbol={tickerParam}
-          volModel={volModel}
-          garchEstimator={garchEstimator}
-          horizon={h}
-          coverage={coverage}
-          activeForecast={activeForecast}
-          baseForecast={baseForecast}
-          conformalState={conformalState}
-          forecastStatus={forecastStatus}
-          forecastError={volatilityError}
-        />
-      </div>
-
-      {/* Range Forecast Inspector */}
-      <div className="mb-8">
-        <RangeForecastInspector
-          symbol={tickerParam}
-          volModel={volModel}
-          horizon={h}
-          coverage={coverage}
-          activeForecast={activeForecast}
-          baseForecast={baseForecast}
-          conformalState={conformalState}
-          forecastStatus={forecastStatus}
-          volatilityError={volatilityError}
-        />
-      </div>
 
 
       {/* EWMA Reaction Map Card */}

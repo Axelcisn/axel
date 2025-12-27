@@ -151,7 +151,9 @@ export default function TrendSection({
       setShortWindow(short);
       setLongWindow(long);
       setEwmaPreset(preset);
-      onEwmaWindowChange?.(short, long, preset);
+      if (onEwmaWindowChange) {
+        onEwmaWindowChange(short, long, preset);
+      }
     },
     [onEwmaWindowChange]
   );
@@ -714,7 +716,9 @@ export default function TrendSection({
                     const next = Number(e.target.value) || shortWindow;
                     setShortWindow(next);
                     setEwmaPreset('custom');
-                    onEwmaWindowChange?.(next, longWindow, 'custom');
+                    if (onEwmaWindowChange) {
+                      onEwmaWindowChange(next, longWindow, 'custom');
+                    }
                   }}
                   className="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-slate-100 focus:outline-none focus:border-slate-500"
                 >
@@ -736,7 +740,9 @@ export default function TrendSection({
                     const next = Number(e.target.value) || longWindow;
                     setLongWindow(next);
                     setEwmaPreset('custom');
-                    onEwmaWindowChange?.(shortWindow, next, 'custom');
+                    if (onEwmaWindowChange) {
+                      onEwmaWindowChange(shortWindow, next, 'custom');
+                    }
                   }}
                   className="w-full rounded-md border border-slate-600 bg-slate-800 px-3 py-2 text-slate-100 focus:outline-none focus:border-slate-500"
                 >
