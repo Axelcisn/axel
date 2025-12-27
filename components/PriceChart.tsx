@@ -34,6 +34,7 @@ import { applyActivityMaskToEquitySeries, computeTradeActivityWindow } from "@/l
 import type { MomentumScorePoint } from "@/lib/indicators/momentum";
 import type { AdxPoint } from "@/lib/indicators/adx";
 import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
+import { computeSessionVwap } from "@/lib/indicators/vwap";
 import type { SelectedStrategyAnalytics } from "@/lib/analytics/selectedStrategyAnalytics";
 import { Settings2, Plus, Minus } from "lucide-react";
 
@@ -106,6 +107,7 @@ interface ChartPoint {
   low?: number;
   close?: number;
   volume?: number;
+  sessionVwap?: number | null;
   volumeColor?: string;
   volumeStroke?: string;
   isFuture?: boolean;
@@ -153,6 +155,7 @@ export interface TrendEwmaSignal {
 
 const TREND_EWMA_SHORT_COLOR = "#facc15"; // amber/yellow
 const TREND_EWMA_LONG_COLOR = "#3b82f6";  // blue
+const SESSION_VWAP_COLOR = "#a855f7";     // purple
 
 type TvCardProps = {
   title: string;
@@ -223,14 +226,10 @@ const normalizeDateString = (value: string): string => {
 
 interface ForecastOverlayProps {
   activeForecast?: any | null;
-  volModel?: string;
   coverage?: number;
   conformalState?: any | null;
 }
 
-type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
-type GarchEstimator = 'Normal' | 'Student-t';
-type RangeEstimator = 'P' | 'GK' | 'RS' | 'YZ';
 export type DateRangePreset =
   | "chart"
   | "1d"
@@ -256,36 +255,12 @@ export type SimCompareRangePreset =
   | "all"
   | "custom";
 
-interface RecommendedModelInfo {
-  volModel: VolModel;
-  garchEstimator?: GarchEstimator;
-  rangeEstimator?: RangeEstimator;
-}
-
 interface HorizonCoverageProps {
   h: number;
   coverage: number;
   onHorizonChange: (days: number) => void;
   onCoverageChange: (cov: number) => void;
   isLoading?: boolean;
-  volModel?: VolModel;
-  onModelChange?: (model: VolModel) => void;
-  // GARCH options
-  garchEstimator?: GarchEstimator;
-  onGarchEstimatorChange?: (est: GarchEstimator) => void;
-  // Range options
-  rangeEstimator?: RangeEstimator;
-  onRangeEstimatorChange?: (est: RangeEstimator) => void;
-  // Recommended model (for green highlight + star)
-  recommendedModel?: RecommendedModelInfo | null;
-  // Model parameters
-  windowSize?: number;
-  onWindowSizeChange?: (size: number) => void;
-  degreesOfFreedom?: number;
-  onDegreesOfFreedomChange?: (df: number) => void;
-  // GBM parameters
-  gbmLambda?: number;
-  onGbmLambdaChange?: (lambda: number) => void;
 }
 
 /** Trade information from Cfd simulation */
@@ -609,6 +584,9 @@ interface PriceChartProps {
     source: "chart" | "pill" | "dropdown"
   ) => void;
   onOpenSimulationSettings?: () => void;
+  selectedInterval?: string;
+  intervalOptions?: Record<string, string[]>;
+  onIntervalChange?: (interval: string) => void;
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
@@ -684,6 +662,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   onChangeSimCompareCustom,
   onVisibleWindowChange,
   onOpenSimulationSettings,
+  selectedInterval,
+  intervalOptions,
+  onIntervalChange,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
@@ -1639,6 +1620,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return map;
   }, [rangeData]);
 
+  // Session-based VWAP (HLC3) keyed by normalized date
+  const sessionVwapSeries = useMemo(() => {
+    if (fullData.length === 0) return [];
+    return computeSessionVwap(fullData, (bar) => normalizeDateString(bar.date));
+  }, [fullData]);
+
+  const sessionVwapMap = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (let i = 0; i < fullData.length; i++) {
+      const date = normalizeDateString(fullData[i]?.date ?? "");
+      if (!date) continue;
+      const vwap = sessionVwapSeries[i];
+      map.set(date, Number.isFinite(vwap) ? (vwap as number) : null);
+    }
+    return map;
+  }, [fullData, sessionVwapSeries]);
+
   // Create chartData aligned to the visible window (no future placeholders)
   const chartData: ChartPoint[] = React.useMemo(() => {
     return syncedDates.map((date) => {
@@ -1659,6 +1657,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         low,
         close,
         volume,
+        sessionVwap: sessionVwapMap.get(date) ?? null,
         trendEwmaShort: trendEwmaShortMap.get(date) ?? null,
         trendEwmaLong: trendEwmaLongMap.get(date) ?? null,
         momentumScore: momentumMap.get(date),
@@ -1674,6 +1673,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     trendEwmaShortMap,
     momentumMap,
     priceByDate,
+    sessionVwapMap,
     syncedDates,
   ]);
 
@@ -1720,6 +1720,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     [chartData]
   );
   const hasTrendEwmaData = chartHasTrendEwmaShort || chartHasTrendEwmaLong;
+  const chartHasSessionVwap = useMemo(
+    () => chartData.some((p) => p.sessionVwap != null && Number.isFinite(p.sessionVwap)),
+    [chartData]
+  );
 
   // Trend overlays are merged directly into chartData; keep alias for downstream code
   const chartDataWithEwma = chartData;
@@ -1826,6 +1830,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       if (p.value != null && Number.isFinite(p.value) && p.value > 0) values.push(p.value);
       if (p.high != null && Number.isFinite(p.high) && p.high > 0) values.push(p.high);
       if (p.low != null && Number.isFinite(p.low) && p.low > 0) values.push(p.low);
+      if (p.sessionVwap != null && Number.isFinite(p.sessionVwap) && p.sessionVwap > 0) {
+        values.push(p.sessionVwap);
+      }
       
       // Priority 2: Forecast band (only if present and positive)
       if (p.forecastCenter != null && Number.isFinite(p.forecastCenter) && p.forecastCenter > 0) values.push(p.forecastCenter);
@@ -4002,6 +4009,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               isAnimationActive={false}
             />
 
+            {/* Session VWAP (HLC3) */}
+            {chartHasSessionVwap && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="sessionVwap"
+                stroke={SESSION_VWAP_COLOR}
+                strokeWidth={1.8}
+                strokeOpacity={0.9}
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+
             {/* Trend EWMA overlays (toggle-controlled) */}
             {showTrendEwma && chartHasTrendEwmaShort && (
               <Line
@@ -4592,6 +4614,33 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Interval Selector */}
+            {intervalOptions && onIntervalChange && (
+              <div className="relative">
+                <select
+                  value={selectedInterval || '1 day'}
+                  onChange={(e) => onIntervalChange(e.target.value)}
+                  className={`
+                    px-2 py-1 rounded-md transition border text-xs font-mono
+                    ${isDarkMode
+                      ? "bg-slate-900 text-white/80 hover:text-white border-slate-700/50 hover:bg-slate-800"
+                      : "bg-white text-slate-700 hover:text-slate-900 border-gray-200 hover:bg-slate-50"
+                    }
+                  `}
+                >
+                  {Object.entries(intervalOptions).map(([category, intervals]) => (
+                    <optgroup key={category} label={category}>
+                      {intervals.map((interval) => (
+                        <option key={interval} value={interval}>
+                          {interval}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           
           {/* Long/Short Position Controls */}
@@ -4781,62 +4830,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                       />
                     </div>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] text-slate-400">Volatility model</label>
-                    <select
-                      value={horizonCoverage?.volModel}
-                      onChange={(e) => horizonCoverage?.onModelChange?.(e.target.value as any)}
-                      className={`w-full rounded-md border px-2 py-1.5 text-sm ${
-                        isDarkMode
-                          ? "bg-slate-900 border-slate-700 text-slate-100"
-                          : "bg-white border-slate-200 text-slate-800"
-                      }`}
-                    >
-                      <option value="GBM">GBM</option>
-                      <option value="GARCH">GARCH</option>
-                      <option value="HAR-RV">HAR-RV</option>
-                      <option value="Range">Range</option>
-                    </select>
-                  </div>
-
-                  {horizonCoverage?.volModel === "GARCH" && (
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-slate-400">GARCH estimator</label>
-                      <select
-                        value={horizonCoverage?.garchEstimator}
-                        onChange={(e) => horizonCoverage?.onGarchEstimatorChange?.(e.target.value as any)}
-                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
-                          isDarkMode
-                            ? "bg-slate-900 border-slate-700 text-slate-100"
-                            : "bg-white border-slate-200 text-slate-800"
-                        }`}
-                      >
-                        <option value="Normal">Normal</option>
-                        <option value="Student-t">Student-t</option>
-                      </select>
-                    </div>
-                  )}
-
-                  {horizonCoverage?.volModel === "Range" && (
-                    <div className="space-y-1.5">
-                      <label className="text-[11px] text-slate-400">Range estimator</label>
-                      <select
-                        value={horizonCoverage?.rangeEstimator}
-                        onChange={(e) => horizonCoverage?.onRangeEstimatorChange?.(e.target.value as any)}
-                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
-                          isDarkMode
-                            ? "bg-slate-900 border-slate-700 text-slate-100"
-                            : "bg-white border-slate-200 text-slate-800"
-                        }`}
-                      >
-                        <option value="P">Parkinson</option>
-                        <option value="GK">Garman-Klass</option>
-                        <option value="RS">Rogers-Satchell</option>
-                        <option value="YZ">Yang-Zhang</option>
-                      </select>
-                    </div>
-                  )}
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
@@ -5699,6 +5692,13 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   const data = chartPayload?.payload ?? payload[0].payload;
   const shortValue = data.trendEwmaShort ?? null;
   const longValue = data.trendEwmaLong ?? null;
+  const hasOhlcvData =
+    data.open != null ||
+    data.high != null ||
+    data.low != null ||
+    data.close != null ||
+    data.volume != null ||
+    data.sessionVwap != null;
   
   // Check if this is a future/forecast-only point (no historical price, only forecast data)
   const isFuturePoint = data.isFuture === true;
@@ -5860,7 +5860,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         )}
         
         {/* OHLCV Data - only show for historical points */}
-        {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
+        {!isFuturePoint && hasOhlcvData && (
           <div className={TOOLTIP_COLUMN_CLASS}>
             <div className={`text-[9px] font-semibold uppercase tracking-wider mb-1 ${
               isDarkMode ? 'text-slate-400' : 'text-gray-500'
@@ -5868,37 +5868,45 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               OHLCV
             </div>
             <div className="space-y-1 text-[10px]">
-              {data.open && (
+              {data.open != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Open</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.open.toFixed(2)}</span>
                 </div>
               )}
-              {data.high && (
+              {data.high != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>High</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.high.toFixed(2)}</span>
                 </div>
               )}
-              {data.low && (
+              {data.low != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Low</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.low.toFixed(2)}</span>
                 </div>
               )}
-              {data.close && (
+              {data.close != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Close</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} font-medium ${
-                    data.open && data.close > data.open
+                    data.open != null && data.close > data.open
                       ? 'text-emerald-400'
-                      : data.open && data.close < data.open
+                      : data.open != null && data.close < data.open
                         ? 'text-rose-400'
                         : isDarkMode ? 'text-slate-400' : 'text-gray-500'
                   }`}>${data.close.toFixed(2)}</span>
                 </div>
               )}
-              {data.volume && (
+              {data.sessionVwap != null && (
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
+                  <span className={isDarkMode ? 'text-purple-300' : 'text-purple-700'}>VWAP (HLC3)</span>
+                  <span className={`${TOOLTIP_VALUE_CLASS} font-medium ${isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                    ${data.sessionVwap.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {data.volume != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Vol</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>{formatVolumeAbbreviated(data.volume)}</span>

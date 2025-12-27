@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 const DATA_ROOT = process.env.NODE_ENV === 'production' 
   ? '/tmp/data' 
   : path.join(process.cwd(), 'data');
@@ -10,6 +13,13 @@ const FORECASTS_DIR = path.join(DATA_ROOT, 'forecasts');
 interface CleanupRequest {
   symbol: string;
   fileIds: string[];
+}
+
+export async function GET() {
+  return NextResponse.json(
+    { status: 'ok' },
+    { status: 200, headers: { 'Cache-Control': 'no-store' } }
+  );
 }
 
 /**

@@ -11,7 +11,8 @@
     "test:ewma-reaction": "tsx ./test-ewma-reaction.ts",
     "test:ewma-tilt": "tsx ./test-ewma-tilt.ts",
     "smoke:test": "bash scripts/smoke-test.sh",
-    "test": "jest"
+    "test": "jest",
+    "capital:check": "tsx scripts/capitalKeyCheck.ts"
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",

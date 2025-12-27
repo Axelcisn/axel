@@ -5922,5 +5922,182 @@
     "cacheStale": false,
     "staleDays": null,
     "dataEndUsed": "2025-12-16"
+  },
+  "zWfo:v2|TSLA|h=1|cov=0.95|lambda=0.94|trainFrac=0.7|minTrain=500|simStart=2021-08-18|trainLen=252|valLen=63|stepLen=63|qE=0.8,0.85,0.9,0.95|qX=0.4,0.5,0.6,0.7|qF=0.95,0.97,0.99|cost=0|lev=5|pos=0.25|initEq=1000|shrink=0.5|minFlat=2|minCloses=1|maxFlip=null|flipGamma=0|tradeEta=0|minOpens63=1|minFlat63=1|recency63=63|recency252=252|enforceRecency=1|dataEnd=2025-12-19": {
+    "best": {
+      "thresholds": {
+        "enterLong": 0.046696825179041286,
+        "enterShort": 0.04176369857183701,
+        "exitLong": 0.0341132706274074,
+        "exitShort": 0.02899683392733164,
+        "flipLong": 0.08255552606743091,
+        "flipShort": 0.07754557080708514
+      },
+      "quantiles": {
+        "enter": 0.8,
+        "exit": 0.4,
+        "flip": 0.99
+      },
+      "meanScore": 0.24748356323895226,
+      "folds": 3,
+      "avgTradeCount": 14.333333333333334,
+      "avgShortOppCount": 9.333333333333334,
+      "totalShortEntries": 11,
+      "applyRecommended": true,
+      "baselineScore": -0.4463641052692651,
+      "bestScore": 0.24748356323895226,
+      "selectionTier": "strict",
+      "strictPass": true,
+      "recencyPass": true,
+      "recency": {
+        "recent": {
+          "flatPct": 76.19047619047619,
+          "flips": 0,
+          "opens": 7,
+          "closes": 8,
+          "tradeCount": 8,
+          "bars": 63,
+          "window": 63
+        },
+        "tail": {
+          "flatPct": 87.3015873015873,
+          "flips": 0,
+          "opens": 13,
+          "closes": 13,
+          "tradeCount": 13,
+          "bars": 252,
+          "window": 252
+        },
+        "constraints": {
+          "minOpensInLast63": 1,
+          "minFlatPctLast63": 1,
+          "bars63": 63,
+          "bars252": 252,
+          "enforceRecency": true
+        },
+        "passed": true
+      }
+    },
+    "foldSummaries": [
+      {
+        "foldStart": "2022-05-18",
+        "foldEnd": "2023-05-18",
+        "valStart": "2023-05-19",
+        "valEnd": "2023-08-18",
+        "thresholds": {
+          "enterLong": 0.040034644019747864,
+          "enterShort": 0.032484599626880925,
+          "exitLong": 0.03234494810755221,
+          "exitShort": 0.02751940235497807,
+          "flipLong": 0.0518692274415961,
+          "flipShort": 0.051369400114985975
+        },
+        "returnPct": 0.44537918856591796,
+        "maxDrawdown": 0.2602656451060512,
+        "tradeCount": 16,
+        "closedTrades": 15,
+        "profitFactor": 1.7762489410524605,
+        "shortOppCount": 7,
+        "score": 1.7112484760884903,
+        "shortEntries": 3,
+        "signalStats": {
+          "flatPct": 30.158730158730158,
+          "flips": 1,
+          "opens": 14,
+          "closes": 14,
+          "tradeCount": 15
+        },
+        "constraints": {
+          "flatPct": 30.158730158730158,
+          "minFlatPct": 2,
+          "closes": 14,
+          "minCloses": 1,
+          "flips": 1,
+          "flipPct": 1.5873015873015872,
+          "maxFlipPct": null
+        }
+      },
+      {
+        "foldStart": "2022-11-16",
+        "foldEnd": "2023-11-16",
+        "valStart": "2023-11-17",
+        "valEnd": "2024-02-20",
+        "thresholds": {
+          "enterLong": 0.045734854420634165,
+          "enterShort": 0.041858475259105396,
+          "exitLong": 0.036172257264527836,
+          "exitShort": 0.030200854859200574,
+          "flipLong": 0.05280151210385257,
+          "flipShort": 0.06730565517398207
+        },
+        "returnPct": -0.17912627474039208,
+        "maxDrawdown": 0.32724308990084683,
+        "tradeCount": 11,
+        "closedTrades": 11,
+        "profitFactor": 0.4879890804843652,
+        "shortOppCount": 8,
+        "score": -0.547379853902084,
+        "shortEntries": 2,
+        "signalStats": {
+          "flatPct": 41.269841269841265,
+          "flips": 3,
+          "opens": 8,
+          "closes": 8,
+          "tradeCount": 8
+        },
+        "constraints": {
+          "flatPct": 41.269841269841265,
+          "minFlatPct": 2,
+          "closes": 8,
+          "minCloses": 1,
+          "flips": 3,
+          "flipPct": 4.761904761904762,
+          "maxFlipPct": null
+        }
+      },
+      {
+        "foldStart": "2024-08-21",
+        "foldEnd": "2025-08-22",
+        "valStart": "2025-08-25",
+        "valEnd": "2025-11-20",
+        "thresholds": {
+          "enterLong": 0.03865598289145462,
+          "enterShort": 0.03347312868460755,
+          "exitLong": 0.029742903937454587,
+          "exitShort": 0.026760763085454362,
+          "flipLong": 0.05083744072058892,
+          "flipShort": 0.04898925251714756
+        },
+        "returnPct": -0.07507494106206468,
+        "maxDrawdown": 0.17814842529865385,
+        "tradeCount": 16,
+        "closedTrades": 15,
+        "profitFactor": 0.9164697240088954,
+        "shortOppCount": 13,
+        "score": -0.42141793246954945,
+        "shortEntries": 6,
+        "signalStats": {
+          "flatPct": 30.158730158730158,
+          "flips": 1,
+          "opens": 14,
+          "closes": 14,
+          "tradeCount": 15
+        },
+        "constraints": {
+          "flatPct": 30.158730158730158,
+          "minFlatPct": 2,
+          "closes": 14,
+          "minCloses": 1,
+          "flips": 1,
+          "flipPct": 1.5873015873015872,
+          "maxFlipPct": null
+        }
+      }
+    ],
+    "zEdgeSamples": 1091,
+    "cacheHit": false,
+    "cacheStale": false,
+    "staleDays": null,
+    "dataEndUsed": "2025-12-19"
   }
 }

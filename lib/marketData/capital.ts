@@ -17,6 +17,17 @@ export type CapitalQuote = {
   source: "capital";
 };
 
+export type CapitalMarketSummary = {
+  epic: string;
+  instrumentName: string;
+  instrumentType: string;
+  marketStatus: string;
+  bid: number | null;
+  offer: number | null;
+  currency?: string | null;
+  updateTimeUTC?: string | null;
+};
+
 const BASE_URL =
   process.env.CAPITAL_API_BASE_URL ?? "https://demo-api-capital.backend-capital.com";
 
@@ -32,7 +43,7 @@ let inflightSession: Promise<SessionTokens> | null = null;
 
 function requireEnv(name: string, v: string | undefined): string {
   if (!v) throw new Error(`Missing env var: ${name}`);
-  return v;
+  return v.trim();
 }
 
 function toNumber(v: unknown): number | null {
@@ -190,4 +201,42 @@ export async function getCapitalQuote(epic: string): Promise<CapitalQuote> {
   }
 
   return { epic, bid, ask, mid, asOf, source: "capital" };
+}
+
+export async function searchCapitalMarkets(
+  searchTerm: string,
+  limit = 20
+): Promise<CapitalMarketSummary[]> {
+  const trimmed = searchTerm.trim();
+  if (!trimmed) return [];
+
+  const res = await authedFetch(
+    `/api/v1/markets?searchTerm=${encodeURIComponent(trimmed)}&max=${limit}`,
+    { method: "GET" }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const snippet = text.length > 300 ? text.slice(0, 300) + "..." : text;
+    throw new Error(
+      `Capital market search failed: status=${res.status} ${res.statusText}; body=${snippet}`
+    );
+  }
+
+  const data = await res.json();
+  const markets = Array.isArray(data?.markets) ? data.markets : [];
+
+  return markets.slice(0, limit).map((m: any) => ({
+    epic: String(m.epic ?? "").trim(),
+    instrumentName: String(m.instrumentName ?? "").trim(),
+    instrumentType: String(m.instrumentType ?? "").trim(),
+    marketStatus: String(m.marketStatus ?? "").trim(),
+    bid: toNumber(m.snapshot?.bid ?? m.bid),
+    offer: toNumber(m.snapshot?.offer ?? m.offer),
+    currency: m.currency ?? m.snapshot?.currency ?? null,
+    updateTimeUTC:
+      (typeof m.snapshot?.updateTimeUTC === "string" && m.snapshot.updateTimeUTC) ||
+      (typeof m.updateTimeUTC === "string" && m.updateTimeUTC) ||
+      null,
+  }));
 }
