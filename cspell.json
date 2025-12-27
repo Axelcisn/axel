@@ -151,7 +151,10 @@
     "TOTV",
     "calib",
     "Calib",
-    "mmyy"
+    "mmyy",
+    "runup",
+    "runups",
+    "annualization"
   ],
   "flagWords": []
 }

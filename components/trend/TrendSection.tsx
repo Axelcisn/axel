@@ -47,24 +47,44 @@ interface TrendClassification {
 
 interface TrendSectionProps {
   ticker: string;
-  ewmaPath?: EwmaWalkerPathPoint[];
-  ewmaSummary?: EwmaSummary;
-  isLoadingEwma?: boolean;
-  ewmaError?: string | null;
+  horizon?: number;
+  coverage?: number;
+  shortWindowOverride?: number;
+  longWindowOverride?: number;
   onEwmaWindowChange?: (
     shortWindow: number,
     longWindow: number,
     preset: EwmaPreset
   ) => void;
+  momentumPeriodOverride?: number;
+  onMomentumPeriodChange?: (period: number) => void;
+  ewmaCrossoverOverride?: any;
+  trendWeight?: number | null;
+  trendWeightUpdatedAt?: string | null;
+  // Legacy props for backward compatibility
+  ewmaPath?: EwmaWalkerPathPoint[];
+  ewmaSummary?: EwmaSummary;
+  isLoadingEwma?: boolean;
+  ewmaError?: string | null;
 }
 
 export default function TrendSection({
   ticker,
+  horizon = 1,
+  coverage,
+  shortWindowOverride,
+  longWindowOverride,
+  onEwmaWindowChange,
+  momentumPeriodOverride,
+  onMomentumPeriodChange,
+  ewmaCrossoverOverride,
+  trendWeight: trendWeightProp,
+  trendWeightUpdatedAt: trendWeightUpdatedAtProp,
+  // Legacy props
   ewmaPath,
   ewmaSummary,
   isLoadingEwma,
   ewmaError,
-  onEwmaWindowChange,
 }: TrendSectionProps) {
   const isDarkMode = useDarkMode();
   
@@ -75,10 +95,9 @@ export default function TrendSection({
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   
   // EWMA Crossover state
-  const [shortWindow, setShortWindow] = useState<number>(10);
-  const [longWindow, setLongWindow] = useState<number>(50);
+  const [shortWindow, setShortWindow] = useState<number>(shortWindowOverride || 10);
+  const [longWindow, setLongWindow] = useState<number>(longWindowOverride || 50);
   const [ewmaPreset, setEwmaPreset] = useState<EwmaPreset>('medium');
-  const [horizon] = useState<number>(1);
   const [showEwmaSettings, setShowEwmaSettings] = useState(false);
   
   // ADX state
@@ -95,8 +114,8 @@ export default function TrendSection({
   const ewmaCrossover = useEwmaCrossover(ticker, shortWindow, longWindow);
   
   // Extract EWMA trend data
-  const trendWeight = null; // TODO: Add trend weight calculation
-  const trendWeightUpdatedAt = null; // TODO: Add updated date
+  const trendWeight = trendWeightProp;
+  const trendWeightUpdatedAt = trendWeightUpdatedAtProp;
   
   // Compute signal from EWMA crossover data
   const ewmaSignal = useMemo(() => {
@@ -211,9 +230,26 @@ export default function TrendSection({
               onClick={() => handleCardClick('ewma-trend')}
               className="cursor-pointer rounded-2xl border border-slate-800 bg-transparent p-5 md:p-6 hover:border-slate-700 transition-colors"
             >
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-white">EWMA Trend</h4>
-                <div className="flex items-center gap-2">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <h4 className="text-sm font-semibold text-white mb-3">EWMA Trend</h4>
+                  {expandedCard !== 'ewma-trend' && (
+                    <div className="flex items-center gap-3 text-xs">
+                      <span className="text-slate-400">Short: {shortWindow}D</span>
+                      <span className="text-slate-400">Long: {longWindow}D</span>
+                      <span className={`px-2 py-1 rounded-full border text-xs font-medium ${
+                        ewmaSignal === 'bullish' 
+                          ? 'border-emerald-500/50 text-emerald-300 bg-emerald-500/10'
+                          : ewmaSignal === 'bearish'
+                          ? 'border-red-500/50 text-red-300 bg-red-500/10'
+                          : 'border-slate-600 text-slate-400 bg-slate-800/50'
+                      }`}>
+                        {ewmaSignal === 'bullish' ? 'Bullish' : ewmaSignal === 'bearish' ? 'Bearish' : 'Neutral'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 ml-4">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -236,22 +272,6 @@ export default function TrendSection({
                   </svg>
                 </div>
               </div>
-              
-              {expandedCard !== 'ewma-trend' && (
-                <div className="mt-3 flex items-center gap-4 text-xs">
-                  <span className="text-slate-400">Short: {shortWindow}D</span>
-                  <span className="text-slate-400">Long: {longWindow}D</span>
-                  <span className={`px-2 py-1 rounded-full border ${
-                    ewmaSignal === 'bullish' 
-                      ? 'border-emerald-500/50 text-emerald-300 bg-emerald-500/10'
-                      : ewmaSignal === 'bearish'
-                      ? 'border-red-500/50 text-red-300 bg-red-500/10'
-                      : 'border-slate-600 text-slate-400 bg-slate-800/50'
-                  }`}>
-                    {ewmaSignal === 'bullish' ? 'Bullish' : ewmaSignal === 'bearish' ? 'Bearish' : 'Neutral'}
-                  </span>
-                </div>
-              )}
             </div>
 
             {/* EWMA Expanded Content */}
