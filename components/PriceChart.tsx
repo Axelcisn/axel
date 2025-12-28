@@ -8,13 +8,18 @@ import {
   YAxis,
   Tooltip,
   Bar,
+  BarChart,
   Cell,
   ComposedChart,
   CartesianGrid,
   ReferenceLine,
   ReferenceDot,
+  ReferenceArea,
   Line,
+  PieChart,
+  Pie,
 } from "recharts";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { useDarkMode } from "@/lib/hooks/useDarkMode";
 import {
   sliceByRange,
@@ -24,11 +29,14 @@ import {
 import type { CanonicalRow } from "@/lib/types/canonical";
 import { getNextTradingDates, generateFutureTradingDates } from "@/lib/chart/tradingDays";
 import { TradeDetailCard, type TradeDetailData } from "@/components/TradeDetailCard";
-import type { Trading212AccountSnapshot } from "@/lib/backtest/trading212Cfd";
+import type { CfdAccountSnapshot } from "@/lib/backtest/cfdSim";
 import { applyActivityMaskToEquitySeries, computeTradeActivityWindow } from "@/lib/backtest/equityActivity";
 import type { MomentumScorePoint } from "@/lib/indicators/momentum";
 import type { AdxPoint } from "@/lib/indicators/adx";
 import type { EwmaPoint } from "@/lib/indicators/ewmaCrossover";
+import { computeSessionVwap } from "@/lib/indicators/vwap";
+import type { SelectedStrategyAnalytics } from "@/lib/analytics/selectedStrategyAnalytics";
+import { Settings2, Plus, Minus } from "lucide-react";
 
 const SYNC_ID = "timing-sync";
 const CHART_MARGIN = { top: 8, right: 0, left: 0, bottom: 0 };
@@ -99,6 +107,7 @@ interface ChartPoint {
   low?: number;
   close?: number;
   volume?: number;
+  sessionVwap?: number | null;
   volumeColor?: string;
   volumeStroke?: string;
   isFuture?: boolean;
@@ -108,7 +117,7 @@ interface ChartPoint {
   equityDelta?: number | null;
   selectedPnl?: number | null;
   selectedEquity?: number | null;
-  selectedSide?: Trading212AccountSnapshot["side"] | null;
+  selectedSide?: CfdAccountSnapshot["side"] | null;
   selectedContracts?: number | null;
   // Forecast band values
   forecastCenter?: number | null;
@@ -146,6 +155,59 @@ export interface TrendEwmaSignal {
 
 const TREND_EWMA_SHORT_COLOR = "#facc15"; // amber/yellow
 const TREND_EWMA_LONG_COLOR = "#3b82f6";  // blue
+const SESSION_VWAP_COLOR = "#a855f7";     // purple
+
+type TvCardProps = {
+  title: string;
+  children: React.ReactNode;
+  right?: React.ReactNode;
+  isDarkMode: boolean;
+  plain?: boolean;
+};
+
+const TvCard: React.FC<TvCardProps> = ({ title, children, right, isDarkMode, plain }) => (
+  <div
+    className={`rounded-3xl ${
+      plain
+        ? `${isDarkMode ? "border border-slate-800/40 bg-transparent" : "border border-slate-200 bg-transparent"}`
+        : `${isDarkMode ? "border border-slate-800/70 bg-slate-900/40" : "border border-slate-200 bg-white"}`
+    } overflow-hidden`}
+  >
+    <div className="px-5 pt-4 flex items-center justify-between">
+      <div className="text-[11px] uppercase tracking-[0.08em] text-slate-400">{title}</div>
+      {right}
+    </div>
+    <div className="px-5 pb-5 pt-3">{children}</div>
+  </div>
+);
+
+type TvSectionProps = {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+  isDarkMode: boolean;
+};
+
+const TvSection: React.FC<TvSectionProps> = ({ title, defaultOpen = false, children, isDarkMode }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div
+      className={`rounded-3xl border ${isDarkMode ? "border-slate-800/50" : "border-slate-200"} overflow-hidden`}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full px-5 py-4 flex items-center justify-between"
+      >
+        <span className={`text-sm font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-900"}`}>
+          {title}
+        </span>
+        <span className="text-slate-400">{open ? <Minus size={16} /> : <Plus size={16} />}</span>
+      </button>
+      {open && <div className="px-5 pb-5">{children}</div>}
+    </div>
+  );
+};
 
 /**
  * Normalize a date-like string into YYYY-MM-DD to keep chart + overlay data aligned.
@@ -164,14 +226,10 @@ const normalizeDateString = (value: string): string => {
 
 interface ForecastOverlayProps {
   activeForecast?: any | null;
-  volModel?: string;
   coverage?: number;
   conformalState?: any | null;
 }
 
-type VolModel = 'GBM' | 'GARCH' | 'HAR-RV' | 'Range';
-type GarchEstimator = 'Normal' | 'Student-t';
-type RangeEstimator = 'P' | 'GK' | 'RS' | 'YZ';
 export type DateRangePreset =
   | "chart"
   | "1d"
@@ -197,40 +255,16 @@ export type SimCompareRangePreset =
   | "all"
   | "custom";
 
-interface RecommendedModelInfo {
-  volModel: VolModel;
-  garchEstimator?: GarchEstimator;
-  rangeEstimator?: RangeEstimator;
-}
-
 interface HorizonCoverageProps {
   h: number;
   coverage: number;
   onHorizonChange: (days: number) => void;
   onCoverageChange: (cov: number) => void;
   isLoading?: boolean;
-  volModel?: VolModel;
-  onModelChange?: (model: VolModel) => void;
-  // GARCH options
-  garchEstimator?: GarchEstimator;
-  onGarchEstimatorChange?: (est: GarchEstimator) => void;
-  // Range options
-  rangeEstimator?: RangeEstimator;
-  onRangeEstimatorChange?: (est: RangeEstimator) => void;
-  // Recommended model (for green highlight + star)
-  recommendedModel?: RecommendedModelInfo | null;
-  // Model parameters
-  windowSize?: number;
-  onWindowSizeChange?: (size: number) => void;
-  degreesOfFreedom?: number;
-  onDegreesOfFreedomChange?: (df: number) => void;
-  // GBM parameters
-  gbmLambda?: number;
-  onGbmLambdaChange?: (lambda: number) => void;
 }
 
-/** Trade information from Trading212 simulation */
-export interface Trading212TradeInfo {
+/** Trade information from Cfd simulation */
+export interface CfdTradeInfo {
   entryDate: string;
   exitDate: string;
   side: "long" | "short";
@@ -247,11 +281,11 @@ export interface Trading212TradeInfo {
 }
 
 /** Trade overlay for chart visualization */
-export interface Trading212TradeOverlay {
+export interface CfdTradeOverlay {
   runId: string;
   label: string;
   color: string;  // hex color for this run
-  trades: Trading212TradeInfo[];
+  trades: CfdTradeInfo[];
   source?: "windowSim" | "globalFallback";
 }
 
@@ -406,7 +440,7 @@ export interface SimulationRunSummary {
   maxEquityDrawdownPct?: number;
 }
 
-type T212RunId =
+type CfdRunId =
   | "ewma-unbiased"
   | "ewma-biased"
   | "ewma-biased-max"
@@ -448,21 +482,21 @@ interface PriceChartProps {
   trendEwmaLong?: TrendEwmaPoint[] | null;
   trendEwmaCrossSignals?: TrendEwmaSignal[] | null;
   horizonCoverage?: HorizonCoverageProps;
-  tradeOverlays?: Trading212TradeOverlay[];  // Trade markers to display on chart
-  t212AccountHistory?: Trading212AccountSnapshot[] | null;  // Equity curve from Trading212 simulation
-  activeT212RunId?: T212RunId | null;  // Currently active T212 run (for Chart toggle)
-  onToggleT212Run?: (runId: T212RunId) => void;  // Toggle T212 run visibility
+  tradeOverlays?: CfdTradeOverlay[];  // Trade markers to display on chart
+  cfdAccountHistory?: CfdAccountSnapshot[] | null;  // Equity curve from Cfd simulation
+  activeCfdRunId?: CfdRunId | null;  // Currently active Cfd run (for Chart toggle)
+  onToggleCfdRun?: (runId: CfdRunId) => void;  // Toggle Cfd run visibility
   simulationMode: SimulationMode;
   onChangeSimulationMode?: (mode: SimulationMode) => void;
-  t212InitialEquity: number;
-  t212Leverage: number;
-  t212PositionFraction: number;
+  cfdInitialEquity: number;
+  cfdLeverage: number;
+  cfdPositionFraction: number;
   // Fractional threshold (e.g., 0.001 = 0.10%) used for no-trade band
-  t212ThresholdFrac: number;
-  t212CostBps: number;
-  t212ZMode: "auto" | "manual" | "optimize";
-  t212SignalRule: "bps" | "z";
-  t212ZDisplayThresholds?: {
+  cfdThresholdFrac: number;
+  cfdCostBps: number;
+  cfdZMode: "auto" | "manual" | "optimize";
+  cfdSignalRule: "bps" | "z";
+  cfdZDisplayThresholds?: {
     enterLong: number;
     enterShort: number;
     exitLong: number;
@@ -470,7 +504,7 @@ interface PriceChartProps {
     flipLong: number;
     flipShort: number;
   } | null;
-  t212ZOptimized?: {
+  cfdZOptimized?: {
     thresholds: {
       enterLong: number;
       enterShort: number;
@@ -504,13 +538,13 @@ interface PriceChartProps {
     } | null;
   } | null;
   isOptimizingZThresholds?: boolean;
-  t212ZOptimizeError?: string | null;
+  cfdZOptimizeError?: string | null;
   onApplyOptimizedZThresholds?: () => void;
-  onChangeT212InitialEquity?: (v: number) => void;
-  onChangeT212Leverage?: (v: number) => void;
-  onChangeT212PositionFraction?: (v: number) => void;
-  onChangeT212ThresholdPct?: (v: number) => void;
-  onChangeT212CostBps?: (v: number) => void;
+  onChangeCfdInitialEquity?: (v: number) => void;
+  onChangeCfdLeverage?: (v: number) => void;
+  onChangeCfdPositionFraction?: (v: number) => void;
+  onChangeCfdThresholdPct?: (v: number) => void;
+  onChangeCfdCostBps?: (v: number) => void;
   onOptimizeZThresholds?: () => void;
   hasMaxRun?: boolean;
   trendWeight?: number | null;
@@ -523,7 +557,7 @@ interface PriceChartProps {
     {
       pnlUsd: number;
       equityUsd: number;
-      side?: Trading212AccountSnapshot["side"] | null;
+      side?: CfdAccountSnapshot["side"] | null;
       contracts?: number | null;
     }
   >;
@@ -540,6 +574,7 @@ interface PriceChartProps {
     label: string | null;
     asOfDate: string | null;
   } | null;
+  selectedAnalytics?: SelectedStrategyAnalytics | null;
   simComparePreset?: SimCompareRangePreset;
   visibleWindow?: { start: string; end: string } | null;
   onChangeSimComparePreset?: (p: SimCompareRangePreset) => void;
@@ -548,6 +583,10 @@ interface PriceChartProps {
     w: { start: string; end: string } | null,
     source: "chart" | "pill" | "dropdown"
   ) => void;
+  onOpenSimulationSettings?: () => void;
+  selectedInterval?: string;
+  intervalOptions?: Record<string, string[]>;
+  onIntervalChange?: (interval: string) => void;
 }
 
 const RANGE_OPTIONS: PriceRange[] = [
@@ -583,44 +622,49 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   trendEwmaLong,
   trendEwmaCrossSignals,
   horizonCoverage,
-  t212InitialEquity,
-  t212Leverage,
-  t212PositionFraction,
-  t212ThresholdFrac,
-  t212CostBps,
-  t212ZMode,
-  t212SignalRule,
-  t212ZDisplayThresholds,
-  t212ZOptimized,
-  isOptimizingZThresholds,
-  t212ZOptimizeError,
-  onApplyOptimizedZThresholds,
-  onChangeT212InitialEquity,
-  onChangeT212Leverage,
-  onChangeT212PositionFraction,
-  onChangeT212ThresholdPct,
-  onChangeT212CostBps,
-  onOptimizeZThresholds,
+  cfdInitialEquity: _cfdInitialEquity,
+  cfdLeverage: _cfdLeverage,
+  cfdPositionFraction: _cfdPositionFraction,
+  cfdThresholdFrac: _cfdThresholdFrac,
+  cfdCostBps: _cfdCostBps,
+  cfdZMode: _cfdZMode,
+  cfdSignalRule: _cfdSignalRule,
+  cfdZDisplayThresholds: _cfdZDisplayThresholds,
+  cfdZOptimized: _cfdZOptimized,
+  isOptimizingZThresholds: _isOptimizingZThresholds,
+  cfdZOptimizeError: _cfdZOptimizeError,
+  onApplyOptimizedZThresholds: _onApplyOptimizedZThresholds,
+  onChangeCfdInitialEquity: _onChangeCfdInitialEquity,
+  onChangeCfdLeverage: _onChangeCfdLeverage,
+  onChangeCfdPositionFraction: _onChangeCfdPositionFraction,
+  onChangeCfdThresholdPct: _onChangeCfdThresholdPct,
+  onChangeCfdCostBps: _onChangeCfdCostBps,
+  onOptimizeZThresholds: _onOptimizeZThresholds,
   tradeOverlays,
-  t212AccountHistory,
-  activeT212RunId,
-  onToggleT212Run,
+  cfdAccountHistory,
+  activeCfdRunId,
+  onToggleCfdRun,
   simulationMode,
   onChangeSimulationMode,
-  hasMaxRun = true,
-  trendWeight = null,
-  trendWeightUpdatedAt = null,
+  hasMaxRun: _hasMaxRun = true,
+  trendWeight: _trendWeight = null,
+  trendWeightUpdatedAt: _trendWeightUpdatedAt = null,
   simulationRuns,
   selectedSimRunId,
   onSelectSimulationRun,
   selectedSimByDate,
   selectedPnlLabel,
   selectedOverviewStats,
+  selectedAnalytics,
   simComparePreset,
   visibleWindow,
   onChangeSimComparePreset,
   onChangeSimCompareCustom,
   onVisibleWindowChange,
+  onOpenSimulationSettings,
+  selectedInterval,
+  intervalOptions,
+  onIntervalChange,
 }) => {
   const isDarkMode = useDarkMode();
   const h = horizon ?? 1;
@@ -659,208 +703,16 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return map;
   }, [selectedSimByDate]);
 
-  // Model dropdown states
-  const [showGarchDropdown, setShowGarchDropdown] = useState(false);
-  const [showRangeDropdown, setShowRangeDropdown] = useState(true);
-  
-  // Model Settings dropdown state (⋯ button next to Model)
-  const [showModelSettingsDropdown, setShowModelSettingsDropdown] = useState(false);
-  const modelSettingsDropdownRef = useRef<HTMLDivElement>(null);
-  
-  // Main Settings dropdown state (consolidated settings button next to List of trades)
-  const [showMainSettingsDropdown, setShowMainSettingsDropdown] = useState(false);
-  const mainSettingsDropdownRef = useRef<HTMLDivElement>(null);
-
   // Simulation Settings dropdown state
   const simRangeDropdownRef = useRef<HTMLDivElement>(null);
   const simRangeButtonRef = useRef<HTMLButtonElement>(null);
   const [simRangeMenuWidth, setSimRangeMenuWidth] = useState<number | null>(null);
-  const [equityInput, setEquityInput] = useState<string>(() => `${t212InitialEquity}`);
-  const [positionPctInput, setPositionPctInput] = useState<string>(() => `${(t212PositionFraction ?? 0) * 100}`);
-  const [thresholdInput, setThresholdInput] = useState<string>(() => `${t212ThresholdFrac * 10000}`);
-  const [costInput, setCostInput] = useState<string>(() => `${t212CostBps}`);
-  const [confirmApplyOptimized, setConfirmApplyOptimized] = useState(false);
-
-  useEffect(() => {
-    setEquityInput(`${t212InitialEquity}`);
-  }, [t212InitialEquity]);
-
-  useEffect(() => {
-    setPositionPctInput(`${(t212PositionFraction ?? 0) * 100}`);
-  }, [t212PositionFraction]);
-
-  useEffect(() => {
-    setThresholdInput(`${t212ThresholdFrac * 10000}`);
-  }, [t212ThresholdFrac]);
-
-  useEffect(() => {
-    setCostInput(`${t212CostBps}`);
-  }, [t212CostBps]);
-
-  useEffect(() => {
-    setConfirmApplyOptimized(false);
-  }, [t212ZOptimized, t212ZMode]);
-
-  useEffect(() => {
-    if (!confirmApplyOptimized) return;
-    const timer = setTimeout(() => setConfirmApplyOptimized(false), 4000);
-    return () => clearTimeout(timer);
-  }, [confirmApplyOptimized]);
-
-  const commitInitialEquity = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num) || num < 0) {
-        setEquityInput(`${t212InitialEquity}`);
-        return;
-      }
-      const clamped = Math.min(1_000_000, num);
-      onChangeT212InitialEquity?.(clamped);
-      setEquityInput(`${clamped}`);
-    },
-    [onChangeT212InitialEquity, t212InitialEquity]
-  );
-
-  const commitPositionPct = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num) || num < 0) {
-        setPositionPctInput(`${(t212PositionFraction ?? 0) * 100}`);
-        return;
-      }
-      const clampedPct = Math.min(100, num);
-      const fraction = clampedPct / 100;
-      onChangeT212PositionFraction?.(fraction);
-      setPositionPctInput(`${clampedPct}`);
-    },
-    [onChangeT212PositionFraction, t212PositionFraction]
-  );
-
-  const commitThreshold = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num)) {
-        setThresholdInput(`${t212ThresholdFrac * 10000}`);
-        return;
-      }
-      const clampedBps = Math.min(500, Math.max(0, num));
-      const frac = clampedBps / 10000;
-      onChangeT212ThresholdPct?.(frac);
-      setThresholdInput(`${clampedBps}`);
-    },
-    [onChangeT212ThresholdPct, t212ThresholdFrac]
-  );
-
-  const commitCost = useCallback(
-    (val: string) => {
-      const num = Number(val);
-      if (!Number.isFinite(num)) {
-        setCostInput(`${t212CostBps}`);
-        return;
-      }
-      const clamped = Math.max(0, Math.min(500, num));
-      onChangeT212CostBps?.(clamped);
-      setCostInput(`${clamped}`);
-    },
-    [onChangeT212CostBps, t212CostBps]
-  );
-
-  const formatScoreDisplay = useCallback((value: number) => {
-    const isFiniteScore = Number.isFinite(value);
-    return {
-      text: isFiniteScore ? value.toFixed(3) : "—",
-      title: isFiniteScore ? undefined : "Undefined (0 drawdown or invalid denominator)",
-    };
-  }, []);
-
-  const handleApplyOptimizedClick = useCallback(() => {
-    if (!t212ZOptimized || !onApplyOptimizedZThresholds || isOptimizingZThresholds) return;
-    const { thresholds, applyRecommended } = t212ZOptimized;
-    const orderingValid =
-      thresholds.exitLong < thresholds.enterLong &&
-      thresholds.enterLong < thresholds.flipLong &&
-      thresholds.exitShort < thresholds.enterShort &&
-      thresholds.enterShort < thresholds.flipShort;
-    if (!orderingValid) return;
-
-    if (!applyRecommended && !confirmApplyOptimized) {
-      setConfirmApplyOptimized(true);
-      return;
-    }
-
-    onApplyOptimizedZThresholds();
-    setConfirmApplyOptimized(false);
-  }, [confirmApplyOptimized, isOptimizingZThresholds, onApplyOptimizedZThresholds, t212ZOptimized]);
-
-  const optimizedOrderingValid = useMemo(() => {
-    if (!t212ZOptimized) return false;
-    const { thresholds } = t212ZOptimized;
-    return (
-      thresholds.exitLong < thresholds.enterLong &&
-      thresholds.enterLong < thresholds.flipLong &&
-      thresholds.exitShort < thresholds.enterShort &&
-      thresholds.enterShort < thresholds.flipShort
-    );
-  }, [t212ZOptimized]);
-
-  const optimizedBaselineScore = useMemo(
-    () => (t212ZOptimized ? formatScoreDisplay(t212ZOptimized.baselineScore) : null),
-    [formatScoreDisplay, t212ZOptimized]
-  );
-  const optimizedBestScore = useMemo(
-    () => (t212ZOptimized ? formatScoreDisplay(t212ZOptimized.bestScore) : null),
-    [formatScoreDisplay, t212ZOptimized]
-  );
-
-  const optimizedApplyLabel = useMemo(() => {
-    if (!t212ZOptimized) return "Apply";
-    if (t212ZOptimized.applyRecommended) return "Apply recommended";
-    return confirmApplyOptimized ? "Click again to apply" : "Apply anyway";
-  }, [confirmApplyOptimized, t212ZOptimized]);
-
-  const optimizedApplyDisabled =
-    !t212ZOptimized || !optimizedOrderingValid || isOptimizingZThresholds || !onApplyOptimizedZThresholds;
-
-  const optimizedSelectionTier = t212ZOptimized?.selectionTier ?? "strict";
-  const optimizedStrictPass = !!t212ZOptimized?.strictPass;
-  const optimizedRecencyPass = !!t212ZOptimized?.recencyPass;
-  const optimizedFailedConstraints = t212ZOptimized?.failedConstraints ?? [];
-  const optimizedRecencyRules = useMemo(() => {
-    const constraints = t212ZOptimized?.recency?.constraints;
-    return {
-      minOpens: constraints?.minOpensInLast63 ?? 1,
-      minFlatPct: constraints?.minFlatPctLast63 ?? 1,
-      bars63: constraints?.bars63 ?? 63,
-      enforceRecency: constraints?.enforceRecency !== false,
-    };
-  }, [t212ZOptimized?.recency?.constraints]);
-
-  const optimizedReasonLabel = useMemo(() => {
-    if (!t212ZOptimized?.reason) return null;
-    if (optimizedSelectionTier === "strict") {
-      if (t212ZOptimized.reason === "bestScore<=baselineScore" || t212ZOptimized.reason === "bestScore<=0") {
-        return { label: "Perf note", text: t212ZOptimized.reason };
-      }
-      return { label: "Reason", text: t212ZOptimized.reason };
-    }
-    return { label: "Fallback reason", text: t212ZOptimized.reason };
-  }, [optimizedSelectionTier, t212ZOptimized?.reason]);
-
   const [showSimRangeMenu, setShowSimRangeMenu] = useState(false);
   const [customSimRangeStart, setCustomSimRangeStart] = useState<string>(visibleWindow?.start ?? "");
   const [customSimRangeEnd, setCustomSimRangeEnd] = useState<string>(visibleWindow?.end ?? "");
-  
-  // Click outside to close Model settings dropdown
-  useEffect(() => {
-    if (!showModelSettingsDropdown) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (modelSettingsDropdownRef.current && !modelSettingsDropdownRef.current.contains(e.target as Node)) {
-        setShowModelSettingsDropdown(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showModelSettingsDropdown]);
+  const [showSettingsPopover, setShowSettingsPopover] = useState(false);
+  const settingsButtonRef = useRef<HTMLButtonElement>(null);
+  const settingsPopoverRef = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
     if (!showSimRangeMenu) return;
@@ -885,6 +737,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
   }, [showSimRangeMenu]);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!showSettingsPopover) return;
+      const target = e.target as Node;
+      if (
+        settingsPopoverRef.current &&
+        !settingsPopoverRef.current.contains(target) &&
+        settingsButtonRef.current &&
+        !settingsButtonRef.current.contains(target)
+      ) {
+        setShowSettingsPopover(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showSettingsPopover]);
 
   const [fullData, setFullData] = useState<PricePoint[]>([]);
   const [selectedRange, setSelectedRange] = useState<PriceRange>("1M");
@@ -949,6 +818,11 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const pendingHoverIndexRef = useRef<number | null>(null);
   const hoverRafRef = useRef<number | null>(null);
 
+  // Equity view toggles
+  const [equityViewMode, setEquityViewMode] = useState<"absolute" | "percent">("absolute");
+  const [showBuyHold, setShowBuyHold] = useState(true);
+  const [showExcursions, setShowExcursions] = useState(true);
+
   // Reset view + range state when ticker changes
   useEffect(() => {
     setSelectedRange("1M");
@@ -963,15 +837,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       setCustomSimRangeEnd(visibleWindow.end);
     }
   }, [visibleWindow]);
-
-  // Insights tab state (TradingView-style)
-  type InsightTab =
-    | "Overview"
-    | "Performance"
-    | "Trades analysis"
-    | "Risk/performance ratios"
-    | "List of trades";
-  const [activeInsightTab, setActiveInsightTab] = useState<InsightTab>("Overview");
 
   // Position lines state (Long/Short)
   type PositionType = 'long' | 'short' | null;
@@ -1755,6 +1620,23 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return map;
   }, [rangeData]);
 
+  // Session-based VWAP (HLC3) keyed by normalized date
+  const sessionVwapSeries = useMemo(() => {
+    if (fullData.length === 0) return [];
+    return computeSessionVwap(fullData, (bar) => normalizeDateString(bar.date));
+  }, [fullData]);
+
+  const sessionVwapMap = useMemo(() => {
+    const map = new Map<string, number | null>();
+    for (let i = 0; i < fullData.length; i++) {
+      const date = normalizeDateString(fullData[i]?.date ?? "");
+      if (!date) continue;
+      const vwap = sessionVwapSeries[i];
+      map.set(date, Number.isFinite(vwap) ? (vwap as number) : null);
+    }
+    return map;
+  }, [fullData, sessionVwapSeries]);
+
   // Create chartData aligned to the visible window (no future placeholders)
   const chartData: ChartPoint[] = React.useMemo(() => {
     return syncedDates.map((date) => {
@@ -1775,6 +1657,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         low,
         close,
         volume,
+        sessionVwap: sessionVwapMap.get(date) ?? null,
         trendEwmaShort: trendEwmaShortMap.get(date) ?? null,
         trendEwmaLong: trendEwmaLongMap.get(date) ?? null,
         momentumScore: momentumMap.get(date),
@@ -1790,6 +1673,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     trendEwmaShortMap,
     momentumMap,
     priceByDate,
+    sessionVwapMap,
     syncedDates,
   ]);
 
@@ -1836,6 +1720,10 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     [chartData]
   );
   const hasTrendEwmaData = chartHasTrendEwmaShort || chartHasTrendEwmaLong;
+  const chartHasSessionVwap = useMemo(
+    () => chartData.some((p) => p.sessionVwap != null && Number.isFinite(p.sessionVwap)),
+    [chartData]
+  );
 
   // Trend overlays are merged directly into chartData; keep alias for downstream code
   const chartDataWithEwma = chartData;
@@ -1942,6 +1830,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       if (p.value != null && Number.isFinite(p.value) && p.value > 0) values.push(p.value);
       if (p.high != null && Number.isFinite(p.high) && p.high > 0) values.push(p.high);
       if (p.low != null && Number.isFinite(p.low) && p.low > 0) values.push(p.low);
+      if (p.sessionVwap != null && Number.isFinite(p.sessionVwap) && p.sessionVwap > 0) {
+        values.push(p.sessionVwap);
+      }
       
       // Priority 2: Forecast band (only if present and positive)
       if (p.forecastCenter != null && Number.isFinite(p.forecastCenter) && p.forecastCenter > 0) values.push(p.forecastCenter);
@@ -1997,8 +1888,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       ? priceYDomain[1]
       : undefined;
   }, [priceYDomain]);
-  const normalizedAccountHistory = useMemo<Trading212AccountSnapshot[]>(() => {
-    const hist = t212AccountHistory ?? [];
+  const normalizedAccountHistory = useMemo<CfdAccountSnapshot[]>(() => {
+    const hist = cfdAccountHistory ?? [];
     return hist
       .map((snap) => ({
         ...snap,
@@ -2007,18 +1898,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       }))
       .filter((snap) => snap.date)
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [t212AccountHistory]);
+  }, [cfdAccountHistory]);
   const windowedAccountHistory = useMemo(() => {
     if (normalizedAccountHistory.length === 0) {
-      return { history: [] as Trading212AccountSnapshot[], prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+      return { history: [] as CfdAccountSnapshot[], prevSideBefore: null as CfdAccountSnapshot["side"] | null };
     }
     if (!activeSimWindow) {
-      return { history: normalizedAccountHistory, prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+      return { history: normalizedAccountHistory, prevSideBefore: null as CfdAccountSnapshot["side"] | null };
     }
     const { start, end } = activeSimWindow;
     const startIdx = normalizedAccountHistory.findIndex((snap) => snap.date >= start);
     if (startIdx === -1) {
-      return { history: [] as Trading212AccountSnapshot[], prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+      return { history: [] as CfdAccountSnapshot[], prevSideBefore: null as CfdAccountSnapshot["side"] | null };
     }
     let endIdx = normalizedAccountHistory.length - 1;
     for (let i = normalizedAccountHistory.length - 1; i >= startIdx; i--) {
@@ -2028,7 +1919,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       }
     }
     if (endIdx < startIdx) {
-      return { history: [] as Trading212AccountSnapshot[], prevSideBefore: null as Trading212AccountSnapshot["side"] | null };
+      return { history: [] as CfdAccountSnapshot[], prevSideBefore: null as CfdAccountSnapshot["side"] | null };
     }
     const slice = normalizedAccountHistory.slice(startIdx, endIdx + 1);
     const prevSideBefore =
@@ -2106,23 +1997,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       (p) => p.trendEwmaLong != null && !Number.isFinite(p.trendEwmaLong)
     ).length;
 
-    console.log("[PriceChart] chart data lengths", {
-      range: selectedRange,
-      showTrendEwma,
-      chartData: chartData.length,
-      chartDataWithEwma: chartDataWithEwma.length,
-      chartDataWithForecastBand: chartDataWithForecastBand.length,
-      chartDataWithEquity: chartDataWithEquity.length,
-      hasTrendEwmaData,
-      chartHasTrendEwmaShort,
-      chartHasTrendEwmaLong,
-      priceYDomain,
-      priceYMinValue,
-      priceYMaxValue,
-      invalidCloseCount,
-      invalidTrendShort,
-      invalidTrendLong,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[PriceChart] chart data lengths", {
+        range: selectedRange,
+        showTrendEwma,
+        chartData: chartData.length,
+        chartDataWithEwma: chartDataWithEwma.length,
+        chartDataWithForecastBand: chartDataWithForecastBand.length,
+        chartDataWithEquity: chartDataWithEquity.length,
+        hasTrendEwmaData,
+        chartHasTrendEwmaShort,
+        chartHasTrendEwmaLong,
+        priceYDomain,
+        priceYMinValue,
+        priceYMaxValue,
+        invalidCloseCount,
+        invalidTrendShort,
+        invalidTrendLong,
+      });
+    }
 
     if (typeof window !== "undefined") {
       (window as any).__priceChartDebug = {
@@ -2187,7 +2080,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [filteredEquityData]);
 
-  // Dedicated Simulation equity series, sourced directly from t212AccountHistory (decoupled from EWMA/price data)
+  // Dedicated Simulation equity series, sourced directly from cfdAccountHistory (decoupled from EWMA/price data)
   const simulationEquityData = useMemo(() => {
     const history = windowedAccountHistory.history;
     const { activityStartDate, activityEndDate } = computeTradeActivityWindow(
@@ -2196,7 +2089,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     );
     if (syncedDates.length === 0) return [];
 
-    const snapshotMap = new Map<string, Trading212AccountSnapshot>();
+    const snapshotMap = new Map<string, CfdAccountSnapshot>();
     if (history && history.length > 0) {
       history.forEach((pt) => {
         const date = pt.date ? normalizeDateString(pt.date) : null;
@@ -2284,7 +2177,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [syncedDates, windowedAccountHistory, selectedSimByDate, selectedPnlByDate]);
 
   useEffect(() => {
-    console.log("[SELECTED RUN]", selectedSimRunId);
+    if (process.env.NODE_ENV === "development") {
+      console.log("[SELECTED RUN]", selectedSimRunId);
+    }
   }, [selectedSimRunId]);
 
   useEffect(() => {
@@ -2293,7 +2188,9 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       0
     );
     const firstSel = simulationEquityData.find((p) => Number.isFinite((p as any).selectedPnl));
-    console.log("[CHART SEL]", { nSel, first: firstSel });
+    if (process.env.NODE_ENV === "development") {
+      console.log("[CHART SEL]", { nSel, first: firstSel });
+    }
   }, [simulationEquityData]);
   const simViewLength = simulationEquityData.length;
   const carryInBlocksWindowSim = useMemo(() => {
@@ -2301,7 +2198,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const prevSideBefore = windowedAccountHistory.prevSideBefore ?? null;
     if (prevSideBefore == null) return false;
     if (windowedAccountHistory.history.length === 0) return true;
-    let prevSide: Trading212AccountSnapshot["side"] | null = prevSideBefore;
+    let prevSide: CfdAccountSnapshot["side"] | null = prevSideBefore;
     for (const snap of windowedAccountHistory.history) {
       const side = snap.side ?? null;
       if (prevSide === null && side != null) {
@@ -2388,17 +2285,19 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [simulationEquityData]);
 
   useEffect(() => {
-    console.log('[SIM-CHART] data source', {
-      simulationMode,
-      activeT212RunId,
-      equityPanelSample: equityPanelData.slice(0, 3),
-      filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
-      priceChartSample: chartDataWithForecastBand.slice(0, 3),
-      simulationEquitySample: simulationEquityData.slice(0, 3),
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.log('[SIM-CHART] data source', {
+        simulationMode,
+        activeCfdRunId,
+        equityPanelSample: equityPanelData.slice(0, 3),
+        filteredEquityPanelSample: filteredEquityPanelData.slice(0, 3),
+        priceChartSample: chartDataWithForecastBand.slice(0, 3),
+        simulationEquitySample: simulationEquityData.slice(0, 3),
+      });
+    }
   }, [
     simulationMode,
-    activeT212RunId,
+    activeCfdRunId,
     equityPanelData,
     filteredEquityPanelData,
     chartDataWithForecastBand,
@@ -2415,17 +2314,20 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     return [-(absMax + pad), absMax + pad];
   }, [simulationEquityData]);
 
-  // Risk/return metrics from equity series
+  // Risk/return metrics from equity series (prefer analytics output)
   const riskMetrics = useMemo(() => {
+    if (selectedAnalytics?.performance.riskAdjusted) {
+      return {
+        sharpeRatio: selectedAnalytics.performance.riskAdjusted.sharpe ?? null,
+        sortinoRatio: selectedAnalytics.performance.riskAdjusted.sortino ?? null,
+      };
+    }
+
     const series = equityPanelData
       .filter((p) => p.equity != null && Number.isFinite(p.equity))
       .map((p) => p.equity as number);
-    
     if (series.length < 2) {
-      return {
-        sharpeRatio: null,
-        sortinoRatio: null,
-      };
+      return { sharpeRatio: null, sortinoRatio: null };
     }
 
     const returns: number[] = [];
@@ -2434,33 +2336,25 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         returns.push(series[i] / series[i - 1] - 1);
       }
     }
+    if (!returns.length) return { sharpeRatio: null, sortinoRatio: null };
 
-    if (returns.length === 0) {
-      return {
-        sharpeRatio: null,
-        sortinoRatio: null,
-      };
-    }
+    const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+    const variance = returns.reduce((a, r) => a + (r - mean) * (r - mean), 0) / returns.length;
+    const std = Math.sqrt(variance);
 
-    const meanReturn = returns.reduce((a, b) => a + b, 0) / returns.length;
-    const variance = returns.reduce((a, r) => a + Math.pow(r - meanReturn, 2), 0) / returns.length;
-    const stdReturn = Math.sqrt(variance);
+    const downsideVar =
+      returns.reduce((a, r) => {
+        const d = Math.min(0, r);
+        return a + d * d;
+      }, 0) / returns.length;
+    const downsideStd = Math.sqrt(downsideVar);
 
-    const negativeReturns = returns.filter((r) => r < 0);
-    const downsideVariance =
-      negativeReturns.length > 0
-        ? negativeReturns.reduce((a, r) => a + Math.pow(r, 2), 0) / negativeReturns.length
-        : 0;
-    const downsideDeviation = Math.sqrt(downsideVariance);
-
-    const sharpeRatio = stdReturn > 0 ? (meanReturn / stdReturn) * Math.sqrt(252) : null;
-    const sortinoRatio = downsideDeviation > 0 ? (meanReturn / downsideDeviation) * Math.sqrt(252) : null;
-
+    const scale = Math.sqrt(252);
     return {
-      sharpeRatio,
-      sortinoRatio,
+      sharpeRatio: std > 0 ? (mean / std) * scale : null,
+      sortinoRatio: downsideStd > 0 ? (mean / downsideStd) * scale : null,
     };
-  }, [equityPanelData]);
+  }, [equityPanelData, selectedAnalytics]);
 
   // Fast lookup helpers for equity series (filtered by date range)
   const equityLookup = useMemo(() => {
@@ -2549,8 +2443,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [equityStatsBase, equityLookup, hoveredDate]);
 
   const summaryTrades = useMemo(() => {
-    const overlaysForStats =
-      tradeOverlays?.filter((o) => o.source !== "globalFallback") ?? [];
+    const overlaysForStats = tradeOverlays ?? [];
     const trades = overlaysForStats.flatMap((o) => o.trades ?? [])?.filter(Boolean) ?? [];
     if (!activeSimWindow) return trades;
     const { start, end } = activeSimWindow;
@@ -2568,15 +2461,26 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   const flattenedTrades = useMemo(() => summaryTrades, [summaryTrades]);
 
   // Formatting helpers for the insight tables
-  const formatUsd = (v: number | null | undefined, opts?: { sign?: boolean; precision?: number }) => {
+  const formatUsd = (
+    v: number | null | undefined,
+    opts?: { sign?: boolean; precision?: number; compact?: boolean }
+  ) => {
     if (v == null || !Number.isFinite(v)) return "—";
-    const sign = opts?.sign ? (v > 0 ? "+" : v < 0 ? "−" : "") : "";
     const precision = opts?.precision ?? 2;
+    const sign = opts?.sign ? (v > 0 ? "+" : v < 0 ? "−" : "") : "";
+    if (opts?.compact) {
+      const formatter = new Intl.NumberFormat("en-US", {
+        notation: "compact",
+        maximumFractionDigits: precision,
+        minimumFractionDigits: 0,
+      });
+      return `${sign}$${formatter.format(Math.abs(v))}`;
+    }
     return `${sign}$${Math.abs(v).toFixed(precision)}`;
   };
 
   const formatPct = (v: number | null | undefined, opts?: { precision?: number }) => {
-    if (v == null || !Number.isFinite(v)) return "";
+    if (v == null || !Number.isFinite(v)) return "—";
     const precision = opts?.precision ?? 2;
     return `${(v * 100).toFixed(precision)}%`;
   };
@@ -2598,7 +2502,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
     const closedTradesCount = closedTrades.length;
     let openedTrades = 0;
-    let prevSide: Trading212AccountSnapshot["side"] | null = windowedAccountHistory.prevSideBefore ?? null;
+    let prevSide: CfdAccountSnapshot["side"] | null = windowedAccountHistory.prevSideBefore ?? null;
     for (const snap of history) {
       if (snap.side && snap.side !== prevSide) {
         openedTrades++;
@@ -2709,7 +2613,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     const largestLossShort = losingShort.length > 0 ? Math.abs(Math.min(...losingShort.map((t) => t.netPnl ?? 0))) : 0;
     
     // Trade duration (in days) - calculate from entry/exit dates
-    const getDurationDays = (t: Trading212TradeInfo) => {
+    const getDurationDays = (t: CfdTradeInfo) => {
       if (!t.entryDate || !t.exitDate) return 0;
       const entry = new Date(t.entryDate);
       const exit = new Date(t.exitDate);
@@ -2852,6 +2756,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [equitySummary, hoveredDate, selectedOverviewStats, tradeSummary]);
 
   useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
       console.log('[UI] Simulation header metrics', {
         simulationMode,
         equitySummary: {
@@ -2869,6 +2774,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
           openedTradesLog: tradeSummary.totalTrades - tradeSummary.closedTradesCount,
         },
       });
+    }
   }, [simulationMode, equitySummary, tradeSummary]);
 
   // Additional derived stats for the insight tabs (buy & hold, size, risk ratios)
@@ -3046,6 +2952,153 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     });
   }, [perfInitialEquity, tradeSummary.allTrades]);
 
+  const equityChartData = useMemo(() => {
+    if (!selectedAnalytics) return [];
+    const buyHoldMap = new Map(
+      (selectedAnalytics.equitySeries.buyHold ?? []).map((p) => [
+        normalizeDateString(p.date) ?? p.date,
+        p,
+      ])
+    );
+    return selectedAnalytics.equitySeries.strategy.map((pt) => {
+      const date = normalizeDateString(pt.date) ?? pt.date;
+      const buy = date ? buyHoldMap.get(date) : undefined;
+      const strategyValue =
+        equityViewMode === "absolute" ? pt.equity : (pt.pct ?? 0) * 100;
+      const buyHoldValue =
+        buy && equityViewMode === "absolute"
+          ? buy.valueAbs
+          : buy
+            ? buy.valuePct * 100
+            : null;
+      return {
+        date,
+        strategyValue,
+        buyHoldValue,
+      };
+    });
+  }, [equityViewMode, selectedAnalytics]);
+
+  const equityChartDomain = useMemo(() => {
+    const values = equityChartData
+      .flatMap((d) => [d.strategyValue, showBuyHold ? d.buyHoldValue : null])
+      .filter((v): v is number => v != null && Number.isFinite(v));
+    if (!values.length) return ["auto", "auto"] as const;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    if (min === max) {
+      return [min - 1, max + 1] as const;
+    }
+    return [min, max] as const;
+  }, [equityChartData, showBuyHold]);
+
+  const equityExcursions = useMemo(
+    () => selectedAnalytics?.equitySeries.excursions ?? [],
+    [selectedAnalytics]
+  );
+
+  const profitStructureData = useMemo(() => {
+    const ps = selectedAnalytics?.performance.profitStructure;
+    if (!ps) return [];
+    return [
+      { label: "Total profit", value: ps.grossProfit ?? 0, fill: "rgba(16,185,129,0.85)" },
+      { label: "Total loss", value: ps.grossLoss != null ? -Math.abs(ps.grossLoss) : 0, fill: "rgba(248,113,113,0.85)" },
+      { label: "Commission", value: ps.commission != null ? -Math.abs(ps.commission) : 0, fill: "rgba(250,204,21,0.85)" },
+      { label: "Total P&L", value: ps.netProfit ?? 0, fill: "rgba(56,189,248,0.9)" },
+    ];
+  }, [selectedAnalytics]);
+
+  const benchmarkBands = useMemo(() => {
+    const empty = {
+      strategy: { min: null, max: null, current: null, minPct: null, maxPct: null, currentPct: null },
+      buyHold: { min: null, max: null, current: null, minPct: null, maxPct: null, currentPct: null },
+    };
+    if (!selectedAnalytics) return empty;
+    const initialEquity = selectedAnalytics.equitySeries.initialEquity ?? null;
+    const compute = (values: Array<number | null | undefined>) => {
+      const nums = values.filter((v): v is number => v != null && Number.isFinite(v));
+      if (!nums.length) {
+        return { min: null, max: null, current: null, minPct: null, maxPct: null, currentPct: null };
+      }
+      const min = Math.min(...nums);
+      const max = Math.max(...nums);
+      const current = nums[nums.length - 1];
+      const toPct = (v: number | null) =>
+        v != null && initialEquity ? v / initialEquity : null;
+      return {
+        min,
+        max,
+        current,
+        minPct: toPct(min),
+        maxPct: toPct(max),
+        currentPct: toPct(current),
+      };
+    };
+
+    const fromAnalytics = selectedAnalytics.performance.benchmark?.bands;
+    if (fromAnalytics?.strategy && fromAnalytics?.buyHold) {
+      return fromAnalytics;
+    }
+
+    const strategyValues = selectedAnalytics.performance.pnlSeries
+      ? selectedAnalytics.performance.pnlSeries.map((p) => p.strategy)
+      : selectedAnalytics.equitySeries.strategy.map((p) => p.pnl);
+    const buyHoldValues = selectedAnalytics.performance.pnlSeries
+      ? selectedAnalytics.performance.pnlSeries.map((p) => p.buyHold ?? null)
+      : (selectedAnalytics.equitySeries.buyHold ?? []).map((p) => p.valueAbs);
+
+    return {
+      strategy: compute(strategyValues),
+      buyHold: compute(buyHoldValues),
+    };
+  }, [selectedAnalytics]);
+
+  const bands = selectedAnalytics?.performance.benchmark?.bands ?? benchmarkBands;
+
+  const returnBreakdown = selectedAnalytics?.performance.returnBreakdown;
+
+  const bandPosition = (value: number | null, min: number | null, max: number | null) => {
+    if (value == null || min == null || max == null) return 0;
+    if (max === min) return 50;
+    const pct = ((value - min) / (max - min)) * 100;
+    return Math.max(0, Math.min(100, pct));
+  };
+
+  const tradeHistogramData = useMemo(
+    () => selectedAnalytics?.trades.histogram ?? [],
+    [selectedAnalytics]
+  );
+
+  const winLossPie = useMemo(
+    () => [
+      { name: "Wins", value: selectedAnalytics?.trades.winLoss.wins ?? 0, fill: "#34d399" },
+      { name: "Losses", value: selectedAnalytics?.trades.winLoss.losses ?? 0, fill: "#f87171" },
+    ],
+    [selectedAnalytics]
+  );
+
+  const oc = selectedAnalytics?.overviewCards ?? null;
+  const kpi = {
+    pnlAbs: oc?.pnlAbs ?? overviewStats.pnlAbs,
+    pnlPct: oc?.pnlPct ?? overviewStats.pnlPct,
+    maxDdAbs: oc?.maxDrawdownAbs ?? overviewStats.maxDrawdownAbs,
+    maxDdPct: oc?.maxDrawdownPct ?? overviewStats.maxDrawdownPct,
+    totalTrades: oc?.totalTrades ?? overviewStats.totalTrades,
+    wins: oc?.profitableTrades ?? overviewStats.profitableTrades,
+    winPct: oc?.pctProfitable ?? overviewStats.pctProfitable,
+    profitFactor: oc?.profitFactor ?? overviewStats.profitFactor,
+    asOf: oc?.asOfDate ?? overviewStats.asOfDate,
+    label: oc?.label ?? overviewStats.label,
+  };
+
+  const strategyButtons = useMemo(
+    () =>
+      (simulationRuns ?? []).filter((r) =>
+        ["unbiased", "biased", "biased-max"].includes(r.id)
+      ),
+    [simulationRuns]
+  );
+
   // === Trade Marker Types and Data ===
   type TradeMarkerType = 'entry' | 'exit' | 'pair';
 
@@ -3178,13 +3231,12 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   };
 
   // Type for tooltip events (opens AND closes)
-  type Trading212TooltipEventType = 'open' | 'close';
+  type CfdTooltipEventType = 'open' | 'close';
 
-  interface Trading212TooltipEvent {
-    type: Trading212TooltipEventType;
+  interface CfdTooltipEvent {
+    type: CfdTooltipEventType;
     runId: string;
     runLabel: string;
-    source?: "windowSim" | "globalFallback";
     side: 'long' | 'short';
     entryDate: string;
     entryPrice: number;
@@ -3291,8 +3343,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
   }, [tradeOverlays]);
 
   // Map from date -> array of events (opens AND closes) for tooltip display
-  const trading212EventsByDate = useMemo(() => {
-    const map = new Map<string, Trading212TooltipEvent[]>();
+  const cfdEventsByDate = useMemo(() => {
+    const map = new Map<string, CfdTooltipEvent[]>();
 
     if (!tradeOverlays || tradeOverlays.length === 0) return map;
 
@@ -3304,7 +3356,6 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
         const base = {
           runId: overlay.runId,
           runLabel: overlay.label,
-          source: overlay.source,
           side: trade.side,
         };
 
@@ -3455,8 +3506,8 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
       if (!date) return;
 
-      // Look up all Trading212 events for this date
-      const events = trading212EventsByDate?.get(date) ?? [];
+      // Look up all Cfd events for this date
+      const events = cfdEventsByDate?.get(date) ?? [];
       if (events.length === 0) return;
 
       // Prefer a 'close' event for the banner; if none, fall back to first event
@@ -3483,7 +3534,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 
       setSelectedTrade(detail);
     };
-  }, [trading212EventsByDate, symbol]);
+  }, [cfdEventsByDate, symbol]);
 
   // Determine line color from current range performance
   const latestRangePerf = perfByRange[selectedRange];
@@ -3518,16 +3569,18 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       });
     }
 
-    console.log(
-      "[PriceChart] data length:",
-      chartDataForRender?.length,
-      "sample:",
-      chartDataForRender?.slice(0, 3),
-      "range:",
-      selectedRange,
-      "showTrendEwma:",
-      showTrendEwma
-    );
+    if (process.env.NODE_ENV === "development") {
+      console.log(
+        "[PriceChart] data length:",
+        chartDataForRender?.length,
+        "sample:",
+        chartDataForRender?.slice(0, 3),
+        "range:",
+        selectedRange,
+        "showTrendEwma:",
+        showTrendEwma
+      );
+    }
 
     return (
       <div className="relative">
@@ -3730,7 +3783,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                   {...tooltipProps}
                   isDarkMode={isDarkMode}
                   horizon={h}
-                  trading212EventsByDate={trading212EventsByDate}
+                  cfdEventsByDate={cfdEventsByDate}
                   ewmaShortWindow={ewmaShortWindow}
                   ewmaLongWindow={ewmaLongWindow}
                 />
@@ -3956,6 +4009,21 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               isAnimationActive={false}
             />
 
+            {/* Session VWAP (HLC3) */}
+            {chartHasSessionVwap && (
+              <Line
+                yAxisId="price"
+                type="monotone"
+                dataKey="sessionVwap"
+                stroke={SESSION_VWAP_COLOR}
+                strokeWidth={1.8}
+                strokeOpacity={0.9}
+                dot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            )}
+
             {/* Trend EWMA overlays (toggle-controlled) */}
             {showTrendEwma && chartHasTrendEwmaShort && (
               <Line
@@ -4021,7 +4089,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
               ))}
             </Bar>
             
-            {/* Trading212 Trade Markers using ReferenceDot for perfect alignment */}
+            {/* Cfd Trade Markers using ReferenceDot for perfect alignment */}
             {tradeMarkers.map((m, idx) => {
               const y = getMarkerY(m);
               if (y == null) return null;
@@ -4405,7 +4473,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
     futureDates,
     tradeMarkers,
     getMarkerY,
-    trading212EventsByDate,
+    cfdEventsByDate,
     dateToClose,
     // Overlay controls dependencies
     isChartHovered,
@@ -4546,6 +4614,33 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Interval Selector */}
+            {intervalOptions && onIntervalChange && (
+              <div className="relative">
+                <select
+                  value={selectedInterval || '1 day'}
+                  onChange={(e) => onIntervalChange(e.target.value)}
+                  className={`
+                    px-2 py-1 rounded-md transition border text-xs font-mono
+                    ${isDarkMode
+                      ? "bg-slate-900 text-white/80 hover:text-white border-slate-700/50 hover:bg-slate-800"
+                      : "bg-white text-slate-700 hover:text-slate-900 border-gray-200 hover:bg-slate-50"
+                    }
+                  `}
+                >
+                  {Object.entries(intervalOptions).map(([category, intervals]) => (
+                    <optgroup key={category} label={category}>
+                      {intervals.map((interval) => (
+                        <option key={interval} value={interval}>
+                          {interval}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           
           {/* Long/Short Position Controls */}
@@ -4645,1485 +4740,764 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
       </div>
 
       
-      {true && (
-        <div className="mt-6">
-          {/* Header Row: Insight Pills (left) + Date Range (right) */}
-          <div className="flex items-center justify-between mb-4">
-            {/* Insight Pills */}
-            <div className="flex flex-wrap gap-2 items-center">
-              {["Overview", "Trades analysis", "Risk/performance ratios", "List of trades"].map((tab) => {
-                const isActive = tab === activeInsightTab;
+      
+      {selectedAnalytics ? (
+        <div className="mt-6 space-y-6">
+          <div className="flex items-center justify-between relative">
+            <div className="flex items-center gap-2">
+              {strategyButtons.map((r) => {
+                const active = r.id === selectedSimRunId;
                 return (
                   <button
-                    key={tab}
+                    key={r.id}
                     type="button"
-                    onClick={() => setActiveInsightTab(tab as any)}
-                    className={`
-                      px-3.5 py-1.5 rounded-full text-xs font-medium transition-all
-                      ${isActive
-                        ? isDarkMode
-                          ? "bg-white text-slate-900 shadow"
-                          : "bg-slate-900 text-white shadow"
-                        : isDarkMode
-                          ? "bg-slate-800/70 text-slate-200 hover:bg-slate-700/80"
-                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                      }
-                    `}
+                    onClick={() => onSelectSimulationRun?.(r.id)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition
+                      ${
+                        active
+                          ? isDarkMode
+                            ? "bg-slate-100 text-slate-900"
+                            : "bg-slate-900 text-white"
+                          : isDarkMode
+                            ? "bg-slate-800/70 text-slate-200 hover:bg-slate-700/80"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
                   >
-                    {tab}
+                    {r.label}
                   </button>
                 );
               })}
-              
-              {/* Settings Button */}
-              {horizonCoverage && (
-                <div className="relative ml-1" ref={mainSettingsDropdownRef}>
-                  <button
-                    onClick={() => setShowMainSettingsDropdown(!showMainSettingsDropdown)}
-                    className={`
-                      w-7 h-7 flex items-center justify-center text-base rounded-full transition-colors border
-                      ${showMainSettingsDropdown
-                        ? isDarkMode 
-                          ? 'border-blue-400 bg-blue-900/30 text-white' 
-                          : 'border-blue-500 bg-blue-50 text-gray-900'
-                        : isDarkMode 
-                          ? 'border-gray-500 text-gray-300 hover:border-gray-400 hover:bg-gray-800/50' 
-                          : 'border-gray-300 text-gray-700 hover:border-gray-400 hover:bg-gray-100'
-                      }
-                    `}
-                    title="Settings"
-                  >
-                    ⋯
-                  </button>
-                  
-                  {/* Settings Dropdown */}
-                  {showMainSettingsDropdown && (
-                    <div 
-                      className={`
-                        absolute top-full left-0 mt-2 z-50 w-72 px-3 py-3 rounded-xl shadow-2xl backdrop-blur-xl border
-                        ${isDarkMode 
-                          ? 'bg-gray-900/95 border-gray-600/30' 
-                          : 'bg-white/95 border-gray-300/50'
-                        }
-                      `}
-                    >
-                      <div className="space-y-3">
-                        {/* Horizon */}
-                        <div>
-                          <div className={`text-[10px] font-semibold mb-1.5 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Horizon
-                          </div>
-                          <div className="flex gap-1.5">
-                            {[1, 2, 3, 5].map((days) => (
-                              <button
-                                key={days}
-                                onClick={() => horizonCoverage.onHorizonChange(days)}
-                                disabled={horizonCoverage.isLoading}
-                                className={`flex-1 py-1 text-xs rounded-lg transition-colors ${
-                                  horizonCoverage.h === days 
-                                    ? 'bg-blue-600 text-white font-medium' 
-                                    : horizonCoverage.isLoading
-                                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                      : isDarkMode 
-                                        ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
-                              >
-                                {days}D
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        
-                        {/* Coverage */}
-                        <div>
-                          <div className={`text-[10px] font-semibold mb-1.5 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Coverage
-                          </div>
-                          <div className="flex gap-1.5">
-                            {[0.90, 0.95, 0.99].map((cov) => (
-                              <button
-                                key={cov}
-                                onClick={() => horizonCoverage.onCoverageChange(cov)}
-                                disabled={horizonCoverage.isLoading}
-                                className={`flex-1 py-1 text-xs rounded-lg transition-colors ${
-                                  horizonCoverage.coverage === cov 
-                                    ? 'bg-blue-600 text-white font-medium' 
-                                    : horizonCoverage.isLoading
-                                      ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                      : isDarkMode 
-                                        ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                }`}
-                              >
-                                {(cov * 100).toFixed(0)}%
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                        
-                        {/* Volatility Model Settings */}
-                        <div>
-                          <div className={`text-[10px] font-semibold mb-1.5 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Volatility Model
-                          </div>
-                          
-                          {/* Model Selection Buttons */}
-                          {horizonCoverage.volModel && horizonCoverage.onModelChange && (
-                            <div className="flex gap-1.5 mb-2">
-                              {/* GBM Button */}
-                              {(() => {
-                                const isSelected = horizonCoverage.volModel === 'GBM';
-                                const isBest = horizonCoverage.recommendedModel?.volModel === 'GBM';
-                                return (
-                                  <button
-                                    onClick={() => horizonCoverage.onModelChange!('GBM')}
-                                    disabled={horizonCoverage.isLoading}
-                                    className={`flex-1 py-1 text-xs rounded-lg transition-colors ${
-                                      isSelected 
-                                        ? isBest
-                                          ? 'bg-emerald-600 text-white font-medium'
-                                          : 'bg-blue-600 text-white font-medium' 
-                                        : horizonCoverage.isLoading
-                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                          : isBest
-                                            ? isDarkMode 
-                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                            : isDarkMode 
-                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                    }`}
-                                  >
-                                    GBM
-                                  </button>
-                                );
-                              })()}
-                              
-                              {/* GARCH Button */}
-                              {(() => {
-                                const isSelected = horizonCoverage.volModel === 'GARCH';
-                                const isBest = horizonCoverage.recommendedModel?.volModel === 'GARCH';
-                                return (
-                                  <button
-                                    onClick={() => horizonCoverage.onModelChange!('GARCH')}
-                                    disabled={horizonCoverage.isLoading}
-                                    className={`flex-1 py-1 text-xs rounded-lg transition-colors ${
-                                      isSelected 
-                                        ? isBest
-                                          ? 'bg-emerald-600 text-white font-medium'
-                                          : 'bg-blue-600 text-white font-medium' 
-                                        : horizonCoverage.isLoading
-                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                          : isBest
-                                            ? isDarkMode 
-                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                            : isDarkMode 
-                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                    }`}
-                                  >
-                                    GARCH
-                                  </button>
-                                );
-                              })()}
-                              
-                              {/* HAR-RV Button */}
-                              {(() => {
-                                const isSelected = horizonCoverage.volModel === 'HAR-RV';
-                                const isBest = horizonCoverage.recommendedModel?.volModel === 'HAR-RV';
-                                return (
-                                  <button
-                                    onClick={() => horizonCoverage.onModelChange!('HAR-RV')}
-                                    disabled={horizonCoverage.isLoading}
-                                    className={`flex-1 py-1 text-xs rounded-lg transition-colors ${
-                                      isSelected 
-                                        ? isBest
-                                          ? 'bg-emerald-600 text-white font-medium'
-                                          : 'bg-blue-600 text-white font-medium' 
-                                        : horizonCoverage.isLoading
-                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                          : isBest
-                                            ? isDarkMode 
-                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                            : isDarkMode 
-                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                    }`}
-                                  >
-                                    HAR-RV
-                                  </button>
-                                );
-                              })()}
-                              
-                              {/* Range Button */}
-                              {(() => {
-                                const isSelected = horizonCoverage.volModel === 'Range';
-                                const isBest = horizonCoverage.recommendedModel?.volModel === 'Range';
-                                return (
-                                  <button
-                                    onClick={() => horizonCoverage.onModelChange!('Range')}
-                                    disabled={horizonCoverage.isLoading}
-                                    className={`flex-1 py-1 text-xs rounded-lg transition-colors ${
-                                      isSelected 
-                                        ? isBest
-                                          ? 'bg-emerald-600 text-white font-medium'
-                                          : 'bg-blue-600 text-white font-medium' 
-                                        : horizonCoverage.isLoading
-                                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                          : isBest
-                                            ? isDarkMode 
-                                              ? 'bg-emerald-900/50 text-emerald-400 border border-emerald-600 hover:bg-emerald-800/50'
-                                              : 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                                            : isDarkMode 
-                                              ? 'bg-gray-800 text-gray-300 hover:bg-gray-700'
-                                              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                                    }`}
-                                  >
-                                    Range
-                                  </button>
-                                );
-                              })()}
-                            </div>
-                          )}
-                          
-                          <div className={`space-y-1.5 px-2.5 py-1.5 rounded-lg ${isDarkMode ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
-                            {/* Window - always shown */}
-                            {horizonCoverage.onWindowSizeChange && (
-                              <div className="flex items-center justify-between gap-3">
-                                <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Window</span>
-                                <input
-                                  type="number"
-                                  min={50}
-                                  max={5000}
-                                  step={50}
-                                  value={horizonCoverage.windowSize ?? 1000}
-                                  onChange={(e) => horizonCoverage.onWindowSizeChange!(parseInt(e.target.value) || 1000)}
-                                  disabled={horizonCoverage.isLoading}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-blue-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                  }`}
-                                />
-                              </div>
-                            )}
-                            
-                            <div className="flex items-center justify-between gap-3">
-                              <span
-                                className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}
-                                title="Entry spread cost in basis points. 1 bp = 0.01%."
-                              >
-                                Cost (bps)
-                              </span>
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={500}
-                                  step={1}
-                                  value={costInput}
-                                  onChange={(e) => setCostInput(e.target.value)}
-                                  onBlur={(e) => commitCost(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      commitCost((e.target as HTMLInputElement).value);
-                                    }
-                                  }}
-                                  className={`w-14 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-amber-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                  }`}
-                                />
-                                <span className={`text-[10px] ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>bps</span>
-                              </div>
-                            </div>
-                            {/* GBM Lambda - only for GBM */}
-                            {horizonCoverage.volModel === 'GBM' && horizonCoverage.onGbmLambdaChange && (
-                              <div className="flex items-center justify-between gap-3">
-                                <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>λ Drift</span>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={1}
-                                  step={0.01}
-                                  value={horizonCoverage.gbmLambda ?? 0}
-                                  onChange={(e) => horizonCoverage.onGbmLambdaChange!(parseFloat(e.target.value) || 0)}
-                                  disabled={horizonCoverage.isLoading}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-blue-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                  }`}
-                                />
-                              </div>
-                            )}
-
-                            {/* DoF - only for GARCH Student-t */}
-                            {horizonCoverage.volModel === 'GARCH' && horizonCoverage.garchEstimator === 'Student-t' && horizonCoverage.onDegreesOfFreedomChange && (
-                              <div className="flex items-center justify-between gap-3">
-                                <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>DoF</span>
-                                <input
-                                  type="number"
-                                  min={3}
-                                  max={30}
-                                  step={0.5}
-                                  value={horizonCoverage.degreesOfFreedom ?? 5}
-                                  onChange={(e) => horizonCoverage.onDegreesOfFreedomChange!(parseFloat(e.target.value) || 5)}
-                                  disabled={horizonCoverage.isLoading}
-                                  className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-blue-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-blue-500'
-                                  }`}
-                                />
-                              </div>
-                            )}
-
-                          </div>
-                        </div>
-                        
-                        {/* Simulation Settings */}
-                        <div>
-                          <div className={`text-[10px] font-semibold mb-1.5 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Simulation
-                          </div>
-                          
-                          <div className={`space-y-1.5 px-2.5 py-1.5 rounded-lg ${isDarkMode ? 'bg-gray-800/50' : 'bg-gray-50'}`}>
-                            {/* Initial Equity */}
-                            <div className="flex items-center justify-between gap-3">
-                              <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Initial equity</span>
-                              <input
-                                type="number"
-                                min={0}
-                                max={1000000}
-                                step={100}
-                                value={equityInput}
-                                onChange={(e) => setEquityInput(e.target.value)}
-                                onBlur={(e) => commitInitialEquity(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    commitInitialEquity((e.target as HTMLInputElement).value);
-                                  }
-                                }}
-                                className={`w-16 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-amber-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                }`}
-                              />
-                            </div>
-                            
-                            {/* Leverage */}
-                            <div className="flex items-center justify-between gap-3">
-                              <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Leverage</span>
-                              <input
-                                type="number"
-                                min={1}
-                                max={100}
-                                step={1}
-                                value={t212Leverage}
-                                onChange={(e) => {
-                                  const val = Number(e.target.value);
-                                  if (Number.isFinite(val) && val >= 1) {
-                                    onChangeT212Leverage?.(Math.min(100, val));
-                                  }
-                                }}
-                                className={`w-12 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                  isDarkMode 
-                                    ? 'border-gray-600 text-white focus:border-amber-500' 
-                                    : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                }`}
-                              />
-                            </div>
-                            
-                            {/* Position % */}
-                            <div className="flex items-center justify-between gap-3">
-                              <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Position %</span>
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={100}
-                                  step={0.5}
-                                  value={positionPctInput}
-                                  onChange={(e) => setPositionPctInput(e.target.value)}
-                                  onBlur={(e) => commitPositionPct(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      commitPositionPct((e.target as HTMLInputElement).value);
-                                    }
-                                  }}
-                                  className={`w-14 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                    isDarkMode 
-                                      ? 'border-gray-600 text-white focus:border-amber-500' 
-                                      : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                  }`}
-                                />
-                                <span className={`text-[10px] ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>%</span>
-                              </div>
-                            </div>
-                            
-                            {/* Signal Type */}
-                            <div className="flex items-center justify-between gap-3">
-                              <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Signal</span>
-                              <div className={`px-2.5 py-0.5 rounded-full text-[9px] font-semibold ${
-                                isDarkMode ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-700'
-                              }`}>
-                                Z
-                              </div>
-                            </div>
-                            
-                            {/* Z Thresholds */}
-                            {t212SignalRule === 'z' && (
-                              <>
-                                <div className="flex items-center justify-between gap-3">
-                                  <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Enter (L / S)</span>
-                                  <span className="font-mono tabular-nums text-right text-[10px]">
-                                    {t212ZDisplayThresholds
-                                      ? `${t212ZDisplayThresholds.enterLong.toFixed(3)} / ${t212ZDisplayThresholds.enterShort.toFixed(3)}`
-                                      : '—'}
-                                  </span>
-                                </div>
-                                
-                                <div className="flex items-center justify-between gap-3">
-                                  <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Exit (L / S)</span>
-                                  <span className="font-mono tabular-nums text-right text-[10px]">
-                                    {t212ZDisplayThresholds
-                                      ? `${t212ZDisplayThresholds.exitLong.toFixed(3)} / ${t212ZDisplayThresholds.exitShort.toFixed(3)}`
-                                      : '—'}
-                                  </span>
-                                </div>
-                                
-                                <div className="flex items-center justify-between gap-3">
-                                  <span className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}>Flip (L / S)</span>
-                                  <span className="font-mono tabular-nums text-right text-[10px]">
-                                    {t212ZDisplayThresholds
-                                      ? `${t212ZDisplayThresholds.flipLong.toFixed(3)} / ${t212ZDisplayThresholds.flipShort.toFixed(3)}`
-                                      : '—'}
-                                  </span>
-                                </div>
-                              </>
-                            )}
-                            
-                            {/* BPS Threshold (if using bps signal rule) */}
-                            {t212SignalRule === 'bps' && (
-                              <div className="flex items-center justify-between gap-3">
-                                <span
-                                  className={`text-[10px] ${isDarkMode ? 'text-gray-400' : 'text-gray-500'} whitespace-nowrap`}
-                                  title="Minimum |edge| to trade (no-trade band). 1 bp = 0.01%."
-                                >
-                                  Threshold
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={500}
-                                    step={1}
-                                    value={thresholdInput}
-                                    onChange={(e) => setThresholdInput(e.target.value)}
-                                    onBlur={(e) => commitThreshold(e.target.value)}
-                                    onKeyDown={(e) => {
-                                      if (e.key === 'Enter') {
-                                        commitThreshold((e.target as HTMLInputElement).value);
-                                      }
-                                    }}
-                                    className={`w-14 bg-transparent border-b text-right font-mono tabular-nums outline-none text-[10px] ${
-                                      isDarkMode 
-                                        ? 'border-gray-600 text-white focus:border-amber-500' 
-                                        : 'border-gray-300 text-gray-900 focus:border-amber-500'
-                                    }`}
-                                  />
-                                  <span className={`text-[10px] ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>bps</span>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
 
+            <button
+              type="button"
+              ref={settingsButtonRef}
+              onClick={() => setShowSettingsPopover((v) => !v)}
+              className={`h-9 w-9 rounded-full border flex items-center justify-center
+                ${isDarkMode ? "border-slate-700 text-slate-200 hover:bg-white/5" : "border-slate-200 text-slate-700 hover:bg-slate-100"}`}
+              title="Simulation settings"
+            >
+              <Settings2 size={16} />
+            </button>
+            {showSettingsPopover && (
+              <div
+                ref={settingsPopoverRef}
+                className={`absolute right-0 top-12 z-30 w-[360px] rounded-2xl border shadow-2xl ${
+                  isDarkMode
+                    ? "border-slate-700/70 bg-slate-900/90 text-slate-100"
+                    : "border-slate-200 bg-white text-slate-900"
+                }`}
+              >
+                <div className="px-4 py-3 text-xs font-semibold uppercase tracking-[0.08em] text-slate-400">
+                  Simulation settings
+                </div>
+                <div className="grid grid-cols-1 gap-3 px-4 pb-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Horizon (days)</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={horizonCoverage?.h ?? ""}
+                        onChange={(e) =>
+                          horizonCoverage?.onHorizonChange?.(Math.max(1, Number(e.target.value) || 1))
+                        }
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Coverage</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        max="0.99"
+                        value={horizonCoverage?.coverage ?? ""}
+                        onChange={(e) =>
+                          horizonCoverage?.onCoverageChange?.(
+                            Math.min(0.99, Math.max(0.01, Number(e.target.value) || (horizonCoverage?.coverage ?? 0.95)))
+                          )
+                        }
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Initial equity ($)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={_cfdInitialEquity}
+                        onChange={(e) => _onChangeCfdInitialEquity?.(Number(e.target.value) || 0)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Leverage</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={_cfdLeverage}
+                        onChange={(e) => _onChangeCfdLeverage?.(Number(e.target.value) || 0)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Position size (%)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.5"
+                        value={Math.round(_cfdPositionFraction * 1000) / 10}
+                        onChange={(e) => {
+                          const next = Number(e.target.value);
+                          if (Number.isFinite(next)) {
+                            _onChangeCfdPositionFraction?.(Math.max(0, Math.min(100, next)) / 100);
+                          }
+                        }}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] text-slate-400">Cost (bps)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.1"
+                        value={_cfdCostBps}
+                        onChange={(e) => _onChangeCfdCostBps?.(Number(e.target.value) || 0)}
+                        className={`w-full rounded-md border px-2 py-1.5 text-sm ${
+                          isDarkMode
+                            ? "bg-slate-900 border-slate-700 text-slate-100"
+                            : "bg-white border-slate-200 text-slate-800"
+                        }`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">TOTAL P&L</div>
+              <div className="mt-2 flex items-baseline gap-3">
+                <div className={`text-sm font-mono ${kpi.pnlAbs != null && kpi.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  {formatUsd(kpi.pnlAbs, { sign: true })}
+                </div>
+                <div className="text-sm text-slate-400">
+                  {kpi.pnlPct != null ? formatPct(kpi.pnlPct) : "—"}
+                </div>
+              </div>
+            </div>
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">MAX DRAWDOWN</div>
+              <div className="mt-2 flex items-baseline gap-3">
+                <div className="text-sm font-mono text-rose-400">
+                  {formatUsd(kpi.maxDdAbs, { sign: true })}
+                </div>
+                <div className="text-sm text-slate-400">
+                  {kpi.maxDdPct != null ? formatPct(kpi.maxDdPct) : "—"}
+                </div>
+              </div>
+            </div>
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">TOTAL TRADES</div>
+              <div className="mt-2 text-sm font-mono text-slate-100">
+                {kpi.totalTrades ?? "—"}
+              </div>
+            </div>
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">PROFITABLE TRADES</div>
+              <div className="mt-2 flex items-baseline gap-3">
+                <div className="text-sm font-mono text-slate-100">
+                  {kpi.wins ?? "—"}
+                </div>
+                <div className="text-sm text-slate-400">
+                  {kpi.winPct != null ? formatPct(kpi.winPct / 100) : "—"}
+                </div>
+              </div>
+            </div>
+            <div className={`rounded-lg border ${isDarkMode ? "border-slate-800/70" : "border-slate-200"} p-3`}>
+              <div className="text-sm uppercase tracking-[0.08em] text-slate-400">PROFIT FACTOR</div>
+              <div className="mt-2 text-sm font-mono text-slate-100">
+                {kpi.profitFactor == null
+                  ? "—"
+                  : kpi.profitFactor === Infinity
+                    ? "∞"
+                    : kpi.profitFactor.toFixed(2)}
+              </div>
+            </div>
           </div>
 
-          {/* Overview Tab - Stats + Equity Chart */}
-          {activeInsightTab === "Overview" && (
-            <div className="flex flex-col gap-6">
-              {/* Stats Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
-                {/* Total P&L */}
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm">
-                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total P&L</span>
-                  </div>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className={`text-xs font-mono ${overviewStats.pnlAbs != null && overviewStats.pnlAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {overviewStats.pnlAbs != null ? `${overviewStats.pnlAbs >= 0 ? "+" : ""}${overviewStats.pnlAbs.toFixed(2)}` : "—"}
-                    </span>
-                    <span className={`text-xs ${overviewStats.pnlPct != null && overviewStats.pnlPct >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {overviewStats.pnlPct != null ? `${(overviewStats.pnlPct * 100).toFixed(2)}%` : ""}
-                    </span>
-                  </div>
-                  <div className={isDarkMode ? "text-xs text-slate-500" : "text-xs text-slate-500"}>
-                    {hoveredDate ? `At ${hoveredDate}` : overviewStats.asOfDate ? `As of ${overviewStats.asOfDate}` : "Today"}
-                  </div>
-                </div>
+          {showCarryInNotice && (
+            <div
+              className={`text-xs rounded-md px-3 py-2 border ${
+                isDarkMode
+                  ? "border-amber-500/40 bg-amber-500/5 text-amber-200"
+                  : "border-amber-200 bg-amber-50 text-amber-700"
+              }`}
+            >
+              No clean restart in this range (position already open at range start). Move the range start earlier or choose a period with a fresh entry.
+            </div>
+          )}
 
-                {/* Max equity drawdown */}
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm">
-                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Max equity drawdown</span>
-                  </div>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-xs font-mono text-slate-400">
-                      {overviewStats.maxDrawdownAbs != null ? `${overviewStats.maxDrawdownAbs.toFixed(2)}` : "—"}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {overviewStats.maxDrawdownPct != null ? `${(overviewStats.maxDrawdownPct * 100).toFixed(2)}%` : ""}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Total trades */}
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm">
-                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Total trades</span>
-                  </div>
-                  <div className="mt-1 text-xs font-mono text-slate-400">
-                    {overviewStats.totalTrades || 0}
-                  </div>
-                </div>
-
-                {/* Profitable trades */}
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm">
-                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profitable trades</span>
-                  </div>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-xs font-mono text-slate-400">
-                      {overviewStats.profitableTrades || 0}
-                    </span>
-                    <span className="text-xs text-slate-500">
-                      {overviewStats.pctProfitable != null
-                        ? `${overviewStats.pctProfitable.toFixed(1)}%`
-                        : "—"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Profit factor */}
-                <div className="flex flex-col gap-1">
-                  <div className="text-sm">
-                    <span className={isDarkMode ? "text-white" : "text-slate-900"}>Profit factor</span>
-                  </div>
-                  <div className="mt-1 text-xs font-mono text-slate-400">
-                    {overviewStats.profitFactor == null
-                      ? "—"
-                      : overviewStats.profitFactor === Infinity
-                      ? "∞"
-                      : overviewStats.profitFactor.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-
-              {showCarryInNotice && (
-                <div
-                  className={`text-xs rounded-md px-3 py-2 border ${
-                    isDarkMode
-                      ? "border-amber-500/40 bg-amber-500/5 text-amber-200"
-                      : "border-amber-200 bg-amber-50 text-amber-700"
-                  }`}
+          <div className={chartFrameClasses}>
+            <div className={`flex items-center gap-3 px-4 py-3 border-b ${isDarkMode ? "border-slate-800/60" : "border-slate-200"}`}>
+              <div className={`inline-flex rounded-full border text-xs ${isDarkMode ? "border-slate-700 bg-slate-900/40" : "border-slate-200 bg-white"}`}>
+                <button
+                  type="button"
+                  onClick={() => setEquityViewMode("absolute")}
+                  className={`px-3 py-1 rounded-l-full ${equityViewMode === "absolute" ? "bg-emerald-600 text-white" : isDarkMode ? "text-slate-200" : "text-slate-700"}`}
                 >
-                  No clean restart in this range (position already open at range start). Move the range start earlier or choose a period with a fresh entry.
-                </div>
-              )}
+                  Absolute
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEquityViewMode("percent")}
+                  className={`px-3 py-1 rounded-r-full ${equityViewMode === "percent" ? "bg-emerald-600 text-white" : isDarkMode ? "text-slate-200" : "text-slate-700"}`}
+                >
+                  Percentage
+                </button>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={showBuyHold}
+                  onChange={(e) => setShowBuyHold(e.target.checked)}
+                  className="rounded border-slate-600 bg-transparent"
+                />
+                <span>Buy &amp; hold</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-400">
+                <input
+                  type="checkbox"
+                  checked={showExcursions}
+                  onChange={(e) => setShowExcursions(e.target.checked)}
+                  className="rounded border-slate-600 bg-transparent"
+                />
+                <span>Trades excursions</span>
+              </label>
+            </div>
+            {equityChartData.length < 2 ? (
+              <div className={`h-[240px] flex items-center justify-center text-xs ${isDarkMode ? 'text-slate-500' : 'text-slate-500'}`}>
+                Not enough points to render the equity view.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={equityChartData} margin={CHART_MARGIN} syncId={SYNC_ID}>
+                  <CartesianGrid stroke={isDarkMode ? "rgba(148, 163, 184, 0.07)" : "rgba(100, 116, 139, 0.12)"} vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    type="category"
+                    axisLine={false}
+                    tickLine={false}
+                    padding={{ left: 0, right: 0 }}
+                    minTickGap={14}
+                    tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
+                  />
+                  <YAxis
+                    orientation="right"
+                    width={Y_AXIS_WIDTH}
+                    axisLine={false}
+                    tickLine={false}
+                    domain={equityChartDomain as any}
+                    tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
+                    tickFormatter={(v: any) => {
+                      if (typeof v !== 'number') return v;
+                      return equityViewMode === 'percent' ? `${v.toFixed(2)}%` : v.toFixed(0);
+                    }}
+                  />
+                  <Tooltip
+                    cursor={{ stroke: isDarkMode ? '#475569' : '#cbd5e1', strokeDasharray: '4 3' }}
+                    contentStyle={{
+                      backgroundColor: isDarkMode ? 'rgba(15,23,42,0.9)' : 'rgba(255,255,255,0.95)',
+                      borderColor: isDarkMode ? 'rgba(148,163,184,0.2)' : 'rgba(203,213,225,0.6)',
+                      color: isDarkMode ? '#e2e8f0' : '#0f172a',
+                      borderRadius: 12,
+                      fontSize: 12,
+                    }}
+                    formatter={(value: any, name: any) => {
+                      if (value == null || !Number.isFinite(value)) return ['—', name];
+                      return [equityViewMode === 'percent' ? `${value.toFixed(2)}%` : value.toFixed(2), name === 'strategyValue' ? 'Strategy' : 'Buy & hold'];
+                    }}
+                  />
+                  <ReferenceLine y={0} stroke={isDarkMode ? 'rgba(148,163,184,0.4)' : 'rgba(100,116,139,0.5)'} strokeDasharray="3 3" />
+                  {showExcursions && equityExcursions.map((ex, idx) => (
+                    <ReferenceArea
+                      key={`excursion-${idx}`}
+                      x1={ex.entryDate}
+                      x2={ex.exitDate || ex.entryDate}
+                      y1={(equityChartDomain as any)[0] ?? 'auto'}
+                      y2={(equityChartDomain as any)[1] ?? 'auto'}
+                      stroke="rgba(45, 212, 191, 0.45)"
+                      fill="rgba(94, 234, 212, 0.08)"
+                      strokeDasharray="3 3"
+                    />
+                  ))}
+                  <Line
+                    type="monotone"
+                    dataKey="strategyValue"
+                    name="Strategy"
+                    stroke={isDarkMode ? '#38bdf8' : '#0ea5e9'}
+                    strokeWidth={2}
+                    dot={equityChartData.length <= 30 ? { r: 2 } : false}
+                    isAnimationActive={false}
+                  />
+                  {showBuyHold && (
+                    <Line
+                      type="monotone"
+                      dataKey="buyHoldValue"
+                      name="Buy & hold"
+                      stroke={isDarkMode ? '#a78bfa' : '#7c3aed'}
+                      strokeWidth={1.5}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
 
-              {/* Equity Chart inside Overview tab */}
-              <div className={chartFrameClasses}>
-                {simulationEquityData.length < 2 ? (
-                  <div className={`h-[220px] flex items-center justify-center text-xs ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                    Not enough points in the selected range to render the simulation chart.
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                  <ComposedChart
-                    data={simulationEquityData}
-                    margin={CHART_MARGIN}
-                    syncId={SYNC_ID}
-                    onMouseMove={applyHoverFromRechartsState}
-                    onMouseLeave={handleChartMouseLeave}
-                    barCategoryGap={sharedBarSizing.barCategoryGap}
-                    barGap={sharedBarSizing.barGap}
-                  >
+          <TvSection title="Performance" defaultOpen={false} isDarkMode={isDarkMode}>
+            <div className="space-y-4">
+              <TvCard title="PROFIT STRUCTURE" isDarkMode={isDarkMode} plain>
+                <div className="h-[260px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={profitStructureData}
+                      margin={{ top: 8, right: 12, left: 0, bottom: 8 }}
+                      barCategoryGap="22%"
+                    >
                       <CartesianGrid
-                        stroke={isDarkMode ? "rgba(148, 163, 184, 0.07)" : "rgba(100, 116, 139, 0.12)"}
+                        strokeDasharray="3 3"
                         vertical={false}
+                        stroke={
+                          isDarkMode
+                            ? "rgba(148,163,184,0.10)"
+                            : "rgba(100,116,139,0.14)"
+                        }
                       />
                       <XAxis
-                        dataKey="date"
-                        type="category"
-                        allowDuplicatedCategory={false}
+                        dataKey="label"
+                        tick={{ fill: isDarkMode ? "#94a3b8" : "#475569", fontSize: 11 }}
                         axisLine={false}
                         tickLine={false}
-                        tickMargin={8}
-                        padding={{ left: 12, right: 12 }}
-                        minTickGap={16}
-                        interval={simTickConfig.interval as any}
-                        tick={{
-                          fill: isDarkMode ? '#9CA3AF' : '#6B7280',
-                          fontSize: simViewLength <= 10 ? 11 : 10,
-                        }}
-                        tickFormatter={simTickFormatter}
                       />
                       <YAxis
-                        yAxisId="equity"
-                        domain={equityYDomain}
-                        orientation="right"
-                        width={Y_AXIS_WIDTH}
+                        tick={{ fill: isDarkMode ? "#94a3b8" : "#475569", fontSize: 11 }}
                         axisLine={false}
                         tickLine={false}
-                        tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
-                        tickFormatter={(value: number) => {
-                          if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
-                          return value.toFixed(0);
-                        }}
                       />
-                      {selectedPnlByDate && Object.keys(selectedPnlByDate).length > 0 && (
-                        <YAxis
-                          yAxisId="pnl"
-                          type="number"
-                          domain={['auto', 'auto']}
-                          orientation="left"
-                          width={Y_AXIS_WIDTH}
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fill: isDarkMode ? '#9CA3AF' : '#6B7280', fontSize: 10 }}
-                          allowDataOverflow
-                          tickFormatter={(value: number) => {
-                            if (Math.abs(value) >= 1000) return `${(value / 1000).toFixed(1)}k`;
-                            return value.toFixed(0);
-                          }}
-                        />
-                      )}
-                      <YAxis yAxisId="delta" domain={equityDeltaDomain} hide />
                       <Tooltip
-                        cursor={false}
-                        animationDuration={0}
-                        isAnimationActive={false}
-                        content={() => {
-                          if (!hoveredDate) return null;
-                          const point = simulationEquityData.find((p) => p.date === hoveredDate);
-                          if (!point) return null;
-                          if (point.equity == null) {
-                            return (
-                              <div className={`${TOOLTIP_CLASS} text-[11px]`}>
-                                No active position in this range.
-                              </div>
-                            );
-                          }
-
-                          const deltaStr =
-                            point.equityDelta != null
-                              ? `${point.equityDelta >= 0 ? "+" : ""}${point.equityDelta.toFixed(2)}`
-                              : "—";
-                          const usedMargin =
-                            point.marginUsed != null && Number.isFinite(point.marginUsed)
-                              ? point.marginUsed
-                              : null;
-                          const freeMargin =
-                            point.freeMargin != null && Number.isFinite(point.freeMargin)
-                              ? point.freeMargin
-                              : point.equity != null && usedMargin != null
-                                ? point.equity - usedMargin
-                                : null;
-
-                          return (
-                            <div className={`${TOOLTIP_CLASS} space-y-1.5`}>
-                              <div className={`text-xs ${TOOLTIP_TITLE_CLASS}`}>
-                                {hoveredDate} · Simulation
-                              </div>
-                              <div className="text-[11px] space-y-0.5">
-                                <div className={`${TOOLTIP_MUTED_CLASS}`}>
-                                  Equity <span className="font-mono text-emerald-400 font-semibold">${point.equity.toFixed(2)}</span>
-                                </div>
-                                {freeMargin != null && (
-                                  <div className={`${TOOLTIP_MUTED_CLASS}`}>
-                                    Free margin <span className="font-mono">${freeMargin.toFixed(2)}</span>
-                                  </div>
-                                )}
-                                {usedMargin != null && (
-                                  <div className={`${TOOLTIP_MUTED_CLASS}`}>
-                                    Used margin <span className="font-mono">${usedMargin.toFixed(2)}</span>
-                                  </div>
-                                )}
-                                <div className={`${TOOLTIP_MUTED_CLASS}`}>
-                                  Δ Day{" "}
-                                  <span
-                                    className={`font-mono font-semibold ${
-                                      point.equityDelta != null && point.equityDelta >= 0
-                                        ? "text-emerald-300"
-                                        : "text-rose-300"
-                                    }`}
-                                  >
-                                    {deltaStr}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
+                        formatter={(v: any) => formatUsd(v as number, { sign: true })}
+                        contentStyle={{
+                          backgroundColor: isDarkMode ? "#0b1221" : "#fff",
+                          borderRadius: 12,
+                          borderColor: isDarkMode ? "#1e293b" : "#e2e8f0",
+                          color: isDarkMode ? "#e2e8f0" : "#0f172a",
                         }}
+                        labelStyle={{ color: isDarkMode ? "#e2e8f0" : "#0f172a" }}
+                        wrapperStyle={{ outline: "none" }}
                       />
-
-                      {hoveredDate && (
-                        <ReferenceLine
-                          key="equity-hover-crosshair"
-                          x={hoveredDate}
-                          stroke={isDarkMode ? "#FFFFFF" : "rgba(148, 163, 184, 0.35)"}
-                          strokeWidth={1}
-                          strokeDasharray="4 2"
-                        />
-                      )}
-
-                      <ReferenceLine
-                        key="equity-zero-line"
-                        y={0}
-                        yAxisId="delta"
-                        stroke={isDarkMode ? "rgba(148, 163, 184, 0.4)" : "rgba(100, 116, 139, 0.5)"}
-                        strokeDasharray="3 3"
-                        strokeWidth={1}
-                      />
-
-                      <Bar
-                        yAxisId="delta"
-                        dataKey="equityDelta"
-                        radius={[2, 2, 0, 0]}
-                        isAnimationActive={false}
-                        maxBarSize={sharedBarSizing.maxBarSize}
-                      >
-                        {simulationEquityData.map((entry, index) => {
-                          const positive = (entry.equityDelta ?? 0) >= 0;
-                          return (
-                            <Cell
-                              key={`eq-bar-${entry.date}-${index}`}
-                              fill={
-                                positive
-                                  ? "rgba(52, 211, 153, 0.35)"
-                                  : "rgba(251, 113, 133, 0.35)"
-                              }
-                              stroke={
-                                positive
-                                  ? "rgba(16, 185, 129, 0.8)"
-                                  : "rgba(244, 63, 94, 0.8)"
-                              }
-                              strokeWidth={1}
-                            />
-                          );
-                        })}
+                      <Bar dataKey="value" radius={[10, 10, 6, 6]}>
+                        {profitStructureData.map((d, i) => (
+                          <Cell key={i} fill={d.fill} />
+                        ))}
                       </Bar>
-
-                      {selectedPnlByDate && Object.keys(selectedPnlByDate).length > 0 && (
-                        <Bar
-                          yAxisId="pnl"
-                          dataKey="selectedPnl"
-                          radius={[2, 2, 0, 0]}
-                          isAnimationActive={false}
-                          maxBarSize={sharedBarSizing.maxBarSize}
-                        >
-                          {simulationEquityData.map((entry, index) => {
-                            const positive = (entry.selectedPnl ?? 0) >= 0;
-                            return (
-                              <Cell
-                                key={`pnl-bar-${entry.date}-${index}`}
-                                fill={
-                                  positive
-                                    ? "rgba(52, 211, 153, 0.35)"
-                                    : "rgba(251, 113, 133, 0.35)"
-                                }
-                                stroke={
-                                  positive
-                                    ? "rgba(16, 185, 129, 0.8)"
-                                    : "rgba(244, 63, 94, 0.8)"
-                                }
-                                strokeWidth={1}
-                              />
-                            );
-                          })}
-                        </Bar>
-                      )}
-
-                      <Line
-                        yAxisId="equity"
-                        type="monotone"
-                        dataKey="equity"
-                        stroke={isDarkMode ? "#38bdf8" : "#0ea5e9"}
-                        strokeWidth={2}
-                        dot={simShowDots ? { r: simViewLength <= 10 ? 3 : 2 } : false}
-                        activeDot={simShowDots ? { r: 4, strokeWidth: 2, fill: isDarkMode ? "#38bdf8" : "#0ea5e9", stroke: isDarkMode ? "#0f172a" : "#f8fafc" } : false}
-                        isAnimationActive={false}
-                        connectNulls={false}
-                      />
-                      {selectedPnlByDate && Object.keys(selectedPnlByDate).length > 0 && (
-                        <Line
-                          yAxisId="pnl"
-                          type="monotone"
-                          dataKey="selectedPnl"
-                          name={`P&L: ${selectedPnlLabel ?? "Selected"}`}
-                          stroke={isDarkMode ? "#f59e0b" : "#d97706"}
-                          strokeWidth={2}
-                          strokeDasharray="6 3"
-                          dot={false}
-                          isAnimationActive={false}
-                          connectNulls
-                        />
-                      )}
-                    </ComposedChart>
+                    </BarChart>
                   </ResponsiveContainer>
-                )}
-              </div>
+                </div>
+              </TvCard>
 
-              {/* Simulation Comparison Table */}
-              {simulationRuns && simulationRuns.length > 0 && (
-                <div className="w-full -mt-4">
-                  <h4
-                    className={`text-[11px] font-semibold mb-2 ${
-                      isDarkMode ? "text-slate-300" : "text-gray-700"
-                    }`}
-                  >
-                    Simulation Comparison
-                  </h4>
-                  
-                  {/* Common simulation info - outside table */}
-                  {simulationRuns.length > 0 && (
-                    <div className={`mb-3 flex gap-6 text-[10px] ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                      <div>
-                        <span className="font-medium">Days:</span> <span className="font-mono ml-1">{simulationRuns[0].days}</span>
+              <TvCard title="RETURNS (ALL / LONG / SHORT)" isDarkMode={isDarkMode} plain>
+                {(() => {
+                  const rb = returnBreakdown;
+                  const basis =
+                    rb?.all?.initialCapital ?? selectedAnalytics.equitySeries.initialEquity;
+                  const cell = (v: number | null | undefined, color?: string, signed = true) => {
+                    if (v == null || !Number.isFinite(v)) {
+                      return <div className="text-right font-mono">—</div>;
+                    }
+                    const pct = basis && basis !== 0 ? v / basis : null;
+                    const displayVal = signed ? formatUsd(v, { sign: true }) : formatUsd(Math.abs(v));
+                    return (
+                      <div className={`text-right font-mono ${color ?? ""}`}>
+                        <div>{displayVal}</div>
+                        <div className="text-[11px] text-slate-500">{formatPct(pct)}</div>
                       </div>
-                      <div>
-                        <span className="font-medium">First Date:</span> <span className="font-mono ml-1">{simulationRuns[0].firstDate}</span>
-                      </div>
-                      <div>
-                        <span className="font-medium">Last Date:</span> <span className="font-mono ml-1">{simulationRuns[0].lastDate}</span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className={`p-4 rounded-xl border ${
-                    isDarkMode 
-                      ? 'bg-transparent border-slate-700/50' 
-                      : 'bg-transparent border-gray-200'
-                  }`}>
-                    <div className="overflow-x-auto">
-                      <table className={`min-w-full text-[11px] ${isDarkMode ? 'text-slate-200' : 'text-gray-700'}`}>
-                        <thead className={`${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>
-                          <tr className={`border-b-2 ${isDarkMode ? 'border-slate-600' : 'border-gray-300'}`}>
-                            <th className="py-2 pr-4 text-left font-semibold w-40"></th>
-                            {simulationRuns.map((run) => (
-                              <th key={run.id} className={`py-2 px-4 text-center font-semibold border-l ${isDarkMode ? 'border-slate-700' : 'border-gray-200'}`}>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    console.log("[HEADER CLICK]", run.id);
-                                    onSelectSimulationRun?.(run.id);
-                                  }}
-                                  aria-pressed={run.id === selectedSimRunId}
-                                  className={`w-full rounded-md px-2 py-1 text-center transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${
-                                    isDarkMode
-                                      ? 'focus-visible:outline-sky-400/80'
-                                      : 'focus-visible:outline-sky-500/80'
-                                  } ${
-                                    run.id === selectedSimRunId
-                                      ? isDarkMode
-                                        ? 'bg-slate-700/60 text-white underline decoration-emerald-400'
-                                        : 'bg-gray-100 text-gray-900 underline decoration-emerald-600'
-                                      : isDarkMode
-                                        ? 'text-slate-200 hover:bg-slate-800/60'
-                                        : 'text-gray-700 hover:bg-gray-100'
-                                  }`}
-                                >
-                                  {run.label}
-                                </button>
-                              </th>
-                            ))}
+                    );
+                  };
+
+                  if (!rb) return <div className="text-xs text-slate-500">No returns breakdown.</div>;
+
+                  const rows = [
+                    {
+                      key: "initialCapital",
+                      label: "Initial capital",
+                      render: (b: any) => (
+                        <div className="text-right font-mono text-slate-200">{formatUsd(b?.initialCapital)}</div>
+                      ),
+                    },
+                    {
+                      key: "openPnl",
+                      label: "Open P&L",
+                      render: (b: any) =>
+                        cell(b?.openPnl, b?.openPnl != null && b.openPnl >= 0 ? "text-emerald-400" : "text-rose-400"),
+                    },
+                    {
+                      key: "netPnl",
+                      label: "Net P&L",
+                      render: (b: any) =>
+                        cell(b?.netPnl, b?.netPnl != null && b.netPnl >= 0 ? "text-emerald-400" : "text-rose-400"),
+                    },
+                    {
+                      key: "grossProfit",
+                      label: "Gross profit",
+                      render: (b: any) => cell(b?.grossProfit, "text-emerald-400"),
+                    },
+                    {
+                      key: "grossLoss",
+                      label: "Gross loss",
+                      render: (b: any) =>
+                        cell(b?.grossLoss != null ? -Math.abs(b.grossLoss) : null, "text-rose-400", false),
+                    },
+                    {
+                      key: "profitFactor",
+                      label: "Profit factor",
+                      render: (b: any) => (
+                        <div className="text-right font-mono">
+                          {b?.profitFactor == null
+                            ? "—"
+                            : b.profitFactor === Infinity
+                              ? "∞"
+                              : b.profitFactor.toFixed(3)}
+                        </div>
+                      ),
+                    },
+                    {
+                      key: "commission",
+                      label: "Commission",
+                      render: (b: any) =>
+                        cell(
+                          b?.commission != null ? -Math.abs(b.commission) : null,
+                          "text-amber-300",
+                          false
+                        ),
+                    },
+                    {
+                      key: "expectedPayoff",
+                      label: "Expected payoff",
+                      render: (b: any) => (
+                        <div className="text-right font-mono">{formatUsd(b?.expectedPayoff, { sign: true })}</div>
+                      ),
+                    },
+                  ];
+
+                  return (
+                    <div className="overflow-hidden rounded-3xl border border-slate-800/60 bg-transparent">
+                      <table className="w-full text-sm">
+                        <thead className="bg-transparent">
+                          <tr className="text-xs text-slate-500">
+                            <th className="text-left py-3 px-4">Metric</th>
+                            <th className="text-right py-3 px-4">All</th>
+                            <th className="text-right py-3 px-4">Long</th>
+                            <th className="text-right py-3 px-4">Short</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {/* === PARAMETERS SECTION === */}
-                          <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
-                            <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                              Parameters
-                            </td>
-                          </tr>
-                          
-                          {/* Lambda row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Lambda (λ)</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                {run.lambda != null ? run.lambda.toFixed(2) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-                          
-                          {/* Train% row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Train Split</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                {run.trainFraction != null ? `${(run.trainFraction * 100).toFixed(0)}%` : "—"}
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* === FORECAST SECTION === */}
-                          <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
-                            <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                              Forecast
-                            </td>
-                          </tr>
-                          
-                          {/* Expected row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Expected Price</td>
-                            {simulationRuns.map((run) => {
-                              const hf = run.horizonForecast;
-                              const hasExp = hf?.expected != null && Number.isFinite(hf.expected);
-                              return (
-                                <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                  {hasExp ? `$${hf!.expected!.toFixed(2)}` : "—"}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* Confidence Bands row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">95% CI Bands</td>
-                            {simulationRuns.map((run) => {
-                              const hf = run.horizonForecast;
-                              const hasBand = hf?.lower != null && hf?.upper != null && Number.isFinite(hf.lower!) && Number.isFinite(hf.upper!);
-                              return (
-                                <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                  {hasBand ? (
-                                    <span className="text-slate-400">
-                                      <span className="text-rose-400">${hf!.lower!.toFixed(2)}</span>
-                                      <span className="mx-1">–</span>
-                                      <span className="text-emerald-400">${hf!.upper!.toFixed(2)}</span>
-                                    </span>
-                                  ) : "—"}
-                                </td>
-                              );
-                            })}
-                          </tr>
-
-                          {/* === VOLATILITY MODELS SECTION === */}
-                          <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
-                            <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                              Volatility Models
-                            </td>
-                          </tr>
-                          
-                          {/* GBM row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">GBM</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.gbm)}
-                                >
-                                  {renderVolCell(run.volatility?.gbm, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* GARCH Normal row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">GARCH Normal</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.garchNormal)}
-                                >
-                                  {renderVolCell(run.volatility?.garchNormal, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* GARCH Student row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">GARCH Student-t</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.garchStudent)}
-                                >
-                                  {renderVolCell(run.volatility?.garchStudent, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* HAR-RV row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">HAR-RV</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.harRv)}
-                                >
-                                  {renderVolCell(run.volatility?.harRv, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-
-                          {/* === RANGE ESTIMATORS SECTION === */}
-                          <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
-                            <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                              Range Estimators
-                            </td>
-                          </tr>
-                          
-                          {/* Parkinson row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Parkinson</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.rangeParkinson)}
-                                >
-                                  {renderVolCell(run.volatility?.rangeParkinson, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* Garman-Klass row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Garman-Klass</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.rangeGarmanKlass)}
-                                >
-                                  {renderVolCell(run.volatility?.rangeGarmanKlass, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* Rogers-Satchell row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Rogers-Satchell</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.rangeRogersSatchell)}
-                                >
-                                  {renderVolCell(run.volatility?.rangeRogersSatchell, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          
-                          {/* Yang-Zhang row */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Yang-Zhang</td>
-                            {simulationRuns.map((run) => {
-                              const ewmaUnbiasedBands = run.horizonForecast;
-                              const ewmaCell = ewmaUnbiasedBands ? {
-                                lower: ewmaUnbiasedBands.lower,
-                                upper: ewmaUnbiasedBands.upper
-                              } as VolCell : undefined;
-                              return (
-                                <td
-                                  key={run.id}
-                                  className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}
-                                  title={volCellTitle(run.volatility?.rangeYangZhang)}
-                                >
-                                  {renderVolCell(run.volatility?.rangeYangZhang, ewmaCell)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-
-                          {/* === PERFORMANCE SECTION === */}
-                          <tr className={`${isDarkMode ? 'bg-slate-800/50' : 'bg-gray-100/70'}`}>
-                            <td colSpan={simulationRuns.length + 1} className="py-1.5 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                              Performance
-                            </td>
-                          </tr>
-
-                          {/* Initial Capital */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Initial Capital</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                {run.initialCapital != null ? formatUsd(run.initialCapital) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* Net Profit */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Net Profit</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'} ${
-                                run.netProfit != null && run.netProfit >= 0 ? 'text-emerald-400' : run.netProfit != null ? 'text-rose-400' : ''
-                              }`}>
-                                {run.netProfit != null ? formatUsd(run.netProfit, { sign: true }) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* Gross Profit */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Gross Profit</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l text-emerald-400 ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                {run.grossProfit != null ? formatUsd(run.grossProfit) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* Gross Loss */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Gross Loss</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l text-rose-400 ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                {run.grossLoss != null ? formatUsd(Math.abs(run.grossLoss)) : "—"}
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* Max Equity Drawdown */}
-                          <tr className={`border-b ${isDarkMode ? 'border-slate-800/40 hover:bg-slate-800/30' : 'border-gray-100 hover:bg-gray-50'}`}>
-                            <td className="py-2 pr-4 pl-3 text-slate-400">Max Equity Drawdown</td>
-                            {simulationRuns.map((run) => (
-                              <td key={run.id} className={`py-2 px-4 text-right font-mono tabular-nums border-l text-rose-400 ${isDarkMode ? 'border-slate-800/40' : 'border-gray-100'}`}>
-                                {run.maxDrawdownValue != null ? formatUsd(run.maxDrawdownValue, { sign: true }) : "—"}
-                              </td>
-                            ))}
-                          </tr>
+                          {rows.map((r) => (
+                            <tr key={r.key} className="border-t border-slate-800/40">
+                              <td className="py-4 px-4 text-slate-300">{r.label}</td>
+                              <td className="py-3 px-4">{r.render(rb.all)}</td>
+                              <td className="py-3 px-4">{r.render(rb.long)}</td>
+                              <td className="py-3 px-4">{r.render(rb.short)}</td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-          {/* Performance Tab - REMOVED, content moved to Overview */}
+                  );
+                })()}
+              </TvCard>
 
-          {/* Trades Analysis Tab */}
-          {activeInsightTab === "Trades analysis" && (
-            <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
-                    <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
-                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>All</th>
-                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Long</th>
-                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Short</th>
-                  </tr>
-                </thead>
-                <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Total trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalTrades}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalLong}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalShort}</td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Total open trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.totalOpen}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.openLong}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.openShort}</td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Winning trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.winningTrades}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.winningLong}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.winningShort}</td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Losing trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.losingTrades}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.losingLong}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.losingShort}</td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Percent profitable</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
-                      {tradeSummary.pctProfitable != null ? `${tradeSummary.pctProfitable.toFixed(2)}%` : "—"}
-                    </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
-                      {tradeSummary.pctProfitableLong != null ? `${tradeSummary.pctProfitableLong.toFixed(2)}%` : "—"}
-                    </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
-                      {tradeSummary.pctProfitableShort != null ? `${tradeSummary.pctProfitableShort.toFixed(2)}%` : "—"}
-                    </td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg P&L</td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.avgPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {tradeSummary.avgPnl.toFixed(2)} <span className="text-xs text-slate-500">USD</span>
-                    </td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.avgPnlLong >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {tradeSummary.avgPnlLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span>
-                    </td>
-                    <td className={`text-right py-2.5 px-4 font-mono ${tradeSummary.avgPnlShort >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {tradeSummary.avgPnlShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span>
-                    </td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg winning trade</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.avgWin.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.avgWinLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.avgWinShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg losing trade</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.avgLoss.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.avgLossLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.avgLossShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Ratio avg win / avg loss</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.ratioWinLoss.toFixed(3)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.ratioWinLossLong.toFixed(3)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{tradeSummary.ratioWinLossShort.toFixed(3)}</td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Largest winning trade</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.largestWin.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.largestWinLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-emerald-400">{tradeSummary.largestWinShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Largest losing trade</td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.largestLoss.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.largestLossLong.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                    <td className="text-right py-2.5 px-4 font-mono text-rose-400">{tradeSummary.largestLossShort.toFixed(2)} <span className="text-xs text-slate-500">USD</span></td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg # bars in trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInTrades)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInTrades)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInTrades)}</td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Avg # bars in winning trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInWinning)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInWinning)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInWinning)}</td>
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 px-4">Avg # bars in losing trades</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInLosing)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInLosing)}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{Math.round(tradeSummary.avgBarsInLosing)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Risk/Performance Ratios Tab */}
-          {activeInsightTab === "Risk/performance ratios" && (
-            <div className={`rounded-2xl border ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
-                    <th className={`text-left py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Metric</th>
-                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>All</th>
-                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Long</th>
-                    <th className={`text-right py-3 px-4 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Short</th>
-                  </tr>
-                </thead>
-                <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Profit factor</td>
-                    <td className="text-right py-2.5 px-4 font-mono">
-                      {insightStats.riskRatios.profitFactorAll == null ? "—" : insightStats.riskRatios.profitFactorAll === Infinity ? "∞" : insightStats.riskRatios.profitFactorAll.toFixed(3)}
-                    </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
-                      {insightStats.riskRatios.profitFactorLong == null ? "—" : insightStats.riskRatios.profitFactorLong === Infinity ? "∞" : insightStats.riskRatios.profitFactorLong.toFixed(3)}
-                    </td>
-                    <td className="text-right py-2.5 px-4 font-mono">
-                      {insightStats.riskRatios.profitFactorShort == null ? "—" : insightStats.riskRatios.profitFactorShort === Infinity ? "∞" : insightStats.riskRatios.profitFactorShort.toFixed(3)}
-                    </td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Sharpe ratio</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.sharpe != null ? insightStats.riskRatios.sharpe.toFixed(3) : "—"}</td>
-                    <td className="text-right py-2.5 px-4 font-mono"></td>
-                    <td className="text-right py-2.5 px-4 font-mono"></td>
-                  </tr>
-                  <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                    <td className="py-2.5 px-4">Sortino ratio</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.sortino != null ? insightStats.riskRatios.sortino.toFixed(3) : "—"}</td>
-                    <td className="text-right py-2.5 px-4 font-mono"></td>
-                    <td className="text-right py-2.5 px-4 font-mono"></td>
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 px-4">Margin calls</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.marginCalls}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.marginCalls}</td>
-                    <td className="text-right py-2.5 px-4 font-mono">{insightStats.riskRatios.marginCalls}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* List of Trades Tab */}
-          {activeInsightTab === "List of trades" && (
-            <div className={`rounded-2xl border overflow-hidden ${isDarkMode ? "border-slate-700/60 bg-slate-900/70" : "border-slate-200 bg-white"}`}>
-              <div className="max-h-[500px] overflow-y-auto">
-                <table className="w-full text-xs">
-                  <thead className={`sticky top-0 ${isDarkMode ? "bg-slate-900" : "bg-white"}`}>
-                    <tr className={isDarkMode ? "border-b border-slate-700/50" : "border-b border-slate-200"}>
-                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Trade #</th>
-                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Type</th>
-                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Date/Time</th>
-                      <th className={`text-left py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Signal</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Price</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Position size</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Net P&L</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Run-up</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Drawdown</th>
-                      <th className={`text-right py-3 px-3 font-medium ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>Cumulative P&L</th>
+              <TvCard
+                title="BENCHMARK COMPARISON"
+                right={
+                  <span className="text-xs text-slate-400">
+                    {formatUsd(selectedAnalytics.performance.benchmark?.buyHoldAbs)}
+                  </span>
+                }
+                isDarkMode={isDarkMode}
+                plain
+              >
+                <table className="w-full text-sm">
+                  <tbody className="text-slate-200">
+                    <tr className="border-b border-slate-800/40">
+                      <td className="py-3">Buy &amp; hold return</td>
+                      <td className="py-3 text-right font-mono">
+                        {formatUsd(selectedAnalytics.performance.benchmark?.buyHoldAbs, { sign: true })} ·{" "}
+                        {formatPct(selectedAnalytics.performance.benchmark?.buyHoldPct)}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody className={isDarkMode ? "text-slate-200" : "text-slate-700"}>
-                    {tradeTableRows.map((row, idx) => {
-                      const { trade, tradeNum, pnlAbs, pnlPct, cumulativeAbs, cumulativePct, basis } = row;
-                      const pnlPositive = (pnlAbs ?? 0) >= 0;
-                      const runUpAbs = trade.runUp ?? null;
-                      const runUpPct = runUpAbs != null ? (basis ? runUpAbs / basis : null) : null;
-                      const drawdownAbs = trade.drawdown != null ? -Math.abs(trade.drawdown) : null;
-                      const drawdownPct = trade.drawdown != null ? (basis ? -Math.abs(trade.drawdown) / basis : null) : null;
-                      const qtyDisplay =
-                        trade.quantity != null && Number.isFinite(trade.quantity) ? trade.quantity.toFixed(2) : "—";
-                      const formatCompactUsd = (v: number | null | undefined) => {
-                        if (v == null || !Number.isFinite(v)) return "—";
-                        return Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 }).format(v);
-                      };
-                      return (
-                        <React.Fragment key={`trade-${idx}`}>
-                          {/* Exit row */}
-                          <tr className={isDarkMode ? "border-b border-slate-800/30" : "border-b border-slate-50"}>
-                            <td className="py-3 px-3" rowSpan={2}>
-                              <span className="font-mono">{tradeNum}</span>{" "}
-                              <span className={trade.side === "long" ? "text-emerald-400" : "text-rose-400"}>
-                                {trade.side === "long" ? "Long" : "Short"}
-                              </span>
-                            </td>
-                            <td className="py-3 px-3 text-slate-400">Exit</td>
-                            <td className="py-3 px-3">{trade.exitDate || "Open"}</td>
-                            <td className="py-3 px-3 text-slate-400">Open</td>
-                            <td className="text-right py-3 px-3 font-mono">{trade.exitPrice?.toFixed(2) || "—"} <span className="text-xs text-slate-500">USD</span></td>
-                            <td className="text-right py-3 px-3 font-mono">{qtyDisplay}</td>
-                            <td className={`text-right py-3 px-3 font-mono ${pnlPositive ? "text-emerald-400" : "text-rose-400"}`}>
-                              {formatUsd(pnlAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
-                              <div className={`text-xs ${pnlPositive ? "text-emerald-300" : "text-rose-300"}`}>{formatPct(pnlPct)}</div>
-                            </td>
-                            <td className={`text-right py-3 px-3 font-mono ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
-                              {formatUsd(runUpAbs)} <span className="text-xs text-slate-500">USD</span>
-                              <div className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{formatPct(runUpPct)}</div>
-                            </td>
-                            <td className={`text-right py-3 px-3 font-mono ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
-                              {formatUsd(drawdownAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
-                              <div className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>{formatPct(drawdownPct)}</div>
-                            </td>
-                            <td className={`text-right py-3 px-3 font-mono ${cumulativeAbs >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                              {formatUsd(cumulativeAbs, { sign: true })} <span className="text-xs text-slate-500">USD</span>
-                              <div className={`text-xs ${cumulativeAbs >= 0 ? "text-emerald-300" : "text-rose-300"}`}>{formatPct(cumulativePct)}</div>
-                            </td>
-                          </tr>
-                          {/* Entry row */}
-                          <tr className={isDarkMode ? "border-b border-slate-800/50" : "border-b border-slate-100"}>
-                            <td className="py-3 px-3 text-slate-400">Entry</td>
-                            <td className="py-3 px-3">{trade.entryDate}</td>
-                            <td className="py-3 px-3">{trade.signal || "—"}</td>
-                            <td className="text-right py-3 px-3 font-mono">{trade.entryPrice?.toFixed(2) || "—"} <span className="text-xs text-slate-500">USD</span></td>
-                            <td className="text-right py-3 px-3 font-mono">{formatCompactUsd(basis)} <span className="text-xs text-slate-500">USD</span></td>
-                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
-                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
-                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
-                            <td className="text-right py-3 px-3 font-mono text-slate-500">—</td>
-                          </tr>
-                        </React.Fragment>
-                      );
-                    })}
-                    {tradeSummary.allTrades.length === 0 && (
-                      <tr>
-                        <td colSpan={10} className="py-8 text-center text-slate-500">No trades to display</td>
-                      </tr>
-                    )}
+                    <tr className="border-b border-slate-800/40">
+                      <td className="py-3">Buy &amp; hold % gain</td>
+                      <td className="py-3 text-right font-mono">
+                        {formatPct(selectedAnalytics.performance.benchmark?.buyHoldPct)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-3">Strategy outperformance</td>
+                      <td className="py-3 text-right font-mono">
+                        {formatUsd(
+                          (selectedAnalytics.performance.benchmark?.strategyAbs ?? 0) -
+                            (selectedAnalytics.performance.benchmark?.buyHoldAbs ?? 0),
+                          { sign: true }
+                        )}
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
-              </div>
+              </TvCard>
+
+              <TvCard title="RISK-ADJUSTED PERFORMANCE" isDarkMode={isDarkMode} plain>
+                <div className="space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Sharpe ratio</span>
+                    <span className="font-mono text-slate-100">
+                      {selectedAnalytics.performance.riskAdjusted?.sharpe != null
+                        ? selectedAnalytics.performance.riskAdjusted.sharpe.toFixed(2)
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400">Sortino ratio</span>
+                    <span className="font-mono text-slate-100">
+                      {selectedAnalytics.performance.riskAdjusted?.sortino != null
+                        ? selectedAnalytics.performance.riskAdjusted.sortino.toFixed(2)
+                        : "—"}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500">
+                    Computed from daily equity returns (252d annualization)
+                  </div>
+                </div>
+              </TvCard>
             </div>
-          )}
+          </TvSection>
+
+          <Accordion type="multiple" className="w-full">
+            <AccordionItem value="trades">
+              <AccordionTrigger className="text-sm font-semibold">Trades analysis</AccordionTrigger>
+              <AccordionContent>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className={chartFrameClasses}>
+                    <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">P&amp;L distribution</div>
+                    <div className="h-[220px] px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={tradeHistogramData} margin={CHART_MARGIN}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(148,163,184,0.12)' : 'rgba(100,116,139,0.14)'} />
+                          <XAxis dataKey="bucket" tick={{ fill: isDarkMode ? '#94a3b8' : '#475569', fontSize: 10 }} tickLine={false} axisLine={false} interval={0} angle={-30} textAnchor="end" height={60} />
+                          <YAxis tick={{ fill: isDarkMode ? '#94a3b8' : '#475569', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                          <Tooltip
+                            formatter={(v: any, name: any, props: any) => [`${props.payload?.count ?? v}`, 'Trades']}
+                            contentStyle={{ backgroundColor: isDarkMode ? '#0f172a' : '#fff', borderRadius: 12, borderColor: isDarkMode ? '#1e293b' : '#e2e8f0' }}
+                          />
+                          <Bar dataKey="count" fill="rgba(56, 189, 248, 0.8)" radius={[6, 6, 4, 4]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className={chartFrameClasses}>
+                    <div className="px-4 pt-4 text-xs uppercase tracking-[0.08em] text-slate-400">Win / Loss mix</div>
+                    <div className="h-[220px] px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={winLossPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80} label>
+                            {winLossPie.map((entry, idx) => (
+                              <Cell key={`slice-${idx}`} fill={entry.fill} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(v: any, name: any) => [`${v}`, name]}
+                            contentStyle={{ backgroundColor: isDarkMode ? '#0f172a' : '#fff', borderRadius: 12, borderColor: isDarkMode ? '#1e293b' : '#e2e8f0' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                  <div className={`rounded-3xl border p-4 ${isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'}`}>
+                    <div className="text-xs uppercase tracking-[0.08em] text-slate-400 mb-3">Summary</div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-slate-400 text-xs">Total trades</div>
+                        <div className="font-mono text-slate-100">{selectedAnalytics.trades.summary.total}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-xs">% Profitable</div>
+                        <div className="font-mono text-slate-100">{selectedAnalytics.trades.summary.pctProfitable != null ? selectedAnalytics.trades.summary.pctProfitable.toFixed(1) + '%' : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-xs">Avg P&amp;L</div>
+                        <div className="font-mono text-emerald-200">{formatUsd(selectedAnalytics.trades.summary.avgPnl, { sign: true })}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-xs">Avg win / loss</div>
+                        <div className="font-mono text-slate-100">
+                          {formatUsd(selectedAnalytics.trades.summary.avgWin, { sign: true })} / {formatUsd(selectedAnalytics.trades.summary.avgLoss, { sign: true })}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-xs">Win/Loss ratio</div>
+                        <div className="font-mono text-slate-100">{selectedAnalytics.trades.summary.winLossRatio != null ? selectedAnalytics.trades.summary.winLossRatio.toFixed(2) : '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-xs">Largest win/loss</div>
+                        <div className="font-mono text-slate-100">{formatUsd(selectedAnalytics.trades.summary.largestWin, { sign: true })} / {formatUsd(selectedAnalytics.trades.summary.largestLoss, { sign: true })}</div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400 text-xs">Avg bars in trade</div>
+                        <div className="font-mono text-slate-100">{selectedAnalytics.trades.summary.avgBars != null ? selectedAnalytics.trades.summary.avgBars.toFixed(1) : '—'}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="capital">
+              <AccordionTrigger className="text-sm font-semibold">Capital efficiency</AccordionTrigger>
+              <AccordionContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className={`rounded-3xl border p-4 ${isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'}`}>
+                    <div className="text-xs uppercase tracking-[0.08em] text-slate-400 mb-3">Capital</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Account size required</span>
+                        <span className="font-mono text-slate-100">{formatUsd(selectedAnalytics.capital.accountSizeRequired)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Return on initial</span>
+                        <span className="font-mono text-emerald-200">{formatPct(selectedAnalytics.capital.returnOnInitial)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Return on required</span>
+                        <span className="font-mono text-emerald-200">{formatPct(selectedAnalytics.capital.returnOnRequired)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Net profit vs largest loss</span>
+                        <span className="font-mono text-slate-100">{selectedAnalytics.capital.netProfitVsMaxLoss != null ? selectedAnalytics.capital.netProfitVsMaxLoss.toFixed(2) : '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`rounded-3xl border p-4 ${isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'}`}>
+                    <div className="text-xs uppercase tracking-[0.08em] text-slate-400 mb-3">Margin usage</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Avg margin used</span>
+                        <span className="font-mono text-slate-100">{formatUsd(selectedAnalytics.capital.avgMarginUsed)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Max margin used</span>
+                        <span className="font-mono text-slate-100">{formatUsd(selectedAnalytics.capital.maxMarginUsed)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Margin efficiency</span>
+                        <span className="font-mono text-emerald-200">{selectedAnalytics.capital.marginEfficiency != null ? selectedAnalytics.capital.marginEfficiency.toFixed(2) : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Margin calls</span>
+                        <span className="font-mono text-slate-100">{selectedAnalytics.capital.marginCalls ?? 0}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+            <AccordionItem value="runups">
+              <AccordionTrigger className="text-sm font-semibold">Run-ups &amp; drawdowns</AccordionTrigger>
+              <AccordionContent>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className={`rounded-3xl border p-4 ${isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'}`}>
+                    <div className="text-xs uppercase tracking-[0.08em] text-slate-400 mb-3">Run-ups</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Avg duration</span>
+                        <span className="font-mono text-slate-100">{selectedAnalytics.runupsDrawdowns.runUps.avgDuration != null ? `${selectedAnalytics.runupsDrawdowns.runUps.avgDuration.toFixed(1)}d` : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Max duration</span>
+                        <span className="font-mono text-slate-100">{selectedAnalytics.runupsDrawdowns.runUps.maxDuration != null ? `${selectedAnalytics.runupsDrawdowns.runUps.maxDuration.toFixed(1)}d` : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Avg value</span>
+                        <span className="font-mono text-emerald-200">{formatUsd(selectedAnalytics.runupsDrawdowns.runUps.avgValue)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Max value</span>
+                        <span className="font-mono text-emerald-200">{formatUsd(selectedAnalytics.runupsDrawdowns.runUps.maxValue)}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className={`rounded-3xl border p-4 ${isDarkMode ? 'border-slate-800 bg-slate-900/60' : 'border-slate-200 bg-white'}`}>
+                    <div className="text-xs uppercase tracking-[0.08em] text-slate-400 mb-3">Drawdowns</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Avg duration</span>
+                        <span className="font-mono text-slate-100">{selectedAnalytics.runupsDrawdowns.drawdowns.avgDuration != null ? `${selectedAnalytics.runupsDrawdowns.drawdowns.avgDuration.toFixed(1)}d` : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Max duration</span>
+                        <span className="font-mono text-slate-100">{selectedAnalytics.runupsDrawdowns.drawdowns.maxDuration != null ? `${selectedAnalytics.runupsDrawdowns.drawdowns.maxDuration.toFixed(1)}d` : '—'}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Avg drawdown</span>
+                        <span className="font-mono text-rose-200">{formatUsd(selectedAnalytics.runupsDrawdowns.drawdowns.avgValue, { sign: true })}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Max drawdown</span>
+                        <span className="font-mono text-rose-200">{formatUsd(selectedAnalytics.runupsDrawdowns.drawdowns.maxValue, { sign: true })}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400">Max DD %</span>
+                        <span className="font-mono text-rose-200">{formatPct(selectedAnalytics.runupsDrawdowns.drawdowns.maxPct)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+      ) : (
+        <div className={`mt-6 rounded-2xl border px-4 py-6 text-sm ${isDarkMode ? "border-slate-700/60 text-slate-300" : "border-slate-200 text-slate-600"}`}>
+          No analytics available for the selected strategy yet.
         </div>
       )}
 
@@ -6140,7 +5514,7 @@ const PriceChartInner: React.FC<PriceChartProps> = ({
 };
 
 // Memoize PriceChart to prevent re-renders from parent state changes
-// (e.g., T212 table updates) that don't affect chart props
+// (e.g., Cfd table updates) that don't affect chart props
 export const PriceChart = React.memo(PriceChartInner);
 
 interface MomentumTooltipProps {
@@ -6235,7 +5609,7 @@ interface PriceTooltipProps {
   }[];
   isDarkMode?: boolean;
   horizon?: number;
-  trading212EventsByDate?: Map<string, {
+  cfdEventsByDate?: Map<string, {
     type: 'open' | 'close';
     runLabel: string;
     source?: "windowSim" | "globalFallback";
@@ -6304,7 +5678,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   payload,
   isDarkMode = true,
   horizon = 1,
-  trading212EventsByDate,
+  cfdEventsByDate,
   ewmaShortWindow,
   ewmaLongWindow,
 }) => {
@@ -6318,6 +5692,13 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   const data = chartPayload?.payload ?? payload[0].payload;
   const shortValue = data.trendEwmaShort ?? null;
   const longValue = data.trendEwmaLong ?? null;
+  const hasOhlcvData =
+    data.open != null ||
+    data.high != null ||
+    data.low != null ||
+    data.close != null ||
+    data.volume != null ||
+    data.sessionVwap != null;
   
   // Check if this is a future/forecast-only point (no historical price, only forecast data)
   const isFuturePoint = data.isFuture === true;
@@ -6345,9 +5726,8 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
   const modelWindow = data.forecastWindowN ?? null;
   const modelHeader = modelFriendly;
   
-  // Get Trading212 events for this date from the map (opens AND closes)
-  const t212Events = trading212EventsByDate?.get(labelStr) ?? [];
-  const t212HasGlobalFallbackMarkers = t212Events.some((e) => e.source === "globalFallback");
+  // Get Cfd events for this date from the map (opens AND closes)
+  const cfdEvents = cfdEventsByDate?.get(labelStr) ?? [];
   
   // Legacy: Extract trade markers from scatter payload (for backwards compat)
   const tradeMarkers: TradeMarkerPointForTooltip[] = (payload ?? [])
@@ -6480,7 +5860,7 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
         )}
         
         {/* OHLCV Data - only show for historical points */}
-        {!isFuturePoint && (data.open || data.high || data.low || data.close || data.volume) && (
+        {!isFuturePoint && hasOhlcvData && (
           <div className={TOOLTIP_COLUMN_CLASS}>
             <div className={`text-[9px] font-semibold uppercase tracking-wider mb-1 ${
               isDarkMode ? 'text-slate-400' : 'text-gray-500'
@@ -6488,37 +5868,45 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               OHLCV
             </div>
             <div className="space-y-1 text-[10px]">
-              {data.open && (
+              {data.open != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Open</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.open.toFixed(2)}</span>
                 </div>
               )}
-              {data.high && (
+              {data.high != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>High</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.high.toFixed(2)}</span>
                 </div>
               )}
-              {data.low && (
+              {data.low != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Low</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>${data.low.toFixed(2)}</span>
                 </div>
               )}
-              {data.close && (
+              {data.close != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Close</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} font-medium ${
-                    data.open && data.close > data.open
+                    data.open != null && data.close > data.open
                       ? 'text-emerald-400'
-                      : data.open && data.close < data.open
+                      : data.open != null && data.close < data.open
                         ? 'text-rose-400'
                         : isDarkMode ? 'text-slate-400' : 'text-gray-500'
                   }`}>${data.close.toFixed(2)}</span>
                 </div>
               )}
-              {data.volume && (
+              {data.sessionVwap != null && (
+                <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
+                  <span className={isDarkMode ? 'text-purple-300' : 'text-purple-700'}>VWAP (HLC3)</span>
+                  <span className={`${TOOLTIP_VALUE_CLASS} font-medium ${isDarkMode ? 'text-purple-200' : 'text-purple-700'}`}>
+                    ${data.sessionVwap.toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {data.volume != null && (
                 <div className={`flex items-baseline justify-between ${TOOLTIP_ROW_GAP}`}>
                   <span className={isDarkMode ? 'text-slate-500' : 'text-gray-400'}>Vol</span>
                   <span className={`${TOOLTIP_VALUE_CLASS} ${isDarkMode ? 'text-slate-400' : 'text-gray-500'}`}>{formatVolumeAbbreviated(data.volume)}</span>
@@ -6573,8 +5961,8 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
           </div>
         )}
         
-        {/* Trading212 Events Section (opens AND closes) */}
-        {t212Events.length > 0 && (
+        {/* Cfd Events Section (opens AND closes) */}
+        {cfdEvents.length > 0 && (
           <div className={TOOLTIP_COLUMN_CLASS}>
             {/* Section Header - no dot, renamed to Trade */}
             <div className="mb-1">
@@ -6583,15 +5971,10 @@ const PriceTooltip: React.FC<PriceTooltipProps> = ({
               }`}>
                 Trade
               </span>
-              {t212HasGlobalFallbackMarkers && (
-                <div className={`mt-1 text-[9px] ${isDarkMode ? "text-slate-400" : "text-gray-500"}`}>
-                  Markers from global run (strict restart blocked)
-                </div>
-              )}
             </div>
             
             <div className="space-y-1 text-[10px]">
-              {t212Events.map((e, idx) => {
+              {cfdEvents.map((e, idx) => {
                 const isShort = e.side === 'short';
                 const openLabel = e.side === 'long' ? 'Open Long' : 'Open Short';
                 const exitLabel = e.side === 'long' ? 'Exit Long' : 'Exit Short';

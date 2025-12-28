@@ -54,7 +54,7 @@ export interface TradeDetailData {
   date?: string;
   events?: TradeCardEvent[];
 
-  // NEW: engine-level fields from Trading212Trade
+// NEW: engine-level fields from CfdTrade
   openingEquity?: number;
   closingEquity?: number;
   grossPnl?: number;
@@ -69,8 +69,8 @@ interface TradeDetailCardProps {
 }
 
 /**
- * Trading212-style detail card that appears when clicking on a trade marker.
- * Shows comprehensive trade information similar to the Trading212 CFD interface.
+ * CFD-style detail card that appears when clicking on a trade marker.
+ * Shows comprehensive trade information similar to a broker CFD interface.
  */
 export const TradeDetailCard: React.FC<TradeDetailCardProps> = ({
   trade,

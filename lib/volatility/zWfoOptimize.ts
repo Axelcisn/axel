@@ -1,9 +1,9 @@
 import { CanonicalRow } from "../types/canonical";
 import {
-  simulateTrading212Cfd,
-  Trading212CfdConfig,
-  Trading212SimBar,
-} from "../backtest/trading212Cfd";
+  simulateCfd,
+  CfdSimConfig,
+  CfdSimBar,
+} from "../backtest/cfdSim";
 import { EwmaWalkerPoint } from "./ewmaWalker";
 
 type ZQuantiles = {
@@ -84,7 +84,7 @@ export type OptimizeZOptions = {
   quantilesEnter: number[];
   quantilesExit: number[];
   quantilesFlip: number[];
-  tradingConfig: Trading212CfdConfig;
+  tradingConfig: CfdSimConfig;
   initialEquity: number;
   minFlatPct?: number;
   minCloses?: number;
@@ -132,7 +132,7 @@ export type ZRecencyCheck = {
   passed: boolean;
 };
 
-export function summarizeSignalStats(bars: Trading212SimBar[]): SignalStats {
+export function summarizeSignalStats(bars: CfdSimBar[]): SignalStats {
   if (!bars.length) {
     return { flatPct: 0, flips: 0, opens: 0, closes: 0, tradeCount: 0 };
   }
@@ -207,7 +207,7 @@ function quantile(values: number[], q: number): number {
   return sorted[base];
 }
 
-function computeRecencyWindowStats(bars: Trading212SimBar[], window: number): ZRecencyWindowStats {
+function computeRecencyWindowStats(bars: CfdSimBar[], window: number): ZRecencyWindowStats {
   const effectiveWindow = Math.max(0, Math.floor(window));
   const slice = effectiveWindow > 0 ? bars.slice(-effectiveWindow) : bars;
   const stats = summarizeSignalStats(slice);
@@ -270,8 +270,8 @@ export function buildBarsFromZEdges(
   series: ZEdgePoint[],
   thresholds: ZHysteresisThresholds,
   qPrevStart = 0
-): { bars: Trading212SimBar[]; qPrevEnd: number; shortOppCount: number; shortEntries: number } {
-  const bars: Trading212SimBar[] = [];
+): { bars: CfdSimBar[]; qPrevEnd: number; shortOppCount: number; shortEntries: number } {
+  const bars: CfdSimBar[] = [];
   let qPrev = qPrevStart;
   let shortOppCount = 0;
   let shortEntries = 0;
@@ -297,7 +297,7 @@ export function buildBarsFromZEdges(
       shortOppCount++;
     }
 
-    let signal: Trading212SimBar["signal"] = "flat";
+    let signal: CfdSimBar["signal"] = "flat";
     if (q > 0) signal = "long";
     else if (q < 0) signal = "short";
 
@@ -311,7 +311,7 @@ export function buildBarsFromZEdges(
   return { bars, qPrevEnd: qPrev, shortOppCount, shortEntries };
 }
 
-function profitFactor(trades: ReturnType<typeof simulateTrading212Cfd>["trades"]): number | null {
+function profitFactor(trades: ReturnType<typeof simulateCfd>["trades"]): number | null {
   const closed = trades.filter((t) => t.exitDate);
   if (closed.length === 0) return null;
   const grossProfit = closed
@@ -324,7 +324,7 @@ function profitFactor(trades: ReturnType<typeof simulateTrading212Cfd>["trades"]
   return grossProfit / grossLoss;
 }
 
-function countTradeSegments(history: ReturnType<typeof simulateTrading212Cfd>["accountHistory"]): number {
+function countTradeSegments(history: ReturnType<typeof simulateCfd>["accountHistory"]): number {
   if (!history.length) return 0;
   let prevSide: typeof history[number]["side"] = null;
   let count = 0;
@@ -447,7 +447,7 @@ export async function optimizeZHysteresisThresholds(options: OptimizeZOptions): 
     if (maxFlipPct != null && flipPct > maxFlipPct) return null;
 
     if (shortOppCount < expectedTail) return null;
-    const simResult = simulateTrading212Cfd(bars, initialEquity, tradingConfig);
+    const simResult = simulateCfd(bars, initialEquity, tradingConfig);
     const tradeCount = countTradeSegments(simResult.accountHistory);
     if (tradeCount < 1) return null;
 

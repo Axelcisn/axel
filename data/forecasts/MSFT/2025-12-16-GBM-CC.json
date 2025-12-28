@@ -1,0 +1,48 @@
+{
+  "symbol": "MSFT",
+  "date_t": "2025-12-16",
+  "method": "GBM-CC",
+  "y_hat": 476.3900146484375,
+  "params": {
+    "window": 252,
+    "lambda_drift": 0,
+    "coverage": 0.9,
+    "h": 1
+  },
+  "estimates": {
+    "mu_star_hat": 0.00025919549674277705,
+    "sigma_hat": 0.015306656003529706,
+    "mu_star_used": 0,
+    "window_start": "2024-12-12",
+    "window_end": "2025-12-16",
+    "n": 252
+  },
+  "target": {
+    "h": 1,
+    "coverage": 0.9
+  },
+  "S_t": 476.3900146484375,
+  "critical": {
+    "type": "normal",
+    "z_alpha": 1.644853625133699
+  },
+  "m_log": 6.166236877245606,
+  "s_scale": 0.015306656003529706,
+  "L_h": 464.5455745051109,
+  "U_h": 488.53645048391604,
+  "band_width_bp": 516,
+  "provenance": {
+    "rng_seed": null,
+    "params_snapshot": {
+      "window": 252,
+      "lambda_drift": 0,
+      "coverage": 0.9,
+      "h": 1,
+      "method": "GBM-CC"
+    },
+    "regime_tag": null,
+    "conformal": null
+  },
+  "locked": true,
+  "created_at": "2025-12-25T03:28:43.253Z"
+}

@@ -3,7 +3,7 @@ import type { Quote } from "@/lib/types/quotes";
 
 /**
  * Fallback quote provider that derives a quote from canonical OHLC data.
- * TODO: add real-time providers (e.g., T212/IBKR/Yahoo quote) ahead of this fallback.
+ * TODO: add real-time providers (e.g., IBKR/Yahoo quote) ahead of this fallback.
  */
 export async function getQuoteFromCanonical(symbol: string): Promise<Quote> {
   const canonical = await loadCanonicalDataWithMeta(symbol);
