@@ -126,9 +126,9 @@ const INDENT_CLASSES: Record<TimingRowLevel, string> = {
 };
 
 const rowText = (kind: TimingRowKind) => {
-  if (kind === 'section') return 'text-xs font-semibold uppercase tracking-wide text-slate-300';
-  if (kind === 'group') return 'text-sm font-semibold text-slate-200';
-  return 'text-sm text-slate-100';
+  if (kind === 'section') return 'text-xs font-semibold uppercase tracking-wide text-slate-300 whitespace-nowrap';
+  if (kind === 'group') return 'text-sm font-semibold text-slate-200 whitespace-nowrap';
+  return 'text-sm text-slate-100 whitespace-nowrap';
 };
 
 const cellClass =
@@ -526,7 +526,14 @@ export default function BiasedMetricsTable({
   return (
     <div className="overflow-hidden rounded-xl border border-slate-800">
       <div className="overflow-auto">
-        <table className="w-full border-collapse text-left">
+        <table className="w-full table-fixed border-collapse text-left">
+          <colgroup>
+            <col style={{ width: 'auto', minWidth: '140px' }} />
+            <col />
+            <col />
+            <col />
+            <col style={{ width: '140px' }} />
+          </colgroup>
           <thead className="sticky top-0 bg-transparent">
             <tr className="text-slate-300">
               <th
@@ -574,11 +581,11 @@ export default function BiasedMetricsTable({
 
               if (row.id === 'section-biased') {
                 const chartCellBase =
-                  'border-b border-slate-800 border-r border-slate-800 last:border-r-0 px-1 py-2 align-top';
+                  'border-b border-slate-800 border-r border-slate-800 last:border-r-0 p-3 align-top';
                 return (
                   <React.Fragment key={row.id}>
                     {baseRow}
-                    <tr className="bg-slate-950/30" key={`${row.id}-charts`}>
+                    <tr key={`${row.id}-charts`}>
                       <td className="px-3 py-2 border-b border-slate-800 border-r border-slate-800 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         Charts
                       </td>
@@ -595,6 +602,7 @@ export default function BiasedMetricsTable({
                               cfg.data.hasVolume && (cfg.data.vwapSeries?.some((v) => v != null) ?? false)
                             }
                             height={150}
+                            debug={process.env.NODE_ENV !== 'production' && false}
                           />
                         </td>
                       ))}

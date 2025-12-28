@@ -180,23 +180,6 @@ export default function TimingPage({ params }: TimingPageProps) {
         </div>
       </div>
       <div className="mx-auto mt-4 w-full max-w-[1400px] px-6 pb-12 md:px-10">
-        {process.env.NODE_ENV === 'development' && devDebug && (
-          <div className="mb-3 rounded-lg border border-slate-800/80 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-            <div className="space-x-3">
-              <span>
-                {intervalIds.interval1}: {devDebug.i1.len} candles (first: {devDebug.i1.first ?? '—'} last: {devDebug.i1.last ?? '—'})
-              </span>
-              <span className="text-slate-500">|</span>
-              <span>
-                {intervalIds.interval2}: {devDebug.i2.len} candles (first: {devDebug.i2.first ?? '—'} last: {devDebug.i2.last ?? '—'})
-              </span>
-              <span className="text-slate-500">|</span>
-              <span>
-                {intervalIds.interval3}: {devDebug.i3.len} candles (first: {devDebug.i3.first ?? '—'} last: {devDebug.i3.last ?? '—'})
-              </span>
-            </div>
-          </div>
-        )}
         <BiasedMetricsTable
           interval1Candles={mapCandles(candles1)}
           interval2Candles={mapCandles(candles2)}
