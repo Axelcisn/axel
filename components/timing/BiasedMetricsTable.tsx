@@ -582,25 +582,22 @@ export default function BiasedMetricsTable({
                       <td className="px-3 py-2 border-b border-slate-800 border-r border-slate-800 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-400">
                         Charts
                       </td>
-                      {chartConfigs.map((cfg, idx) => {
-                        const borderClass = idx === chartConfigs.length - 1 ? 'border-r border-slate-800' : '';
-                        return (
-                          <td key={cfg.key} className={`${chartCellBase} ${borderClass}`}>
-                            <IntervalMiniChart
-                              title={cfg.label}
-                              candles={cfg.data.candles}
-                              ema20={cfg.data.ema20Series}
-                              ema50={cfg.data.ema50Series}
-                              ema200={cfg.data.ema200Series}
-                              vwap={cfg.data.vwapSeries}
-                              vwapAvailable={
-                                cfg.data.hasVolume && (cfg.data.vwapSeries?.some((v) => v != null) ?? false)
-                              }
-                              height={150}
-                            />
-                          </td>
-                        );
-                      })}
+                      {chartConfigs.map((cfg) => (
+                        <td key={cfg.key} className={chartCellBase}>
+                          <IntervalMiniChart
+                            title={cfg.label}
+                            candles={cfg.data.candles}
+                            ema20={cfg.data.ema20Series}
+                            ema50={cfg.data.ema50Series}
+                            ema200={cfg.data.ema200Series}
+                            vwap={cfg.data.vwapSeries}
+                            vwapAvailable={
+                              cfg.data.hasVolume && (cfg.data.vwapSeries?.some((v) => v != null) ?? false)
+                            }
+                            height={150}
+                          />
+                        </td>
+                      ))}
                       <td className={cellClass}></td>
                     </tr>
                   </React.Fragment>
